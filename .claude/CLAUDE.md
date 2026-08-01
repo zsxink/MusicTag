@@ -63,6 +63,11 @@ cargo fmt            # 格式化
 - **总入口**：`pipe` skill —— 需求确认后自动跑完「架构设计 → 开发 → CR → 验证 → 测试 → 归档 → 提交 PR → 合并」。
 - **一键全自动（多 Agent 协作）**：`/pipe <name>` —— 由 Workflow 工具编排多 Agent（Leader 主导，7 角色分工），完整闭环。
 - **一键全自动（单 Agent）**：`/opsx:run <name>` —— 原样保留的单 Agent 串行流水线（propose→分支→apply→自动CR→验证→merge→archive）。
+- **Epic 大变更拆分**（如 V1 整个产品，通用可复用 V2）：
+  - `/pipe:init <epic> [来源]` —— Architect 自动拆成多个子变更，**用户只批一次总 PRD**，产出 `openspec/epics/<epic>/epic.json`（gitignored，本地状态）
+  - `/pipe:epic <epic>` —— 串行实施：逐个子变更跑完整 `/pipe`（架构→开发→CR→验证→测试→归档→PR→合并），前一个合回 main 再开下一个；中断可续跑
+  - `/pipe:epic:status <epic>` —— 查看进度/断点
+  - 子变更内部 **100% 复用 `/pipe`**（一 change 一分支一 PR）；Epic 状态放 `openspec/epics/`，独立于 openspec 变更生命周期
 - **分步命令**：
   - `/cr <name>` —— 自动代码审查（只读 subagent 对照规格审查 diff；有问题打回 Leader 重派开发角色修复）
   - `/verify <name>` —— 自动验证（cargo check/test + npm run build + openspec validate）

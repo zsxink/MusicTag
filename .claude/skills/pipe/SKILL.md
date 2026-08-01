@@ -9,11 +9,14 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 
 **本工作流是项目总入口**。规格产出与实现用 OpenSpec 官方命令（`/opsx:*`），多 Agent 编排由 `/pipe` 命令调用 Workflow 脚本执行，质量保障用 superpowers skills，git 流程由本流水线编排。
 
+**Epic 大变更**（整产品级，如 V1）：不走单变更 `/pipe`，改走 `/pipe:init <epic>`（拆子变更 + 只批一次总 PRD）+ `/pipe:epic <epic>`（串行逐个跑 `/pipe`）。详见命令文件。
+
 ## 何时使用
 
 - 「加个 X 功能」「把 X 改成 Y」「这里好像有个 bug」——任何需要改代码的请求
 - **GitHub Issue 驱动的变更**（`/pipe <issue号或链接>`）
 - **用户明确需求**并期待「自动完成后续」时，用本流水线全自动执行
+- **大变更/整个版本**（V1/V2）——用 Epic 命令：`/pipe:init` 拆、`/pipe:epic` 跑
 
 ## 七角色
 
