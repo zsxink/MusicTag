@@ -1,6 +1,6 @@
 ---
 name: "Pipe: Epic"
-description: 串行驱动一个已初始化的 Epic——逐个子变更跑完整流水线（架构→开发→CR→验证→测试→归档→PR→合并）
+description: 串行驱动一个已初始化的 Epic——逐个子变更跑完整流水线（前置校验→架构→开发→测试→CR→最终验证→归档→PR→合并）
 category: Workflow
 tags: [workflow, epic, pipeline, automation]
 ---
@@ -15,9 +15,9 @@ tags: [workflow, epic, pipeline, automation]
 
 ## 前置校验（硬门槛）
 
-1. `openspec/epics/<epic>/epic.json` 存在，`prdConfirmed === true`（总 PRD 已批准）。
+1. `openspec/epics/<epic>/epic.json` 已提交且 `prdConfirmed === true`（总 PRD 已批准）。
 2. 当前在 main 且工作区干净（`git status` 无未提交改动）。
-3. 无正在进行的子变更分支（`git branch` 里没有未合并的子变更分支）。
+3. 当前 cursor 所指子项的 `openspec/changes/<name>/` 中 proposal、specs、design、tasks 齐全，并且 `openspec validate <name>` 通过。
 
 ## 执行步骤（主会话串行循环）
 
@@ -26,11 +26,13 @@ tags: [workflow, epic, pipeline, automation]
 ### ① 校验状态
 - 读 `epic.json`，确认当前子变更 `item` 与其 `dependsOn`（依赖项必须全部 done）。
 - 确认 main 干净。
+- 在 main 上执行 `.claude/workflows/pipe-epic-preflight.sh <epic> <子变更>`；它机械校验 Epic 状态、sourceRevision、来源文件漂移和子 change artifacts。不完整或来源已漂移时停止并重新初始化/确认。
 
-### ② 调 Workflow 执行子变更
+### ② 创建分支并调 Workflow 执行子变更
+- `git checkout -b <子变更>` 后，执行 `.claude/workflows/pipe-preflight.sh <子变更>`；该脚本校验分支、工作区、OpenSpec artifacts 和 `main` 基线。
 - 调用 **Workflow 工具**执行 `.claude/workflows/music-tag-run.js`，`args.name=<子变更名>`。
-- 复用全部 7 角色逻辑（架构设计→开发按域→CR 只读三轮→验证→测试），**不复制逻辑**。
-- 子变更的 PRD 已在 `/pipe:init` 由 Architect 从来源切片生成并获批，**运行期不再确认**。
+- 复用全部 7 角色逻辑（前置校验→架构→开发按依赖→测试→CR 只读三轮→最终验证），**不复制逻辑**。
+- 子变更的完整 artifacts 已在 `/pipe:init` 从已批准切片生成并校验，**运行期不再确认**。
 
 ### ③ 结果处理
 | Workflow 返回 | 处理 |
@@ -58,10 +60,9 @@ git branch -d <子变更>
 ```
 
 ### ⑦ 写 checkpoint
-- 更新 `epic.json`：
-  - 成功 → `item.status = 'done'`、`item.mergedHash = <merge提交hash>`、`cursor++`。
-  - 失败/挂起 → `item.status = <失败状态>`、`item.error = <原因>`、`cursor` 停在当前。
-- `openspec/epics/` 整体 gitignored，**不提交**（本地编排状态）。
+- 在子变更 PR 中更新 `epic.json`：成功路径预写 `item.status = 'done'`、`item.implementationCommit = <当前分支 HEAD>`、`cursor++`；该状态随同一 PR 合入 main。
+- 失败/挂起时不伪造成功；保留工作区并把原因写入 `item.error`，通过一个状态 PR 提交后再停止，保证其他机器能恢复。
+- `openspec/epics/` 是受版本控制的状态；`/pipe:epic:status` 以 main 上状态为准。
 
 ### ⑧ 下一个
 - 成功 → 继续下一个子变更；失败/挂起 → 停下上报用户。
@@ -83,7 +84,7 @@ git branch -d <子变更>
 ## 完成报告
 
 - 跑完的子变更数、每个的 merge commit hash
-- 每个子变更的 CR 轮次 / 验证 / 测试结果
+- 每个子变更的 implementation commit、CR 轮次 / 验证 / 测试结果
 - 剩余的未完成子变更（如有）
 - 下一步：`/pipe:epic:status <epic>` 查看进度
 

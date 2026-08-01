@@ -1,11 +1,13 @@
 ---
 name: "OPSX: Run"
-description: 全自动流水线——需求确认后自动完成 propose→分支→开发→测试→CR→验证→合并→归档
+description: 旧版单 Agent 流水线（仅兼容保留；新变更默认使用 /pipe）
 category: Workflow
 tags: [workflow, automation, pipeline]
 ---
 
-# OPSX: Run — 全自动流水线
+# OPSX: Run — 旧版单 Agent 流水线
+
+> 兼容保留。新变更默认使用 `/pipe`：它具有前置 artifact 校验、测试先于 CR、最终验证及 CI 合并门禁。本命令不得绕过这些门禁。
 
 **触发**：用户明确一个需求/变更（已有定稿规格或清晰描述），要求「自动完成后续」。用户输入可能是变更名（kebab-case）或一段需求描述。
 
@@ -26,9 +28,9 @@ tags: [workflow, automation, pipeline]
   ↓
 ⑤ 验证      /verify <name>（cargo check+test、npm run build、openspec validate）
   ↓
-⑥ 合并      git add . && git commit → git checkout main → git merge <name>
+⑥ 归档+PR   archive → git add + commit → push → gh pr create → CI 全绿
   ↓
-⑦ 归档      /opsx:archive <name>（更新主规格）
+⑦ 合并      gh pr merge <name> --squash
 ```
 
 ## 执行步骤
@@ -59,18 +61,16 @@ git checkout -b <change-name>   # 从 main 开分支，每变更一分支
 - 运行 `/verify <name>`：`cargo check`、`cargo test`、`npm run build`、`openspec validate <name>`。
 - 任一失败：修复 → 重跑验证，直到全绿。
 
-### ⑥ 合并
+### ⑥ 归档与 PR
 ```bash
 git add . && git commit -m "feat(<name>): <变更摘要>"
-git checkout main
-git merge <name>
+git push -u origin <name>
+gh pr create --base main --head <name>
 ```
-- 合并前确认 main 上没有会冲突的新提交（有则先 rebase 或人工处理）。
-- 合并用 `--no-ff` 保留变更历史（可选，个人项目 `ff` 即可）。
+- `/opsx:archive <name>` 必须在提交前完成；等待 CI required checks 全绿后方可合并。
 
-### ⑦ 归档
-- `/opsx:archive <name>` 归档变更、更新主规格（`openspec/specs/`）。
-- 归档后删除本地分支：`git branch -d <name>`。
+### ⑦ 合并
+- `gh pr merge <name> --squash` 后更新 main 并删除已合并的本地分支。
 
 ## 确认点
 

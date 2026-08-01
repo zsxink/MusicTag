@@ -1,6 +1,6 @@
 ---
 name: pipe
-description: MusicTag 项目开发流水线（多 Agent 协作）——需求确认后自动完成架构设计、开发、CR、验证、测试、合并、归档。任何新功能、行为修改、Bug 修复前的必经流程。
+description: MusicTag 项目开发流水线（多 Agent 协作）——需求确认后自动完成前置校验、架构设计、开发、测试、CR、最终验证、合并、归档。任何新功能、行为修改、Bug 修复前的必经流程。
 ---
 
 # MusicTag 多 Agent 协作流水线（pipe）
@@ -42,7 +42,7 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 ② 分支      git checkout -b <name>
   ↓
 ③ Workflow  /pipe <name> 或直接调用 .claude/workflows/music-tag-run.js
-     架构设计 → 开发(按域串行/并行) → CR(只读,最多三轮) → 验证 → 测试
+     前置校验 → 架构设计 → 开发(按依赖串行) → 测试 → CR(只读,最多三轮) → 最终验证
   ↓
 ④ 结果处理  success → 进 ⑤；失败/挂起 → 停下上报
   ↓
@@ -60,7 +60,7 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 - **输入是 Issue** → 先 `gh issue view <id>` 取需求背景 → `/opsx:propose`。
 - 生成 `openspec/changes/<name>/` 的 **PRD**：proposal.md → specs/。
 - **用户只 review PRD（proposal + specs）并批准后**，才进入开发（这就是「需求确认」）。确认后即全自动。
-- design.md / tasks.md 由 Architect 在 Workflow 内自动产出/细化，用户不参与评审。
+- design.md / tasks.md 必须在进入 Workflow 前已生成并通过 OpenSpec 校验；Architect 只细化已批准设计，不可扩张需求。
 - 涉及 V1 拍板决策 → 同步 `docs/V1-PRD.md` / `docs/design/design.md`。
 
 ### ② 创建分支（git）
@@ -73,22 +73,22 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 1. **架构设计**：Architect 产出/细化 `design.md`，判定变更域（backend/frontend/both）。
 2. **开发**：按变更域**自适应组织**——
    - 纯后端 → 仅 Rust-Dev；纯前端 → 仅 Vue-Dev
-   - 跨前后端 → Rust-Dev + Vue-Dev **并行**（worktree 隔离，互不冲突）
+   - 跨前后端 → Rust-Dev 后 Vue-Dev **串行**；当前 Workflow 不创建 worktree，禁止在同一分支并写
    - 全程 **TDD**：新逻辑先写失败测试再实现（`superpowers:test-driven-development`）
    - Rust 侧 lofty 读写、网易云加密、封面压缩必须有测试
    - **增量提交**：每批任务 `git add + commit`（`feat(<name>): <任务>`），进度可追溯、崩溃可恢复
-3. **CR（只读，最多三轮）**：
+3. **测试**：Tester 对照 scenarios 补齐测试、跑冒烟；任一 scenario 缺失即失败。Tester 的写入发生在 CR 前。
+4. **CR（只读，最多三轮）**：
    - CR 代理**只读**审查 `git diff main...HEAD`，对照 specs/design
    - 无阻断无主要问题 → 通过，进验证
    - 有问题 → **打回 Leader** → Leader 重派对应开发角色修复 → 再复审
    - **三轮未通过 → 挂起**，上报用户决策
-4. **验证**：Verify 代理跑 `cargo check` + `cargo test` + `npm run build` + `openspec validate`，只验证不修复；失败 → 打回修复重跑。
-5. **测试**：Tester 代理对照 specs scenarios 审计覆盖、补齐缺失测试、跑核心链路冒烟。
+5. **最终验证**：Verify 代理在所有 Tester/CR 写入后跑 `cargo check` + `cargo test` + `npm run build` + `openspec validate`，只验证不修复；失败 → 打回修复重跑。
 
 ### ④ 结果处理
 | Workflow 返回 | 处理 |
 |--------------|------|
-| `success` | 进 ⑤ 归档 |
+| `success` | 进 ⑤ 归档（由外层 Leader 执行受控集成步骤） |
 | `verify_failed` / `test_failed` | 打回开发修复，重跑 Workflow（可续跑） |
 | `suspended` | **停下上报用户**：CR 三轮未通过，列各轮问题，请用户决策 |
 | `failed` | 停下报告失败原因与阶段 |
@@ -120,6 +120,7 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 - PRD（proposal + specs）未经用户批准，**禁止**进入开发；设计由 Architect 自动产出，无需用户评审。
 - **归档必须先于提交 PR**：规格更新与代码同进 PR，合并后主规格即最新。
 - 不在 main 上直接开发；merge PR 是回到 main 的唯一方式。
+- Workflow 的 `success` 仅表示质量门通过；Leader 必须归档、创建 PR、确认 CI required checks 后合并并写 checkpoint。
 - **CR 只读**：审查代理不 Edit/Write 代码；问题经 Leader 中转，由开发角色修复。
 - **CR 三轮未通过即挂起**，不无限重试。
 - 未写失败测试就实现 = 违规。规格改前先改文档。

@@ -54,18 +54,18 @@ cargo fmt            # 格式化
 ## 规格与变更管理（OpenSpec）
 
 - 变更生命周期由 **OpenSpec** 管理：`openspec/` 是规格根目录，schema 为 spec-driven。
-- 命令：`/opsx:explore`（探索/澄清）、`/opsx:propose <name>`（生成 proposal→specs→design→tasks）、`/opsx:apply <name>`（按任务实现）、`/opsx:sync`（回写规格）、`/opsx:archive <name>`（归档、更新主规格）、**`/opsx:run`（全自动流水线：需求确认后一条龙跑完）**。
+- 命令：`/opsx:explore`（探索/澄清）、`/opsx:propose <name>`（生成 proposal→specs→design→tasks）、`/opsx:apply <name>`（按任务实现）、`/opsx:sync`（回写规格）、`/opsx:archive <name>`（归档、更新主规格）；`/opsx:run` 仅兼容保留，新变更使用 `pipe`。
 - 变更在 `openspec/changes/<name>/`；V1 定稿规格（`docs/V1-PRD.md`、`docs/design/design.md`）保持权威，**拍板决策变更须同步这两份文档**。
 - 项目语境与规则已注入 `openspec/config.yaml`（context + 每类 artifact 的 rules）。
 
 ## 开发流水线（需求确认后自动完成）
 
-- **总入口**：`pipe` skill —— 需求确认后自动跑完「架构设计 → 开发 → CR → 验证 → 测试 → 归档 → 提交 PR → 合并」。
+- **总入口**：`pipe` skill —— 需求确认后自动跑完「前置校验 → 架构设计 → 开发 → 测试 → CR → 最终验证 → 归档 → 提交 PR → 合并」。
 - **一键全自动（多 Agent 协作）**：`/pipe <name>` —— 由 Workflow 工具编排多 Agent（Leader 主导，7 角色分工），完整闭环。
-- **一键全自动（单 Agent）**：`/opsx:run <name>` —— 原样保留的单 Agent 串行流水线（propose→分支→apply→自动CR→验证→merge→archive）。
+- **兼容单 Agent 流程**：`/opsx:run <name>` —— 仅用于既有变更，且不得绕过 `pipe` 的前置校验、最终验证和 CI 门禁。
 - **Epic 大变更拆分**（如 V1 整个产品，通用可复用 V2）：
-  - `/pipe:init <epic> [来源]` —— Architect 自动拆成多个子变更，**用户只批一次总 PRD**，产出 `openspec/epics/<epic>/epic.json`（gitignored，本地状态）
-  - `/pipe:epic <epic>` —— 串行实施：逐个子变更跑完整 `/pipe`（架构→开发→CR→验证→测试→归档→PR→合并），前一个合回 main 再开下一个；中断可续跑
+  - `/pipe:init <epic> [来源]` —— Architect 自动拆成多个子变更并生成/校验完整 OpenSpec artifacts，**用户只批一次总 PRD**；`openspec/epics/<epic>/epic.json` 受版本控制
+  - `/pipe:epic <epic>` —— 串行实施：逐个子变更跑完整 `/pipe`（前置校验→架构→开发→测试→CR→最终验证→归档→PR→合并），前一个合回 main 再开下一个；中断可续跑
   - `/pipe:epic:status <epic>` —— 查看进度/断点
   - 子变更内部 **100% 复用 `/pipe`**（一 change 一分支一 PR）；Epic 状态放 `openspec/epics/`，独立于 openspec 变更生命周期
 - **分步命令**：
@@ -78,10 +78,10 @@ cargo fmt            # 格式化
 
 - **7 角色**：Leader（编排）、Architect（设计+变更域判定）、Rust-Dev（`rust-backend`）、Vue-Dev（`vue-frontend`）、CR（`cr-agent`，只读）、Verify/CI（`verify-agent`）、Tester（`tester`）。
 - **编排**：Workflow 脚本 `.claude/workflows/music-tag-run.js`，`/pipe <name>` 调用，`args.name=<变更名>`。
-- **自适应组织**：Architect 判定变更域——纯后端仅 Rust-Dev、纯前端仅 Vue-Dev、跨前后端两者并行（worktree 隔离）。
+- **自适应组织**：Architect 判定变更域——纯后端仅 Rust-Dev、纯前端仅 Vue-Dev、跨前后端按 Rust→Vue 串行；未显式创建 worktree 时禁止并写。
 - **CR 只读、Leader 中转**：CR 只读审查（不 Edit/Write 代码），问题打回 Leader → Leader 重派对应开发角色修复 → 再复审。
 - **CR 三轮未通过 → 挂起**：不再自动重试，停下上报用户决策。
-- **Workflow 返回**：`success` 进归档（归档→提交 PR→合并）；`verify_failed`/`test_failed` 打回修复重跑；`suspended`/`failed` 停下上报。
+- **Workflow 返回**：`success` 表示质量门通过，Leader 再执行归档→提交 PR→确认 CI→合并；`verify_failed`/`test_failed` 打回修复重跑；`suspended`/`failed` 停下上报。
 
 ## GitHub（远程 + Issue 驱动）
 
@@ -97,6 +97,7 @@ cargo fmt            # 格式化
 - 不在 main 上直接开发；**merge PR 是回到 main 的唯一方式**。
 - 开发期间**增量提交**（`feat(<name>): <任务>`），进度可追溯、崩溃可恢复。
 - **归档在提交 PR 前**：`/opsx:archive <name>` 的规格改动进分支，与代码一起进 PR，合并后主规格即最新。
+- PR 合并前必须等待 GitHub CI required checks；本地 Verify 不能替代远端门禁。
 - **提交 PR**：`git push -u origin <name>` + `gh pr create --base main --head <name>`；**合并**：`gh pr merge <name> --squash`。
 - 合并后 `git branch -d <name>` 清理已合并分支（`-d` 只删已合并）。
 - 现有 git 相关 superpowers skills：`using-git-worktrees`（需要隔离工作区时）、`finishing-a-development-branch`（合并决策）。
@@ -117,4 +118,4 @@ cargo fmt            # 格式化
 
 ## 验证
 
-改完代码后运行对应验证：Rust 侧 `cargo check`+`cargo test`；前端 `npm run build`；涉及跨端契约改动时跑 `npm run tauri dev` 人工确认。报告结果要如实——失败就报失败并附输出，不粉饰。
+改完代码后运行对应验证：Rust 侧 `cargo check --manifest-path src-tauri/Cargo.toml` + `cargo test --manifest-path src-tauri/Cargo.toml`；前端 `npm run test` + `npm run build`；涉及跨端契约改动时跑 `npm run tauri dev` 人工确认。报告结果要如实——失败就报失败并附输出，不粉饰。

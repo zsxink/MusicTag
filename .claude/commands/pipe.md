@@ -1,6 +1,6 @@
 ---
 name: "Pipe"
-description: 多 Agent 协作全自动流水线——架构设计→开发→CR(三轮)→验证→测试，需求确认后一条龙跑完
+description: 多 Agent 协作全自动流水线——前置校验→架构设计→开发→测试→CR(三轮)→最终验证，需求确认后一条龙跑完
 category: Workflow
 tags: [workflow, automation, multi-agent, pipeline]
 ---
@@ -27,7 +27,7 @@ tags: [workflow, automation, multi-agent, pipeline]
 ② 分支      git checkout -b <name>（每变更一分支）
   ↓
 ③ Workflow  .claude/workflows/music-tag-run.js（多 Agent 编排）
-     架构设计 → 开发(按域串行/并行) → CR(只读,最多三轮) → 验证 → 测试
+     前置校验 → 架构设计 → 开发(按依赖串行) → 测试 → CR(只读,最多三轮) → 最终验证
   ↓
 ④ 结果处理  success → 进 ⑤；verify_failed / test_failed → 修后重跑；suspended → 上报用户
   ↓
@@ -56,7 +56,7 @@ tags: [workflow, automation, multi-agent, pipeline]
 - **输入是 Issue** → 先 `gh issue view <id>` 取 Issue 内容作需求背景 → `/opsx:propose` 生成 PRD。
 - 输入是需求描述 → `/opsx:propose <name>`：确认理解 → `openspec new change <name>` → 生成 **PRD（proposal + specs）** → **用户只 review PRD 并批准**。
 - 输入已是变更名 → 跳过 propose，直接进入 ②。
-- design.md / tasks.md 由 Architect 在 Workflow 内**自动产出/细化**，用户不参与评审。
+- design.md / tasks.md 必须在进入 Workflow 前已生成并通过 OpenSpec 校验；Architect 只细化已批准设计，不可扩张需求。
 - 涉及 V1 拍板决策 → 先同步 `docs/V1-PRD.md` / `docs/design/design.md`。
 
 ### ② 创建分支
@@ -66,26 +66,26 @@ git checkout -b <change-name>   # 分支名 = change 名
 ```
 
 ### ③ 运行 Workflow（多 Agent 编排）
-调用 Workflow 工具执行 `.claude/workflows/music-tag-run.js`，参数 `args.name=<change-name>`。
+先执行 `.claude/workflows/pipe-preflight.sh <change-name>`；仅成功时才调用 Workflow 工具执行 `.claude/workflows/music-tag-run.js`，参数 `args.name=<change-name>`。
 
 Workflow 内部由 Leader 主导：
 1. **架构设计**：Architect 产出/细化 `design.md`，判定变更域（backend/frontend/both）。
 2. **开发**：按变更域自适应组织——
    - 纯后端 → 仅 Rust-Dev
    - 纯前端 → 仅 Vue-Dev
-   - 跨前后端 → Rust-Dev + Vue-Dev **并行**（worktree 隔离，互不冲突）
+   - 跨前后端 → Rust-Dev 后 Vue-Dev **串行**；当前 Workflow 不创建 worktree，禁止在同一分支并写
    - 全程 TDD：新逻辑先写失败测试再实现；增量提交 `feat(<name>): <任务>`。
-3. **CR（只读，最多三轮）**：CR 代理只读审查 diff（`git diff main...HEAD`），对照 specs/design。
+3. **测试**：Tester 对照 scenarios 补齐测试、跑冒烟；任一 scenario 缺失即失败。Tester 的写入发生在 CR 前。
+4. **CR（只读，最多三轮）**：CR 代理只读审查 diff（`git diff main...HEAD`），对照 specs/design；问题按文件所有权定向打回。
    - 无阻断无主要问题 → 通过，进验证。
    - 有问题 → **打回 Leader** → Leader 重新派给对应开发角色修复 → 再复审。
    - **三轮未通过 → 挂起（suspended）**，上报用户决策。
-4. **验证**：Verify 代理跑 cargo check/test、npm run build、openspec validate。失败 → 打回修复重跑。
-5. **测试**：Tester 代理对照 specs scenarios 审计覆盖、补测试、跑冒烟。
+5. **最终验证**：Verify 代理在所有 Tester/CR 写入后跑 cargo check/test、npm run build、openspec validate。失败 → 打回修复重跑。
 
 ### ④ 结果处理
 | Workflow 返回 | 处理 |
 |--------------|------|
-| `success` | 进 ⑤ 归档 |
+| `success` | 进 ⑤ 归档（由外层 Leader 执行受控集成步骤） |
 | `verify_failed` | 打回开发修复，重跑 Workflow（可续跑，不重头） |
 | `test_failed` | 同上 |
 | `suspended` | **停下上报用户**：CR 三轮未通过，列出各轮问题与分歧，请用户决策（改规格/人工修复/继续放行） |
@@ -134,4 +134,5 @@ git branch -d <name>           # 清理已合并分支
 - CR 三轮未通过 → **挂起**，不无限重试。
 - **归档必须先于提交 PR**：规格更新与代码同进 PR，合并后主规格即最新。
 - 不在 main 上直接开发；merge PR 是回到 main 的唯一方式。
+- Workflow 的 `success` 仅表示质量门通过；Leader 必须按 ⑤–⑦ 的显式检查清单归档、创建 PR、确认 CI required checks 后合并并写 checkpoint。
 - 报告如实：失败/挂起就停，不粉饰、不假报全绿。

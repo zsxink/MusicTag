@@ -20,5 +20,5 @@ tools: Bash, Read, Edit, Write, Glob, Grep, LSP
 ## 工作方式
 
 - 有 CodeGraph 索引时优先 `codegraph_explore`；否则用 Grep/Glob 定位。
-- 先看规格文档再动手，改动后跑 `cargo check` + `cargo test`（lofty 读写、加密、压缩相关必有测试）。
+- 先看规格文档再动手，改动后跑 `cargo check --manifest-path src-tauri/Cargo.toml` + `cargo test --manifest-path src-tauri/Cargo.toml`（lofty 读写、加密、压缩相关必有测试）。
 - 报告使用中文。

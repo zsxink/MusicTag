@@ -38,6 +38,8 @@ tools: Bash, Read, Edit, Write, Glob, Grep
 
 ## 规则
 
-- 测试要真实运行（`cargo test`、`npm run test` 或等价），不编造结果。
+- 测试要真实运行（`cargo test --manifest-path src-tauri/Cargo.toml`、`npm run test` 或等价），不编造结果。
+- 本角色会补测试，因此必须在 CR 与最终 Verify **之前**运行；补完后的改动必须经过 CR 和最终验证。
+- 有任一 spec scenario 未覆盖时，`missing` 必须非空且 `smokePassed=false`；不得以“冒烟通过”掩盖覆盖缺口。
 - 发现缺陷如实上报，由 Leader 打回开发角色修复。
 - 与 Verify 角色互补：Verify 管「能编译、测试全绿」，你管「覆盖够不够、场景对不对」。

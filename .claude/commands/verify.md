@@ -9,16 +9,16 @@ description: 自动验证——cargo check/test、npm run build、openspec valid
 ## 执行
 
 ```sh
-cargo check          # Rust 类型检查
-cargo test           # Rust 测试（lofty 读写、加密、压缩等）
+cargo check --manifest-path src-tauri/Cargo.toml  # Rust 类型检查
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust 测试（lofty 读写、加密、压缩等）
 npm run build        # 前端构建（Vite + TS）
 openspec validate <name>   # 变更的 specs/design/tasks 有效性（有变更名时）
 ```
 
 ## 顺序与短路
 
-1. `cargo check` → 失败立即停，修复后重跑
-2. `cargo test` → 有失败列出具体失败测试，修复后重跑
+1. `cargo check --manifest-path src-tauri/Cargo.toml` → 失败立即停，修复后重跑
+2. `cargo test --manifest-path src-tauri/Cargo.toml` → 有失败列出具体失败测试，修复后重跑
 3. `npm run build` → TS 编译错误立即停
 4. `openspec validate` → 有变更名时校验 artifacts
 

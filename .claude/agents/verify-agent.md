@@ -9,16 +9,16 @@ tools: Bash, Read, Glob, Grep
 ## 执行
 
 ```sh
-cargo check          # Rust 类型检查
-cargo test           # Rust 测试（lofty 读写、加密、压缩等）
+cargo check --manifest-path src-tauri/Cargo.toml  # Rust 类型检查
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust 测试（lofty 读写、加密、压缩等）
 npm run build        # 前端构建（Vite + TS）
 openspec validate <name>   # 变更的 specs/design/tasks 有效性
 ```
 
 ## 顺序与短路
 
-1. `cargo check` → 失败立即停，上报具体错误
-2. `cargo test` → 列出失败测试，上报
+1. `cargo check --manifest-path src-tauri/Cargo.toml` → 失败立即停，上报具体错误
+2. `cargo test --manifest-path src-tauri/Cargo.toml` → 列出失败测试，上报
 3. `npm run build` → TS 编译错误上报
 4. `openspec validate` → 有变更名时校验 artifacts
 

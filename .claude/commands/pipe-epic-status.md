@@ -13,10 +13,10 @@ tags: [workflow, epic, status]
 
 ## 展示内容
 
-1. **总览**：`name`、`status`（planned/running/done/suspended/failed）、`prdConfirmed`、来源。
+1. **总览**：`name`、`status`（ready/running/done/suspended/failed）、`prdConfirmed`、来源、`sourceRevision`。
 2. **子变更清单**（按数组顺序）：
-   | 名称 | 域 | dependsOn | 状态 | mergedHash | 切片来源 |
-   |------|----|-----------|------|-----------|---------|
+   | 名称 | 域 | dependsOn | 状态 | implementationCommit | 切片来源 |
+   |------|----|-----------|------|----------------------|---------|
    | v1-skeleton | both | — | ✅ done | abc123 | FR-1/FR-2 |
    | v1-tag-read | both | v1-skeleton | 🔄 running | — | FR-3 |
    | v1-tag-save | both | v1-tag-read | ⏳ todo | — | FR-5 |

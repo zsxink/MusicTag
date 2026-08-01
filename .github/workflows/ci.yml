@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Validate OpenSpec
+        run: npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive
+      - name: Install frontend dependencies
+        if: ${{ hashFiles('package.json') != '' }}
+        run: npm ci
+      - name: Build frontend
+        if: ${{ hashFiles('package.json') != '' }}
+        run: npm run build
+      - name: Test frontend
+        if: ${{ hashFiles('package.json') != '' }}
+        run: npm run test
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ hashFiles('src-tauri/Cargo.toml') != '' }}
+      - name: Check Rust
+        if: ${{ hashFiles('src-tauri/Cargo.toml') != '' }}
+        working-directory: src-tauri
+        run: cargo check --all-targets
+      - name: Test Rust
+        if: ${{ hashFiles('src-tauri/Cargo.toml') != '' }}
+        working-directory: src-tauri
+        run: cargo test --all-targets
