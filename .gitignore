@@ -1,0 +1,14 @@
+# Node / Vite
+node_modules/
+dist/
+*.local
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# 构建产物
+*.log
+
+# Epic 本地编排状态（不提交，不进任何分支/PR）
+openspec/epics/

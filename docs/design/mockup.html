@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MusicTag — 界面草图 · v2（含搜索候选）</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- ============ 全局顶栏 ============ -->
+  <header class="appbar">
+    <div class="brand">
+      <span class="brand-mark">♪</span>
+      <span class="brand-name">MusicTag</span>
+    </div>
+    <div class="appbar-path" id="pathBar" title="当前文件夹">路径: /Volumes/Music/周杰伦/</div>
+    <button class="theme-btn" id="themeBtn" title="切换主题">☀️</button>
+  </header>
+
+  <div class="workspace">
+
+    <!-- ============ 左栏：展平歌曲列表 ============ -->
+    <aside class="sidebar">
+      <div class="sidebar-open">
+        <button class="btn btn-ghost open-folder-btn" id="openBtn">📁 打开文件夹</button>
+      </div>
+      <div class="searchbox">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search" placeholder="搜索歌曲 / 作者…" spellcheck="false">
+      </div>
+      <div class="songlist" id="songlist">
+        <!-- 歌曲行由 JS 渲染 -->
+      </div>
+    </aside>
+
+    <!-- ============ 右栏：编辑表单 ============ -->
+    <main class="editor" id="editor">
+      <div class="editor-empty" id="editorEmpty">
+        <div class="empty-mark">♪</div>
+        <div class="empty-title">从左侧选择一首歌曲</div>
+        <div class="empty-hint">支持 FLAC / MP3 · 展示列表的歌曲来自内嵌标签，无标签则读取文件名</div>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- ============ 切歌未保存确认弹窗 ============ -->
+  <div class="overlay" id="overlay" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+      <h3 class="dialog-title" id="dialogTitle">保存对 告白气球.mp3 的修改吗？</h3>
+      <p class="dialog-body">修改尚未保存，切换歌曲将丢失。</p>
+      <div class="dialog-actions">
+        <button class="btn btn-primary" id="dlgSave">保存</button>
+        <button class="btn btn-danger" id="dlgDiscard">不保存</button>
+        <button class="btn btn-ghost" id="dlgCancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="mockup.js"></script>
+</body>
+</html>

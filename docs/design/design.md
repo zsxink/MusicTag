@@ -1,0 +1,309 @@
+# MusicTag — 设计语言（Design Language）
+
+| 项 | 值 |
+|---|---|
+| 产品 | MusicTag |
+| 版本 | V1 |
+| 类型 | 桌面应用（Tauri 2 + Rust，WebView 前端） |
+| 定位 | 工具线 · 自用 · 逐首补全 FLAC/MP3 元数据 |
+| 日期 | 2026-08-01 |
+| 配套 | 界面草图 `design/mockup.{html,css,js}` · 需求见 `V1-PRD.md` 第二部分 |
+
+> 设计语言与草图保持同步：这里描述的全部 token / 组件 / 状态在 `mockup.css` 与 `mockup.js` 里有对应实现。
+
+---
+
+## 1. 设计原则
+
+1. **工具线 > 展示线**：信息密度偏高但克制，一切视觉都为「快速补标签」服务，不讨好展示。
+2. **安静的双主题**：深色为骨（默认，防启动闪白），浅色跟随系统；全界面只有**一个琥珀强调色**，其余全部用灰阶分层。
+3. **数据用等宽字体**：路径、音轨号、歌词正文用 mono，强化「数据感」。
+4. **少即是多**：无装饰、无渐变、无插画；状态用颜色 + 文字双重表达。
+
+---
+
+## 2. 色彩系统（语义 token）
+
+### 2.1 深色（默认，`:root` 缺省值）
+
+| Token | 值 | 用途 |
+|---|---|---|
+| `--bg` | `#12161A` | 窗口底色 / 搜索框 |
+| `--panel` | `#1A2026` | 顶栏、侧栏、输入框 |
+| `--panel-2` | `#212830` | 编辑顶栏、封面区、badge 底 |
+| `--border` | `#262D34` | 分隔线、描边、虚线 |
+| `--text` | `#E8E9E4` | 主文字 |
+| `--text-dim` | `#8A939C` | 副信息、占位、来源标签 |
+| `--accent` | `#E8A33D` | 琥珀：保存 / 选中 / 焦点 / 强调 |
+| `--accent-ink` | `#241A05` | 琥珀底上的文字 |
+| `--danger` | `#C0553E` | 不保存 / 丢弃 |
+| `--success` | `#3FA36B` | ✓ 已保存 |
+
+### 2.2 浅色（跟随系统 `/` 手动）
+
+| Token | 值 | 备注 |
+|---|---|---|
+| `--bg` | `#F4F4F1` | 暖灰底 |
+| `--panel` | `#FFFFFF` | |
+| `--panel-2` | `#F1F0EC` | |
+| `--border` | `#DAD9D2` | |
+| `--text` | `#1E2429` | |
+| `--text-dim` | `#5F6A73` | |
+| `--accent` | `#B4761D` | 加深以保证对比 |
+| `--accent-ink` | `#FFFFFF` | |
+| `--danger` | `#B3452E` | |
+
+### 2.3 交互色
+
+- `--hover`：深色 `rgba(255,255,255,0.05)` / 浅色 `rgba(0,0,0,0.045)` — 行、按钮 hover 底
+- `--active`（选中行底）：琥珀 10–14% 透明
+
+---
+
+## 3. 字体排印
+
+- **正文（sans）**：`-apple-system, BlinkMacSystemFont, PingFang SC, Segoe UI, Microsoft YaHei` — 中文优先
+- **数据（mono）**：`SF Mono, ui-monospace, JetBrains Mono, Menlo, Consolas` — 路径、歌词、音轨号
+- 字号阶梯：
+
+| 字号 | 用途 |
+|---|---|
+| `9–10px` | 封面候选缩略图上的来源角标 |
+| `11.5px` | 副信息 / badge / 状态 / 搜索触发按钮 |
+| `12px` | 字段标签、按钮、候选条 meta |
+| `12.5px` | 歌词正文（mono） |
+| `13px` | 正文、列表行 |
+| `14px` | 强调（「正在编辑」文件名） |
+| `15px` | 空态标题 |
+
+---
+
+## 4. 间距 · 圆角 · 阴影 · 动效
+
+- **间距基数 4px**，常用 8 / 12 / 16 / 20。
+- **圆角**：输入框与列表 **8px**、按钮 **6px**、候选格/候选条 **6px**、badge 胶囊 **10px**、弹窗 **12px**。
+- **阴影**：**仅弹窗**使用 `0 18px 48px`；普通界面扁平无投影。封面候选缩略图上的来源角标用 `rgba(0,0,0,0.6)` 底提升可读性。
+- **动效**：过渡统一 **120ms**；按钮按压位移 **1px**；搜索中转圈 `spin .8s linear infinite`（2px 边框，顶边琥珀）。
+- 尊重 `prefers-reduced-motion`，减弱过渡与动画。
+
+---
+
+## 5. 布局结构
+
+```
+┌────────────────────────────────────────────────────────┐
+│ appbar   ♪ MusicTag │ 路径: /Volumes/…      │ [☀️主题] │
+├──────────────┬─────────────────────────────────────────┤
+│ sidebar 300px │ editor                                │
+│ [📁 打开文件夹] │ ┌────────────────────────────────────┐ │
+│ [🔍 搜索……]   │ │ 正在编辑: 告白气球.mp3 周杰伦  [状态]│ │
+│ ──────────── │ │                          [撤销][保存]│ │
+│ 周杰伦        │ ├────────────────────────────────────┤ │
+│  床边故事     │ │ 歌名    [      ]    ┌──────┐         │ │
+│  告白气球 ▸  │ │ 作者    [      ]    │ 封面 │         │ │
+│ 五月天        │ │ 专辑    [      ]    │ 🖼   │         │ │
+│  知足        │ │ 专辑作者[      ]    │      │         │ │
+│  …           │ │ 音轨号  [01]/共[12] └──────┘         │ │
+│              │ │ 年份    [      ]   JPEG/PNG·跟随文件  │ │
+│              │ │ 流派    [      ]   [🔍 搜索封面]       │ │
+│              │ │ 文件名  [      ]                      │ │
+│              │ ├────────────────────────────────────┤ │
+│              │ │ 歌词 [来源: 内嵌标签] ☑同时保存为.lrc │ │
+│              │ │ [🔍 搜索歌词]                         │ │
+│              │ │ ┌──────────────────────────────────┐ │ │
+│              │ │ │ [00:11.32] 你说你有点难追…         │ │ │
+│              │ │ └──────────────────────────────────┘ │ │
+└──────────────┴─────────────────────────────────────────┘
+```
+
+- **appbar**：品牌 + 路径（mono）+ 主题按钮（**最右**）。
+- **sidebar 300px**：打开文件夹 → 搜索 → 展平歌曲列表。
+- **editor**：编辑顶栏（状态 + 撤销/保存右上）→ 字段网格 `1fr 200px`（左字段列 + 右封面区，封面下方接「搜索封面」）→ 歌词区（head 行 → 搜索歌词 → textarea）。
+
+---
+
+## 6. 组件清单与状态
+
+### 6.1 基础组件
+
+| 组件 | 关键状态 |
+|---|---|
+| 打开文件夹按钮 | 全宽、ghost；hover 微亮 |
+| 搜索框 | focus 琥珀描边 |
+| 歌曲行 | hover 微亮；`selected` 琥珀底 + 歌名变琥珀 |
+| 输入框 | focus 琥珀描边；占位符 `--text-dim` |
+| 封面区 | 虚线框 + hover 边框变琥珀；点击 / 拖拽 |
+| 歌词 badge | 胶囊，`--panel-2` 底 + 描边 + dim 文字（如「来源: 内嵌标签」） |
+| 保存状态 | `dirty` 琥珀文字 / `saved` 绿 |
+| 撤销（ghost） | hover 微亮 |
+| 保存（primary） | 琥珀底 + `--accent-ink` 文字；disabled 40% 透明 |
+| 主题按钮 | ghost 方形 30×30，图标 ☀️/🌙 |
+| 弹窗 | 阴影 + 12px 圆角；主/危险/ghost 三按钮；`role="dialog" aria-modal` |
+| 空状态 | 图标 40px 35% 透明 + 标题 + 副说明 |
+
+### 6.2 搜索触发按钮（`.search-trigger`）
+
+| 属性 | 值 |
+|---|---|
+| 形态 | **虚线** 1px 描边，透明底，6px 圆角，全宽 |
+| 文字 | `🔍 搜索歌词` / `🔍 搜索封面`，11.5px，`--text-dim` |
+| hover | 描边 + 文字变琥珀 |
+| 位置 | 封面区：封面框 + 元信息**下方**；歌词区：head 行与 textarea **之间**（上方） |
+
+- 手动搜索的唯一入口；点击后进入「搜索中…」加载态。
+- 真实产品中自动搜索只在选中歌曲那一刻触发一次，之后的主动搜索全部走此按钮。
+
+### 6.3 搜索中状态（`.cand-status`）
+
+- 居中的 11.5px dim 文字「搜索中…」，尾部跟一个 **10×10 圆形转圈**（2px 边框，顶边琥珀，`spin .8s infinite`）。
+- 保证候选未就绪时用户看到明确进度，避免误判为无结果。
+
+### 6.4 封面候选（`.cand-grid` / `.cand-cell`）
+
+- **3 列网格**，间距 6px；每格 **1:1 方形**，6px 圆角，1px 描边，`object-fit: cover` 缩略图。
+- hover 描边变琥珀；点击填入封面区预览。
+- 来源角标（`.src-tag`）：缩略图**左下角**，9px 白字、`rgba(0,0,0,0.6)` 底、3px 圆角（如 网易云 / QQ音乐 / 咪咕）。
+- 网格下方一行 dim 提示（如「点选一张填入预览」）。
+
+### 6.5 歌词候选（`.cand-row`）
+
+- 横向条：**来源标签**（10px，`--panel-2` 底 + 描边 + dim 文字）+ **歌名 — 作者**（12px，超长省略）。
+- 每条顶部间距 6px；hover 描边变琥珀 + 底 `--hover`。
+- 点击一条 → 歌词填入 textarea（仍可继续编辑），badge 更新为对应来源平台。
+
+### 6.6 候选空态（`.cand-empty`）
+
+- 居中的 11px dim 文字（如「未找到匹配的歌词，可手动粘贴」），保留手动填写入口。
+
+---
+
+## 7. 交互细节
+
+- 过渡统一 **120ms**；按钮按压位移 **1px**。
+- 尊重 `prefers-reduced-motion`，减弱过渡与转圈动画。
+- 键盘可操作：`⌘O` 打开、Tab 遍历字段、焦点琥珀描边。
+- 弹窗标注 `role="dialog" aria-modal`，可 Esc 取消。
+- 候选点选**不自动覆盖**已有内容；搜索中可重复点按钮重搜。
+
+---
+
+## 8. 无障碍
+
+- 浅色强调色加深保证对比（琥珀 `#B4761D`）。
+- 所有状态不只靠颜色（文字 + 颜色双重表达）。
+- 最小目标字号 11.5px（封面角标 9px 仅为辅助标注），正文 13px。
+
+---
+
+## 9. 搜索候选区与触发模型（与 FR-8 对应）
+
+- **自动触发（仅一次）**：选中歌曲那一刻，按「歌名 + 作者」对**缺失项**（无歌词 / 无封面）自动并发搜 3 家（网易云 + QQ + 咪咕）；已有内容、或删除内容后**均不再自动触发**。
+- **手动触发**：歌词区/封面区各有「搜索歌词 / 搜索封面」虚线按钮，随时可主动发起——删除内容后要重新搜就用它。
+- **结果形态**：一律候选展示（封面缩略图网格 / 歌词候选条），用户**手动点选才填入**，不自动写盘、不自动覆盖。
+- **无结果 / 断网**：候选区显示明确空态 + 保留手动填写入口。
+
+---
+
+## 10. 前端架构（Vue 3 + Vite + TypeScript）
+
+> 技术选型详见 `V1-PRD.md` §7。以下为组件结构、状态管理与 Tauri command 契约。
+
+### 10.1 组件树
+
+```
+App.vue
+├── AppBar.vue          # 品牌 + 路径 + 主题按钮（最右）
+├── SongList.vue        # 左栏：打开文件夹 + 搜索框 + 歌曲列表
+│   └── SongRow.vue     # 单行（作者 + 歌名），选中高亮
+├── Editor.vue          # 右栏编辑表单
+│   ├── EditorBar.vue   # 正在编辑 + 保存状态 + 撤销/保存
+│   ├── FieldGrid.vue   # 字段网格 1fr 200px
+│   │   ├── FieldList.vue   # 歌名/作者/专辑/专辑作者/音轨/年份/流派/文件名
+│   │   │   └── FieldRow.vue
+│   │   └── CoverPanel.vue  # 封面区 + 搜索封面按钮 + 候选网格
+│   │       └── CoverCandidate.vue  # 单张缩略图（来源角标）
+│   └── LyricPanel.vue   # 歌词 head + 搜索歌词 + 候选条 + textarea
+│       └── LyricCandidate.vue
+└── SwitchDialog.vue     # 切歌确认弹窗（保存/不保存/取消）
+```
+
+**拆分要点**：`CoverPanel` / `LyricPanel` 各收一个「搜索候选区」——搜索态、候选列表、来源 badge 内聚到各自面板内。`search_song` 一次调用同时喂歌词 + 封面两个候选区（候选秒出，歌词/封面各自惰性拉取）。
+
+### 10.2 状态管理（单 store，不用 Pinia）
+
+单一响应式 store `store/song.ts`，对应 mockup 的 `current` / `original` / `dirty`：
+
+```ts
+// store/song.ts
+interface SongEditor {
+  current: Song;         // 编辑中
+  original: Song;        // 打开时快照
+  dirty: boolean;        // computed（对比 current / original）
+  lyricsSource: 'embedded' | 'sidecar' | 'none';
+}
+```
+
+V1 规模用 Vue 组合式 API 的 `reactive` + `computed` 即可，不需要引入 Pinia。
+
+### 10.3 Tauri command 契约
+
+TS 类型与 Rust struct 对齐（类型映射见下）：
+
+```ts
+// 与 Rust Song struct 对齐
+// Rust enum 映射：LyricsSource Embedded/SidecarLrc/None ↔ 'embedded'|'sidecar'|'none'
+//                MusicSourceId Netease/QqMusic/Migu ↔ 'netease'|'qqmusic'|'migu'
+interface Song {
+  path: string;
+  title: string; artist: string; album: string;
+  album_artist: string;
+  track: string; track_total: string;
+  year: string; genre: string;
+  lyrics: string;
+  lyrics_source: 'embedded' | 'sidecar' | 'none';
+  cover: string | null;        // base64 data URL（data:image/jpeg;base64,...）
+  cover_mime: string | null;
+}
+
+// 列表轻量项（list_songs 返回；详情选中后再 open_song 读）
+interface SongSummary {
+  path: string;
+  title: string;
+  artist: string;
+}
+
+interface SongCandidate {
+  source: 'netease' | 'qqmusic' | 'migu';   // MusicSourceId 字面量
+  id: string;
+  title: string; artist: string; album: string;
+  cover_url: string | null;
+}
+
+interface SearchResult {
+  songs: SongCandidate[];
+  source_stats: Array<[MusicSourceId, number]>;  // 各家返回条数
+}
+```
+
+**TS ↔ Rust 类型映射**：
+
+| TS | Rust | 说明 |
+|---|---|---|
+| `source`/`MusicSourceId` | `'netease' \| 'qqmusic' \| 'migu'` | `enum MusicSourceId { Netease, QqMusic, Migu }` → camelCase 字面量 |
+| `lyrics_source` | `'embedded' \| 'sidecar' \| 'none'` | `enum LyricsSource { Embedded, SidecarLrc, None }` → 字面量 |
+| `cover` | `string \| null` | Rust `Option<Vec<u8>>` → **base64 data URL**（IPC 边界序列化） |
+| `cover_mime` | `string \| null` | `Option<String>` |
+
+| command | 参数 → 返回 | 用途 |
+|---|---|---|
+| `list_songs(dir)` | `PathBuf → Vec<SongSummary>` | 打开文件夹，深度遍历；**只读列表项**（`path`/`title`/`artist`，歌名/作者空时前端回退显示文件名） |
+| `open_song(path)` | `PathBuf → Song` | 读取一首的**完整**标签 + 封面 base64，放进编辑区（按需读取） |
+| `save_song(song)` | `Song → Result<(), String>` | 写回原文件（cover 为 base64，Rust 侧解码） |
+| `rename_song(path, new_name)` | `PathBuf, String → Result` | 音频 + `.lrc` 改名 |
+| `search_song(title, artist)` | `String, String → SearchResult` | 三家并发搜索 |
+| `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本 |
+| `download_cover(url)` | `String → Vec<u8>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`） |
+
+**封面传递**：`Song.cover` 用 **base64 data URL**（`data:image/jpeg;base64,...`），`<img :src="song.cover">` 直接用；一次只编辑一首、图不大，不必配置 asset 协议。写盘时 `save_song` 收到 base64，Rust 侧解码回 `Vec<u8>` 再写原文件（磁盘落盘形式仍是原始字节，见 PRD §5.3）。
+
+**惰性拉取**：`search_song` 一次返回候选（封面 URL + 歌词 id），点选封面才 `download_cover`、点选歌词行才 `fetch_lyric`。

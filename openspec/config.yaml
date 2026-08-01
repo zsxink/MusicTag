@@ -1,0 +1,41 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+context: |
+  MusicTag 是一个跨平台桌面应用（Tauri 2 + Rust），一次一首地给本地裸 FLAC/MP3 补全元数据（歌名、作者、专辑、封面、歌词）。工具线 · 自用 · 纯本地取向。目标播放器：自研播放器 + Slat Player。
+
+  V1 关键约束（已拍板，勿违反）：
+  - 一次一首，无批量编辑（批量是 V2）
+  - 选中即搜：选中歌曲那一刻，仅对缺失的歌词/封面自动联网搜索（网易云+QQ+咪咕三源并发聚合）；已有则不搜；删除后不自动再触发
+  - 结果不自动写盘：候选一律列表展示、手动点选才填入；切歌即弃
+  - 保存 = 表单全量覆盖：填了就存、不填即清空删除；无空字段保护、无自动继承/补全
+  - 直接写盘：无备份、无撤销；标签始终写回原路径；改名是独立动作；撞名拒绝覆盖
+  - MP3 统一写 ID3v2.4（lofty 默认，勿用 use_id3v23）
+  - 坏标签只读：open_song 读标签失败 → 表单只读禁用，提示「标签损坏，只读」
+  - 保存失败：表单内容保留可重试，顶栏标「✕ 保存失败：原因」，dirty 保持 true，绝不假报已保存
+  - 离线降级：会话内首次自动搜索全源失败 → 标记离线，后续选中不再自动搜，只留手动搜索按钮
+
+  技术栈：外壳 Tauri 2 + Rust；前端 Vue 3 + Vite + TypeScript（<script setup>，单 store 不用 Pinia）；标签读写 lofty（MP3 写 ID3v2.4；FLAC Vorbis LYRICS/PICTURE、MP3 USLT/APIC 全支持）；其余 image（封面压缩）、walkdir、rfd、reqwest+serde_json、tokio、aes+cbc+rsa+rand（网易云加密，无 JS 引擎）。
+
+  定稿规格（最终权威，改动先同步再动代码）：docs/V1-PRD.md、docs/design/design.md、记忆 music-tag-v1-spec.md。
+  交互参考：docs/design/mockup.html（含浅/深色 mockup 截图 shot-*.png）。
+
+  Tauri command 契约（前端全走 invoke）：list_songs/open_song/save_song/rename_song/search_song/fetch_lyric/download_cover/embed_cover。
+  列表按需读取：list_songs 只返回 SongSummary { path, title, artist }；选中一首才 open_song 读全量标签 + 封面 base64。封面跨 IPC 用 base64 data URL。
+
+  沟通语言：中文。UI 文案用中文。
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+rules:
+  proposal:
+    - 先读 docs/V1-PRD.md / docs/design/design.md，判断是否与已拍板决策冲突
+    - 一次一首边界：涉及批量能力的提议需明确标注为 V2，V1 不做
+  specs:
+    - 每条 requirement 的 scenario 用 WHEN/THEN 格式，可转化为测试用例
+    - 涉及标签写入的规范必须写明 MP3/FLAC 各自的帧与版本
+  tasks:
+    - Rust 侧：lofty 读写、网易云加密、封面压缩相关任务必须附带测试
+    - 任务按依赖排序，Rust 后端（Tauri command）优先于前端接入
