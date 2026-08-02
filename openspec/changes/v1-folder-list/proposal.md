@@ -18,6 +18,10 @@
 ### Modified Capabilities
 （无）
 
+## 关联 Issue
+
+- GitHub Issue：`#7`（变更前已建，作为本变更锚点；分支提交 `feat(7): ...`、PR `Closes #7`）
+
 ## Impact
 
 - 新增 Rust 依赖：`rfd`（对话框）、`walkdir`（遍历）、`lofty`（读 title/artist）。

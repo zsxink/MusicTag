@@ -16,6 +16,10 @@
 ### Modified Capabilities
 （无）
 
+## 关联 Issue
+
+- GitHub Issue：`#13`（变更前已建，作为本变更锚点；分支提交 `feat(13): ...`、PR `Closes #13`）
+
 ## Impact
 
 - 复用 `v1-song-save` 的保存通道（弹窗「保存」按钮 = 先 save_song 再切）。

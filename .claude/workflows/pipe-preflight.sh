@@ -12,3 +12,14 @@ test -f "$change_dir/tasks.md"
 find "$change_dir/specs" -type f -name '*.md' -print -quit | grep -q .
 git merge-base --is-ancestor main HEAD
 openspec validate "$change_name" --strict --no-interactive
+
+# Issue 驱动强制校验：变更必须先建 GitHub Issue，proposal 必须关联 Issue 号，且该 Issue 存在
+issue_num=$(grep -oE 'GitHub Issue：`#[0-9]+`' "$change_dir/proposal.md" | grep -oE '[0-9]+' | head -1)
+if [ -z "$issue_num" ]; then
+  echo "✗ [preflight] 变更 '$change_name' 未关联 GitHub Issue：请在 proposal.md 写「## 关联 Issue」段（GitHub Issue：\`#<号>\`）" >&2
+  exit 1
+fi
+if ! gh issue view "$issue_num" --json number --jq '.number' >/dev/null 2>&1; then
+  echo "✗ [preflight] 关联的 GitHub Issue #$issue_num 不存在或不可访问" >&2
+  exit 1
+fi

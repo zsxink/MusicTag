@@ -23,6 +23,10 @@
 ### Modified Capabilities
 （无）
 
+## 关联 Issue
+
+- GitHub Issue：`#15`（变更前已建，作为本变更锚点；分支提交 `feat(15): ...`、PR `Closes #15`）
+
 ## Impact
 
 - 纯前端：复用 `v1-search-backend` 的 command、`v1-lyrics-lrc` 的歌词区、`v1-cover-embed` 的封面区。

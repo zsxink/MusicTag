@@ -19,6 +19,10 @@
 ### Modified Capabilities
 （无）
 
+## 关联 Issue
+
+- GitHub Issue：`#9`（变更前已建，作为本变更锚点；分支提交 `feat(9): ...`、PR `Closes #9`）
+
 ## Impact
 
 - 新增 Rust 依赖：`base64`（解码 cover data URL）。

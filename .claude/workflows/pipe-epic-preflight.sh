@@ -24,3 +24,19 @@ git cat-file -e "${source_revision}^{commit}"
 if [ -n "$source_path" ] && [ -f "$source_path" ]; then
   git diff --quiet "$source_revision" -- "$source_path"
 fi
+
+# Issue 驱动强制校验：当前 cursor 子变更必须先建 GitHub Issue 且存在
+issue_num=$(node -e '
+const fs = require("fs");
+const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const item = state.items?.[state.cursor];
+console.log(item?.issue || "");
+' "$state_file")
+if [ -z "$issue_num" ]; then
+  echo "✗ [preflight] 子变更 '$change_name'（epic.json cursor）未关联 Issue 号：请在 epic.json items 该 item 补 \`issue\` 字段" >&2
+  exit 1
+fi
+if ! gh issue view "$issue_num" --json number --jq '.number' >/dev/null 2>&1; then
+  echo "✗ [preflight] 子变更关联的 GitHub Issue #$issue_num 不存在或不可访问" >&2
+  exit 1
+fi

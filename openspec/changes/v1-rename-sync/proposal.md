@@ -19,6 +19,10 @@ V1 中「文件名改名」是独立动作，不与保存绑定。改名时需�
 ### Modified Capabilities
 （无）
 
+## 关联 Issue
+
+- GitHub Issue：`#12`（变更前已建，作为本变更锚点；分支提交 `feat(12): ...`、PR `Closes #12`）
+
 ## Impact
 
 - 复用 `v1-lyrics-lrc` 的 `.lrc` 命名约定（去扩展名同名同目录）。

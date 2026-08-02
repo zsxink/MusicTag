@@ -17,6 +17,10 @@
 ### Modified Capabilities
 （无）
 
+## 关联 Issue
+
+- GitHub Issue：`#10`（变更前已建，作为本变更锚点；分支提交 `feat(10): ...`、PR `Closes #10`）
+
 ## Impact
 
 - 新增 Rust 依赖：`image`（压缩，已在 v1-song-read 引入用于 mime 探测，此处扩展压缩能力）、`rfd`（文件选择，已引入）。
