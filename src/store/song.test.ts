@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Song } from '../lib/tauri'
-import { open, selectSong, songStore } from './song'
+import { activateFolder, open, selectSong, songStore } from './song'
 
 /** 构造一首完整标签的 Song（v1-song-read 契约形状）。 */
 const makeSong = (over: Partial<Song> = {}): Song => ({
@@ -106,5 +106,19 @@ describe('songStore — v1-song-read 编辑状态模型', () => {
     await selectSong('/a/s.flac')
     expect(songStore.selectedPath).toBe('/a/s.flac')
     expect(songStore.current).toBeNull()
+  })
+
+  it('换目录（activateFolder）：重置编辑状态，不残留上一首', async () => {
+    await open('/a/old.flac', vi.fn(async () => makeSong({ path: '/a/old.flac' })))
+    songStore.current!.title = '改过'
+    expect(songStore.dirty).toBe(true)
+
+    await activateFolder('/newdir', vi.fn(async () => []))
+
+    expect(songStore.selectedPath).toBeNull()
+    expect(songStore.current).toBeNull()
+    expect(songStore.original).toBeNull()
+    expect(songStore.dirty).toBe(false)
+    expect(songStore.readonly).toBe(false)
   })
 })

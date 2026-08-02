@@ -83,8 +83,10 @@ export async function selectSong(
 /**
  * 打开文件夹并整体替换列表（spec：重新打开整体替换 + 顶栏显示路径）。
  *
- * 纯状态编排，IPC 依赖以 `loadSongs` 注入（组件侧传 `() => invoke('list_songs',{dir})`），
- * 便于测试不依赖 Tauri。目录为 null（用户取消选择）时不改动任何状态。
+ * 换目录同时重置编辑状态（selectedPath/current/original 归零），不残留上一首
+ * 的编辑内容。纯状态编排，IPC 依赖以 `loadSongs` 注入（组件侧传
+ * `() => invoke('list_songs',{dir})`），便于测试不依赖 Tauri。
+ * 目录为 null（用户取消选择）时不改动任何状态。
  */
 export async function activateFolder(
   dir: string | null,
@@ -93,6 +95,10 @@ export async function activateFolder(
   if (dir === null || dir === '') return // 取消/空，无视
   raw.folderPath = dir
   raw.selectedPath = null
+  raw.current = null
+  raw.original = null
+  raw.readonly = false
+  raw.lyricsSource = 'none'
   raw.songs = await loadSongs(dir)
 }
 
