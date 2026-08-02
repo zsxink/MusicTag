@@ -23,6 +23,7 @@ V1 的自动搜索（FR-8）需要 Rust 侧三源（网易云 + QQ + 咪咕）�
 
 ## Impact
 
-- 新增 Rust 依赖：`reqwest`（共享 Client，伪装 UA）、`serde_json`、`tokio`（并发）、`aes`/`cbc`/`rsa`/`rand`（网易云加密）、`base64`。
+- 新增 Rust 依赖：`reqwest`（共享 Client，伪装 UA）、`serde_json`、`tokio`（并发）、`aes`/`cbc`/`rsa`/`rand`（网易云加密）、`base64`（QQ 歌词解码）。
 - 契约落点：`MusicSourceId` 枚举（Netease/QqMusic/Migu）、`SongCandidate`/`SearchResult`/`SearchError` struct；`search_song`/`fetch_lyric`/`download_cover` command。
+- **实现参照**：xhongc/music-tag-web（music_resource.py / encrypt.py / qm.py / task/utils.py），Rust 移植保持接口、参数、加密算法一致；详见 design.md 的 Decisions 实现参照节。
 - 纯 backend，无前端改动；`v1-search-ui` 在前端消费这些 command。
