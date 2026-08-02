@@ -37,27 +37,16 @@ tags: [workflow, epic, pipeline, automation]
 ### ③ 结果处理
 | Workflow 返回 | 处理 |
 |--------------|------|
-| `success` | 进 ④ 归档 + ⑤ PR + ⑥ 合并 |
+| `success` | 集成已在 workflow ⑦ 由 leader subagent 完成（归档/PR/合并），主会话只做 ⑦ checkpoint 写入 + ⑧ 推进下一个 |
 | `verify_failed` / `test_failed` | 打回修复重跑（可续跑） |
+| `integration_failed` | 集成未完成：检查 `integration` 原因，修复后重跑或人工介入 |
 | `suspended` | 停下上报用户（CR 三轮未通过 / 需决策），记 epic.json error |
 | `failed` | 停下报告失败原因与阶段 |
 
-### ④ 归档（规格随分支走）
-- 在子变更分支上执行 `/opsx:archive <子变更>`，规格更新进分支。
+### ④–⑥ 归档 / PR / 合并（已由 workflow ⑦ leader subagent 完成）
+子变更 Workflow 返回 `success` 时，**归档 / 提交 PR / 等 CI / 合并 / 分支清理已在 workflow ⑦ 由 `leader` subagent 完成**（对应 pipe skill ⑤–⑦），主会话**不再直接执行**这些 git/gh 命令。主会话只负责 ⑦ checkpoint 写入与 ⑧ 推进下一个子变更。
 
-### ⑤ 提交 PR
-```bash
-git add . && git commit -m "feat(<子变更>): <变更摘要>"
-git push -u origin <子变更>
-gh pr create --base main --head <子变更> --body "Closes #<issue>"   # 有对应 Issue 时
-```
-
-### ⑥ 合并 PR
-```bash
-git checkout main && git pull
-gh pr merge <子变更> --squash
-git branch -d <子变更>
-```
+> 兼容说明：若直接以单变更方式跑 `/pipe <name>`（非 epic），集成同样在 workflow ⑦ 内完成。
 
 ### ⑦ 写 checkpoint
 - 在子变更 PR 中更新 `epic.json`：成功路径预写 `item.status = 'done'`、`item.implementationCommit = <当前分支 HEAD>`、`cursor++`；该状态随同一 PR 合入 main。
@@ -94,3 +83,4 @@ git branch -d <子变更>
 - 一个子变更 = 一个分支 = 一个 PR；不在 main 上直接开发。
 - 失败不假报成功；`epic.json` 如实记录 status/error。
 - 总 PRD 未批准（`prdConfirmed !== true`）禁止运行——先 `/pipe:init`。
+- **集成派 subagent**：子变更的归档/PR/合并由 workflow ⑦ 内 `leader` subagent 完成；主会话不直接跑这些 git/gh 命令（只做 checkpoint 与循环推进）。
