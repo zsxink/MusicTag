@@ -12,6 +12,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::pick_folder,
             commands::list_songs,
+            commands::open_song,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
