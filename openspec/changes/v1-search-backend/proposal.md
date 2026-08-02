@@ -21,6 +21,10 @@ V1 的自动搜索（FR-8）需要 Rust 侧三源（网易云 + QQ + 咪咕）�
 ### Modified Capabilities
 （无）
 
+## 关联 Issue
+
+- GitHub Issue：`#14`（变更前已建，作为本变更锚点；分支提交 `feat(14): ...`、PR `Closes #14`）
+
 ## Impact
 
 - 新增 Rust 依赖：`reqwest`（共享 Client，伪装 UA）、`serde_json`、`tokio`（并发）、`aes`/`cbc`/`rsa`/`rand`（网易云加密）、`base64`（QQ 歌词解码）。

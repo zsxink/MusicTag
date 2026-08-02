@@ -18,6 +18,10 @@
 ### Modified Capabilities
 （无——这是首个变更，`openspec/specs/` 目前为空）
 
+## 关联 Issue
+
+- GitHub Issue：`#6`（变更前已建，作为本变更锚点；分支提交 `feat(6): ...`、PR `Closes #6`）
+
 ## Impact
 
 - 依赖：Tauri 2 CLI 与 crate、Vue 3、Vite、TypeScript；前端包管理 npm。

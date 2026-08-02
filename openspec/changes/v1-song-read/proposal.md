@@ -17,6 +17,10 @@
 ### Modified Capabilities
 （无）
 
+## 关联 Issue
+
+- GitHub Issue：`#8`（变更前已建，作为本变更锚点；分支提交 `feat(8): ...`、PR `Closes #8`）
+
 ## Impact
 
 - 新增 Rust 依赖：`lofty`（读标签 + 封面）、`image`（封面读 bytes）、`base64`。

@@ -17,6 +17,10 @@
 ### Modified Capabilities
 （无）
 
+## 关联 Issue
+
+- GitHub Issue：`#11`（变更前已建，作为本变更锚点；分支提交 `feat(11): ...`、PR `Closes #11`）
+
 ## Impact
 
 - 复用 `v1-song-save` 的内嵌歌词写回通道（FLAC LYRICS / MP3 USLT）。

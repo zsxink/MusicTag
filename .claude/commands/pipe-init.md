@@ -52,7 +52,9 @@ tags: [workflow, epic, split, pipeline]
 - 未批准时不得创建子 change 或启动开发。
 
 ### ⑤ 创建并校验子变更 artifacts
-- 用户批准总 PRD 后，对每个 item 从其 `slice` 生成独立的 `openspec/changes/<item.name>/`：`proposal.md`、`specs/`、`design.md`、`tasks.md`。
+- 用户批准总 PRD 后，先为**每个子变更创建 GitHub Issue**（Issue 驱动，一个子变更一个 Issue，body 写范围/域/依赖/slice，关联总 Epic Issue）——存下 Issue 号，供 proposal 配套段与 epic.json 使用。
+- 对每个 item 从其 `slice` 生成独立的 `openspec/changes/<item.name>/`：`proposal.md`、`specs/`、`design.md`、`tasks.md`。
+- **每个 proposal 必须写「## 关联 Issue」段**：`GitHub Issue：\`#<号>\``（供 `pipe-preflight.sh` 强制校验）。
 - 每项 artifact 必须只覆盖其切片；共同契约先落入依赖最前的子项，后续子项以其为前置条件，避免重复实现。
 - 对每个子项运行 `openspec validate <item.name>`；任一项失败则停止，修复 artifacts 后再继续。
 - 此步仅生成已批准总 PRD 的可执行拆分，不实现应用代码，也不再要求逐项确认。
@@ -66,8 +68,9 @@ tags: [workflow, epic, split, pipeline]
   "status": "ready",
   "prdConfirmed": false,
   "source": "docs/V1-PRD.md",
+  "epicIssue": 5,
   "items": [
-    { "name": "v1-skeleton", "domain": "both", "dependsOn": [], "status": "todo", "implementationCommit": null, "slice": "FR-1/FR-2" }
+    { "name": "v1-skeleton", "issue": 6, "domain": "both", "dependsOn": [], "status": "todo", "implementationCommit": null, "slice": "FR-1/FR-2" }
   ],
   "cursor": 0,
   "error": null,
