@@ -2,7 +2,7 @@
 // 左栏单行（v1-folder-list）：「作者 - 歌名」；title/artist 前端 trim 空 → 回退文件名（去扩展名）。
 // 选中态用 design.md `--active` 琥珀底 + 歌名变琥珀。
 import type { SongSummary } from '../lib/tauri'
-import { artistText, songStore, titleText } from '../store/song'
+import { artistText, selectSong, songStore, titleText } from '../store/song'
 
 const props = defineProps<{
   song: SongSummary
@@ -13,7 +13,7 @@ const isSelected = () => songStore.selectedPath === props.song.path
 
 /** 点击选中该行。 */
 function select() {
-  songStore.selectedPath = props.song.path
+  selectSong(props.song.path)
 }
 </script>
 

@@ -44,6 +44,27 @@ export function artistText(sum: SongSummary): string {
   return sum.artist.trim() !== '' ? sum.artist : fileNameStem(sum.path)
 }
 
+/** 点击选中一行（spec：点击行 → 该行被选中并高亮）。 */
+export function selectSong(path: string | null): void {
+  raw.selectedPath = path
+}
+
+/**
+ * 打开文件夹并整体替换列表（spec：重新打开整体替换 + 顶栏显示路径）。
+ *
+ * 纯状态编排，IPC 依赖以 `loadSongs` 注入（组件侧传 `() => invoke('list_songs',{dir})`），
+ * 便于测试不依赖 Tauri。目录为 null（用户取消选择）时不改动任何状态。
+ */
+export async function activateFolder(
+  dir: string | null,
+  loadSongs: (dir: string) => Promise<SongSummary[]>,
+): Promise<void> {
+  if (dir === null || dir === '') return // 取消/空，无视
+  raw.folderPath = dir
+  raw.selectedPath = null
+  raw.songs = await loadSongs(dir)
+}
+
 const raw = reactive<SongEditor>({
   folderPath: null,
   songs: [],
