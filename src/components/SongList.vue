@@ -50,7 +50,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
     <!-- 空文件夹 / 无匹配 -->
     <div
-      v-else-if="filteredSongs.value.length === 0"
+      v-else-if="filteredSongs.length === 0"
       class="empty"
       data-testid="empty-state"
     >
@@ -69,7 +69,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
     <!-- 列表 -->
     <ul v-else class="list">
-      <SongRow v-for="song in filteredSongs.value" :key="song.path" :song="song" />
+      <SongRow v-for="song in filteredSongs" :key="song.path" :song="song" />
     </ul>
   </aside>
 </template>
