@@ -1,0 +1,78 @@
+/* ============================================================
+   MusicTag 设计语言 token 地基（docs/design/design.md §2 色彩系统）
+   深色为默认（:root 缺省，防启动闪白）；浅色跟随系统偏好。
+   手动主题切换 + 持久记忆（FR-7.3/7.4）由后续 v1-ux-settings 实现。
+   ============================================================ */
+
+:root {
+  /* 默认值 = 深色主题 */
+  --bg:          #12161A;   /* 窗口底色 */
+  --panel:       #1A2026;   /* 顶栏、侧栏、输入框 */
+  --panel-2:     #212830;   /* 编辑顶栏、封面区、badge 底 */
+  --border:      #262D34;   /* 分隔线、描边、虚线 */
+  --text:        #E8E9E4;   /* 主文字 */
+  --text-dim:    #8A939C;   /* 副信息、占位、来源标签 */
+  --accent:      #E8A33D;   /* 琥珀：保存 / 选中 / 焦点 / 强调 */
+  --accent-ink:  #241A05;   /* 琥珀底上的文字 */
+  --danger:      #C0553E;   /* 不保存 / 丢弃 */
+  --danger-ink:  #FFFFFF;
+  --success:     #3FA36B;   /* ✓ 已保存 */
+  --hover:       rgba(255, 255, 255, 0.05);
+  --active:      rgba(232, 163, 61, 0.14);  /* 选中行底 */
+
+  /* 字体与形状 */
+  --mono:        "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans:        -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+  --radius:      8px;
+}
+
+/* 浅色主题（跟随系统偏好） */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:          #F4F4F1;
+    --panel:       #FFFFFF;
+    --panel-2:     #F1F0EC;
+    --border:      #DAD9D2;
+    --text:        #1E2429;
+    --text-dim:    #5F6A73;
+    --accent:      #B4761D;   /* 加深保证对比 */
+    --accent-ink:  #FFFFFF;
+    --danger:      #B3452E;
+    --danger-ink:  #FFFFFF;
+    --hover:       rgba(0, 0, 0, 0.045);
+    --active:      rgba(180, 118, 29, 0.10);
+  }
+}
+
+/* ---------- 基础 ---------- */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+}
+
+#app {
+  height: 100%;
+}
