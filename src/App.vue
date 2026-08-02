@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// 壳（v1-folder-list）：appbar + 左栏 SongList + 右侧 SongEditor 挂载占位。
-// 左侧展示当前文件夹展平歌曲列表；右侧编辑器由后续子变更（v1-song-read 起）挂载。
+// 壳：appbar + 左栏 SongList + 右侧编辑表单 Editor（v1-song-read 挂载）。
+// 左侧展示当前文件夹展平歌曲列表；选中一首 → 右栏读全量标签渲染编辑表单。
 import AppBar from './components/AppBar.vue'
+import Editor from './components/Editor.vue'
 import SongList from './components/SongList.vue'
 </script>
 
@@ -10,10 +11,12 @@ import SongList from './components/SongList.vue'
     <!-- 全局顶栏：品牌 + 当前目录绝对路径（mono）+ 主题按钮占位 -->
     <AppBar />
 
-    <!-- 主体：左侧列表 + 右侧编辑器挂载点 -->
+    <!-- 主体：左侧列表 + 右侧编辑器 -->
     <main class="workspace">
       <SongList />
-      <section class="editor-slot" aria-label="歌曲编辑器" />
+      <section class="editor-slot" aria-label="歌曲编辑器">
+        <Editor />
+      </section>
     </main>
   </div>
 </template>
