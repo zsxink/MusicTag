@@ -8,6 +8,7 @@
 // 封面/歌词/其它标签；title/artist 从标签读取但不 trim（前端判定空串回退文件名）。
 // 单文件标签读取失败时返回空串而非报错，保证列表永不因单曲坏标签崩溃。
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lofty::prelude::{Accessor, TaggedFileExt};
 use lofty::probe::Probe;
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,43 @@ pub struct SongSummary {
     pub path: String,
     pub title: String,
     pub artist: String,
+}
+
+/// 歌词来源（design.md D1 契约形状：`"embedded" | "sidecar" | "none"`）。
+///
+/// serde 默认会把 enum 序列化成 `{"Embedded":null}` 对象形状，破坏 TS 契约，
+/// 必须逐变体 rename 对齐 `src/lib/tauri.ts` 的字面量。`SidecarLrc` 若只依赖
+/// `rename_all = "snake_case"` 会得到 `"sidecar_lrc"`，故显式 `rename = "sidecar"`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LyricsSource {
+    Embedded,
+    #[serde(rename = "sidecar")]
+    SidecarLrc,
+    None,
+}
+
+/// 完整标签（open_song 返回 / save_song 提交）。字段与 TS `Song` 契约逐项对齐。
+///
+/// - 文本字段一律 `String`，未设置读空串（PRD §6），Rust 侧不 trim。
+/// - `cover` 为 base64 data URL（`data:<mime>;base64,...`），前端 `<img :src>` 直接用。
+/// - `lyrics_source` 本变更只落内嵌判定（trim 非空 → Embedded，否则 None）；
+///   `SidecarLrc` 由 v1-lyrics-lrc 补充。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Song {
+    pub path: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub album_artist: String,
+    pub track: String,
+    pub track_total: String,
+    pub year: String,
+    pub genre: String,
+    pub lyrics: String,
+    pub lyrics_source: LyricsSource,
+    pub cover: Option<String>,
+    pub cover_mime: Option<String>,
 }
 
 /// 是否为可收录的音频扩展名（`.flac`/`.mp3`，大小写不敏感）。
@@ -72,12 +110,195 @@ pub fn list_songs(dir: String) -> Vec<SongSummary> {
         .collect()
 }
 
+/// 读取单曲完整标签。与 `read_summary`（失败 → 空串保列表）不同，
+/// 本函数 `Probe::open` 或 `.read()` 任一失败都返回 `Err`，触发前端只读表单。
+fn read_song_meta(path: &Path) -> Result<Song, String> {
+    let tagged_file = Probe::open(path)
+        .and_then(|probed| probed.read())
+        .map_err(|e| format!("读取标签失败: {e}"))?;
+
+    let tag = tagged_file.primary_tag();
+
+    // 文本字段统一经 ItemKey 读取，未设置读空串（PRD §6），Rust 不 trim。
+    let get = |key: lofty::tag::ItemKey| {
+        tag.and_then(|t| t.get_string(key))
+            .map(|s| s.to_owned())
+            .unwrap_or_default()
+    };
+
+    let track = get(lofty::tag::ItemKey::TrackNumber);
+    let track_total = get(lofty::tag::ItemKey::TrackTotal);
+
+    // TRCK 合串（`x/y`）兜底拆分：lofty 读侧已对 ID3v2 TRCK / Vorbis
+    // TRACKNUMBER 拆分，但极个别文件可能仍返回合串（design.md D2）。
+    let (track, track_total) = split_track_pair(&track, &track_total);
+
+    // FLAC Vorbis 用 ItemKey::Lyrics；MP3 用 UnsyncLyrics（USLT）。
+    let lyrics = get(lofty::tag::ItemKey::Lyrics);
+    let lyrics = if lyrics.is_empty() {
+        get(lofty::tag::ItemKey::UnsyncLyrics)
+    } else {
+        lyrics
+    };
+
+    let lyrics_source = if lyrics.trim().is_empty() {
+        LyricsSource::None
+    } else {
+        LyricsSource::Embedded
+    };
+
+    // 年份读取需同时兼容两个 ItemKey（design.md D2 只写 `ItemKey::Year`，但 lofty
+    // 实际映射：Vorbis `DATE` → RecordingDate、ID3v2 `TDRC` → RecordingDate；仅
+    // Vorbis `YEAR` 落 `ItemKey::Year`）。故 RecordingDate 优先、Year 兜底，保证
+    // FLAC `DATE=...` 与 MP3 `TDRC=...` 均能读到。
+    let year = {
+        let y = get(lofty::tag::ItemKey::RecordingDate);
+        if y.is_empty() {
+            get(lofty::tag::ItemKey::Year)
+        } else {
+            y
+        }
+    };
+
+    let (cover, cover_mime) = tag
+        .and_then(|t| t.pictures().first().cloned())
+        .map(encode_cover)
+        .unwrap_or((None, None));
+
+    Ok(Song {
+        path: path.to_string_lossy().into_owned(),
+        title: get(lofty::tag::ItemKey::TrackTitle),
+        artist: get(lofty::tag::ItemKey::TrackArtist),
+        album: get(lofty::tag::ItemKey::AlbumTitle),
+        album_artist: get(lofty::tag::ItemKey::AlbumArtist),
+        track,
+        track_total,
+        year,
+        genre: get(lofty::tag::ItemKey::Genre),
+        lyrics,
+        lyrics_source,
+        cover,
+        cover_mime,
+    })
+}
+
+/// TRCK/TRACKNUMBER 合串（`x/y`）兜底拆分。`track` 含 `/` 时按第一个 `/`
+/// 拆到 `track`/`track_total`（左侧 track 已非空时保留原值，不覆盖）。
+fn split_track_pair(track: &str, track_total: &str) -> (String, String) {
+    if !track_total.is_empty() {
+        return (track.to_string(), track_total.to_string());
+    }
+    match track.split_once('/') {
+        Some((num, total)) if !num.trim().is_empty() => {
+            (num.trim().to_string(), total.trim().to_string())
+        }
+        _ => (track.to_string(), String::new()),
+    }
+}
+
+/// 组装封面 base64 data URL：`data:<mime>;base64,...`。
+///
+/// MIME 优先用 lofty `Picture::mime_type()`（内嵌自带声明），为空时退回
+/// `image::guess_format` 按字节探测（design.md D3）。
+fn encode_cover(picture: lofty::picture::Picture) -> (Option<String>, Option<String>) {
+    let bytes = picture.data();
+    let mime = picture
+        .mime_type()
+        .map(|m| m.as_str().to_string())
+        .or_else(|| {
+            image::guess_format(bytes)
+                .ok()
+                .map(|f| f.to_mime_type().to_string())
+        });
+
+    let Some(mime) = mime else {
+        // 探测不出 MIME 时仍给 data URL，用通用 MIME 兜底。
+        return (
+            Some(encode_data_url(bytes, "application/octet-stream")),
+            None,
+        );
+    };
+
+    (Some(encode_data_url(bytes, &mime)), Some(mime))
+}
+
+fn encode_data_url(bytes: &[u8], mime: &str) -> String {
+    let b64 = BASE64.encode(bytes);
+    format!("data:{mime};base64,{b64}")
+}
+
+/// 读取单曲完整标签并返回（open_song command）。
+///
+/// 入参为 `String` 与 `list_songs` 一致（列表项 `path` 直接透传），Tauri 自动转 PathBuf。
+#[tauri::command]
+pub fn open_song(path: String) -> Result<Song, String> {
+    read_song_meta(Path::new(&path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
     use tempfile::TempDir;
+
+    // 测试工具：用 lofty 自带的写 API 构造 fixture（比手工拼字节可靠），
+    // 覆盖完整字段（含歌词、封面、TRCK 合串）。
+
+    /// 生成一张 2x2 红色 PNG 的字节（`image` crate 编码）。
+    fn tiny_png_bytes() -> Vec<u8> {
+        use std::io::Cursor;
+        let mut buf = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba([255, 0, 0, 255]),
+        ))
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .expect("编码测试 PNG 失败");
+        buf.into_inner()
+    }
+
+    /// 往已写好的音频文件追加/覆写全字段标签（用 lofty 写回，贴近真实文件形态）。
+    fn add_tags(path: &Path, lyrics: Option<&str>, picture: Option<Vec<u8>>) {
+        use lofty::config::WriteOptions;
+        use lofty::picture::{MimeType, Picture, PictureType};
+        use lofty::prelude::{TagExt, TaggedFileExt};
+        use lofty::tag::{items::ENGLISH, ItemValue, TagItem};
+
+        let mut file = lofty::read_from_path(path).expect("读取 fixture 失败");
+        let tag = file.primary_tag_mut().expect("fixture 应有主标签");
+
+        tag.insert_text(lofty::tag::ItemKey::AlbumTitle, "Album".to_string());
+        tag.insert_text(lofty::tag::ItemKey::AlbumArtist, "AlbumArtist".to_string());
+        tag.insert_text(lofty::tag::ItemKey::TrackNumber, "3".to_string());
+        tag.insert_text(lofty::tag::ItemKey::TrackTotal, "12".to_string());
+        tag.insert_text(lofty::tag::ItemKey::RecordingDate, "2021".to_string());
+        tag.insert_text(lofty::tag::ItemKey::Genre, "Pop".to_string());
+        if let Some(lrc) = lyrics {
+            // USLT 帧强制 lang=eng（PRD §7）；lofty 写 ID3v2 时要求 lang 非空，
+            // 用 TagItem::new + set_lang 显式指定。
+            let mut item = TagItem::new(
+                lofty::tag::ItemKey::UnsyncLyrics,
+                ItemValue::Text(lrc.to_string()),
+            );
+            item.set_lang(ENGLISH);
+            tag.push(item);
+            // FLAC 侧走 ItemKey::Lyrics（LYRICS 帧）
+            tag.insert_text(lofty::tag::ItemKey::Lyrics, lrc.to_string());
+        }
+        if let Some(bytes) = picture {
+            let pic = Picture::unchecked(bytes)
+                .pic_type(PictureType::CoverFront)
+                .mime_type(MimeType::Png)
+                .description("cover")
+                .build();
+            tag.push_picture(pic);
+        }
+
+        tag.save_to_path(path, WriteOptions::default())
+            .expect("写回 fixture 失败");
+    }
 
     /// 构造带 title/artist 的最小合法 FLAC（STREAMINFO + VORBIS_COMMENT 块）。
     ///
@@ -238,5 +459,259 @@ mod tests {
         };
         let json = serde_json::to_string(&s).unwrap();
         assert_eq!(json, r#"{"path":"p","title":"t","artist":"a"}"#);
+    }
+
+    // ---------------------------------------------------------------------------
+    // open_song 全量读取
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn open_song_flac_reads_all_fields_with_lyrics_and_cover() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_flac(tmp.path(), "song.flac", "Song", "Artist");
+        add_tags(
+            &tmp.path().join("song.flac"),
+            Some("[00:00.00]第一行歌词\n[00:05.00]第二行"),
+            Some(tiny_png_bytes()),
+        );
+
+        let song = read_song_meta(&tmp.path().join("song.flac")).expect("FLAC 应可读");
+
+        assert_eq!(song.path, tmp.path().join("song.flac").to_string_lossy());
+        assert_eq!(song.title, "Song");
+        assert_eq!(song.artist, "Artist");
+        assert_eq!(song.album, "Album");
+        assert_eq!(song.album_artist, "AlbumArtist");
+        assert_eq!(song.track, "3");
+        assert_eq!(song.track_total, "12");
+        assert_eq!(song.year, "2021");
+        assert_eq!(song.genre, "Pop");
+        assert_eq!(song.lyrics, "[00:00.00]第一行歌词\n[00:05.00]第二行");
+        assert_eq!(song.lyrics_source, LyricsSource::Embedded);
+
+        let cover = song.cover.expect("应有封面 data URL");
+        assert!(
+            cover.starts_with("data:image/png;base64,"),
+            "封面应前缀 data:image/png;base64,，实际: {cover}"
+        );
+        assert_eq!(song.cover_mime.as_deref(), Some("image/png"));
+        // base64 解码回去应与原始 PNG 字节一致
+        let b64 = cover.strip_prefix("data:image/png;base64,").unwrap();
+        let decoded = BASE64.decode(b64).expect("base64 应可解码");
+        assert_eq!(decoded, tiny_png_bytes());
+    }
+
+    #[test]
+    fn open_song_mp3_reads_all_fields_with_uslt_and_apic() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_mp3(tmp.path(), "song.mp3", "Song", "Artist");
+        add_tags(
+            &tmp.path().join("song.mp3"),
+            Some("[00:00.00]第一行歌词\n[00:05.00]第二行"),
+            Some(tiny_png_bytes()),
+        );
+
+        let song = read_song_meta(&tmp.path().join("song.mp3")).expect("MP3 应可读");
+
+        assert_eq!(song.title, "Song");
+        assert_eq!(song.artist, "Artist");
+        assert_eq!(song.album, "Album");
+        assert_eq!(song.album_artist, "AlbumArtist");
+        assert_eq!(song.track, "3");
+        assert_eq!(song.track_total, "12");
+        assert_eq!(song.year, "2021");
+        assert_eq!(song.genre, "Pop");
+        assert_eq!(song.lyrics, "[00:00.00]第一行歌词\n[00:05.00]第二行");
+        assert_eq!(song.lyrics_source, LyricsSource::Embedded);
+
+        let cover = song.cover.expect("应有封面 data URL");
+        assert!(
+            cover.starts_with("data:image/png;base64,"),
+            "封面应前缀 data:image/png;base64,，实际: {cover}"
+        );
+        assert_eq!(song.cover_mime.as_deref(), Some("image/png"));
+        let b64 = cover.strip_prefix("data:image/png;base64,").unwrap();
+        assert_eq!(BASE64.decode(b64).unwrap(), tiny_png_bytes());
+    }
+
+    #[test]
+    fn open_song_mp3_track_pair_merged_frame_reads_split() {
+        // 部分 MP3 的 TRCK 写成合并串 `03/12`。lofty 读侧已拆（design.md D2），
+        // 这里直接手工拼一个含 `/` 的 TRCK 文本帧注入 ID3v2.4 tag，验证读路径端到端拆分。
+        let tmp = TempDir::new().unwrap();
+
+        fn synchsafe(n: usize) -> [u8; 4] {
+            let n = n as u32;
+            [(n >> 21) as u8, (n >> 14) as u8, (n >> 7) as u8, n as u8]
+        }
+        // TRCK 文本帧：帧头（ID3v2.4 无 flags）+ UTF-8 文本
+        let mut trck = Vec::from(b"TRCK");
+        let content = b"03/12";
+        trck.extend_from_slice(&synchsafe(content.len() + 1));
+        trck.extend_from_slice(&[0, 0]);
+        trck.push(0x03); // UTF-8
+        trck.extend_from_slice(content);
+
+        let mut audio = Vec::from(b"ID3\x04\x00\x00");
+        audio.extend_from_slice(&synchsafe(trck.len()));
+        audio.extend(&trck);
+        // 两个合法 MPEG 帧保证 lofty 解析通过
+        for _ in 0..2 {
+            audio.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]);
+            audio.extend(std::iter::repeat_n(0u8, 413));
+        }
+        fs::write(tmp.path().join("trck.mp3"), &audio).expect("写入测试 MP3 失败");
+
+        // 读回，lofty 对 TRCK 读侧做 x/y 拆分 → track/track_total 拆开
+        let song = read_song_meta(&tmp.path().join("trck.mp3")).expect("应可读");
+        assert_eq!(song.track, "03");
+        assert_eq!(song.track_total, "12");
+    }
+
+    #[test]
+    fn open_song_untagged_file_returns_blanks() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_flac(tmp.path(), "plain.flac", "", "");
+        // 只写基础 FLAC，不 add_tags —— title/artist 为空，其余字段未设置
+
+        let song = read_song_meta(&tmp.path().join("plain.flac")).expect("无标签 FLAC 应可读");
+
+        assert_eq!(song.title, "");
+        assert_eq!(song.artist, "");
+        assert_eq!(song.album, "");
+        assert_eq!(song.album_artist, "");
+        assert_eq!(song.track, "");
+        assert_eq!(song.track_total, "");
+        assert_eq!(song.year, "");
+        assert_eq!(song.genre, "");
+        assert_eq!(song.lyrics, "");
+        assert_eq!(song.lyrics_source, LyricsSource::None);
+        assert_eq!(song.cover, None);
+        assert_eq!(song.cover_mime, None);
+    }
+
+    #[test]
+    fn open_song_corrupt_file_returns_err_not_blank() {
+        // 与 list_songs 的语义差异：坏标签 → list_songs 空串、open_song 必须 Err。
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("broken.mp3"), b"garbage bytes").unwrap();
+        let res = read_song_meta(&tmp.path().join("broken.mp3"));
+        assert!(res.is_err(), "坏标签文件应返回 Err，而非空 Song");
+        assert!(!res.unwrap_err().is_empty(), "错误原因不应为空串");
+    }
+
+    #[test]
+    fn open_song_lyrics_source_none_when_whitespace_only() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_flac(tmp.path(), "ws.flac", "T", "A");
+        add_tags(&tmp.path().join("ws.flac"), Some("   \n  "), None);
+
+        let song = read_song_meta(&tmp.path().join("ws.flac")).expect("应可读");
+        // 内嵌歌词 trim 后为空 → None
+        assert_eq!(song.lyrics_source, LyricsSource::None);
+        assert_eq!(song.lyrics, "   \n  ");
+    }
+
+    #[test]
+    fn open_song_track_pair_split_fallback() {
+        // 模拟 TRCK 合串 `03/12` 兜底拆分（lofty 读侧已拆，兜底逻辑单测）
+        assert_eq!(
+            split_track_pair("03/12", ""),
+            ("03".to_string(), "12".to_string())
+        );
+        // track_total 已有值时保留
+        assert_eq!(
+            split_track_pair("03", "12"),
+            ("03".to_string(), "12".to_string())
+        );
+        // 无 `/` 时 track_total 为空
+        assert_eq!(
+            split_track_pair("05", ""),
+            ("05".to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn lyrics_source_serializes_to_contract_shape() {
+        // 契约形状冻结（design.md D1）：embedded / sidecar / none。
+        // 杜绝 `{"Embedded":null}` 对象形状与 `"sidecar_lrc"`。
+        let embedded = Song {
+            path: "p".into(),
+            title: "t".into(),
+            artist: "a".into(),
+            album: String::new(),
+            album_artist: String::new(),
+            track: String::new(),
+            track_total: String::new(),
+            year: String::new(),
+            genre: String::new(),
+            lyrics: String::new(),
+            lyrics_source: LyricsSource::Embedded,
+            cover: None,
+            cover_mime: None,
+        };
+        let json = serde_json::to_string(&embedded).unwrap();
+        assert!(
+            json.contains(r#""lyrics_source":"embedded""#),
+            "Embedded 应序列化为 embedded，实际: {json}"
+        );
+
+        let sidecar = Song {
+            lyrics_source: LyricsSource::SidecarLrc,
+            ..embedded
+        };
+        let json = serde_json::to_string(&sidecar).unwrap();
+        assert!(
+            json.contains(r#""lyrics_source":"sidecar""#),
+            "SidecarLrc 应序列化为 sidecar（显式 rename），实际: {json}"
+        );
+        assert!(!json.contains("sidecar_lrc"), "不得出现 sidecar_lrc");
+        assert!(!json.contains("SidecarLrc"), "不得出现 Rust 变体名");
+
+        let none = Song {
+            lyrics_source: LyricsSource::None,
+            ..sidecar
+        };
+        let json = serde_json::to_string(&none).unwrap();
+        assert!(
+            json.contains(r#""lyrics_source":"none""#),
+            "None 应序列化为 none，实际: {json}"
+        );
+    }
+
+    #[test]
+    fn song_serializes_snake_case_cover_shape() {
+        let song = Song {
+            path: "p".into(),
+            title: "t".into(),
+            artist: "a".into(),
+            album: "al".into(),
+            album_artist: "aa".into(),
+            track: "1".into(),
+            track_total: "10".into(),
+            year: "2000".into(),
+            genre: "g".into(),
+            lyrics: "l".into(),
+            lyrics_source: LyricsSource::None,
+            cover: Some("data:image/png;base64,AAAA".into()),
+            cover_mime: Some("image/png".into()),
+        };
+        let json = serde_json::to_string(&song).unwrap();
+        // 断言全字段 snake_case 契约形状（与 src/lib/tauri.ts 对齐）
+        assert!(
+            json.contains(r#""album_artist":"aa""#),
+            "album_artist 应为 snake_case: {json}"
+        );
+        assert!(json.contains(r#""track_total":"10""#));
+        assert!(json.contains(r#""lyrics_source":"none""#));
+        assert!(json.contains(r#""cover":"data:image/png;base64,AAAA""#));
+        assert!(json.contains(r#""cover_mime":"image/png""#));
+    }
+
+    #[test]
+    fn open_song_command_returns_err_for_missing_path() {
+        // 不存在的路径 → Err（区别于空串）
+        let res = open_song("/nonexistent/definitely/missing.flac".to_string());
+        assert!(res.is_err());
     }
 }

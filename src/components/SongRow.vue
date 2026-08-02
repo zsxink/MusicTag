@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // 左栏单行（v1-folder-list）：「作者 - 歌名」；title/artist 前端 trim 空 → 回退文件名（去扩展名）。
 // 选中态用 design.md `--active` 琥珀底 + 歌名变琥珀。
-import type { SongSummary } from '../lib/tauri'
+// v1-song-read：选中即触发 `open_song` 读全量（spec「选中读取完整标签」）。
+import { invokeCommand } from '../lib/tauri'
+import type { Song, SongSummary } from '../lib/tauri'
 import { artistText, selectSong, songStore, titleText } from '../store/song'
 
 const props = defineProps<{
@@ -11,9 +13,14 @@ const props = defineProps<{
 /** 该行是否被选中（store 比对 path）。 */
 const isSelected = () => songStore.selectedPath === props.song.path
 
-/** 点击选中该行。 */
+/** 打开歌曲：invoke('open_song', { path }) 读全量标签。 */
+function loadSong(path: string): Promise<Song> {
+  return invokeCommand<Song>('open_song', { path })
+}
+
+/** 点击选中该行并读取完整标签。 */
 function select() {
-  selectSong(props.song.path)
+  selectSong(props.song.path, loadSong)
 }
 </script>
 

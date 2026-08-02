@@ -1,10 +1,24 @@
-// 单 store（design.md §10.2，不用 Pinia）。v1-folder-list 起承载左栏列表状态。
-// 后续 v1-song-read 起的 SongEditor 形态字段（current/original/dirty）再并入。
+// 单 store（design.md §10.2，不用 Pinia）。v1-folder-list 承载左栏列表状态，
+// v1-song-read 起承载 SongEditor 编辑状态（current/original/dirty/readonly）。
 import { computed, reactive } from 'vue'
 
 import type { LyricsSource, Song, SongSummary } from '../lib/tauri'
 
-/** 文件夹列表 + SongEditor 形态占位。 */
+/** 参与 dirty 判定的可编辑字段（design.md D6：path/lyrics_source 不参与）。 */
+const DIRTY_FIELDS = [
+  'title',
+  'artist',
+  'album',
+  'album_artist',
+  'track',
+  'track_total',
+  'year',
+  'genre',
+  'lyrics',
+  'cover',
+] as const
+
+/** 文件夹列表 + SongEditor 编辑状态。 */
 interface SongEditor {
   /** 当前打开的文件夹绝对路径（null = 未打开）。 */
   folderPath: string | null
@@ -14,10 +28,15 @@ interface SongEditor {
   searchQuery: string
   /** 被选中歌曲的 path（null = 无选中）。 */
   selectedPath: string | null
-  /** —— SongEditor 占位字段 —— */
+  /** 编辑中歌曲（open_song 结果，表单 v-model 绑它）。 */
   current: Song | null
+  /** 打开时快照（dirty 对比基准；编辑不污染它）。 */
   original: Song | null
+  /** 是否未保存（computed：current/original 逐字段对比）。 */
   dirty: boolean
+  /** 坏标签只读开关（open_song Err → true，表单禁用）。 */
+  readonly: boolean
+  /** 快照 `current.lyrics_source`（占位，供 UI badge）。 */
   lyricsSource: LyricsSource
 }
 
@@ -44,16 +63,30 @@ export function artistText(sum: SongSummary): string {
   return sum.artist.trim() !== '' ? sum.artist : fileNameStem(sum.path)
 }
 
-/** 点击选中一行（spec：点击行 → 该行被选中并高亮）。 */
-export function selectSong(path: string | null): void {
+/**
+ * 点击选中一行（spec：点击行 → 该行被选中并高亮）。
+ *
+ * 传入 `loadSong`（组件侧传 `(path) => invoke('open_song', { path })`）时，选中即触发
+ * `open()` 读全量渲染到编辑表单（spec「选中读取完整标签」）；不传则只设选中高亮
+ * （v1-folder-list 遗留场景，测试用）。
+ */
+export async function selectSong(
+  path: string | null,
+  loadSong?: (path: string) => Promise<Song>,
+): Promise<void> {
   raw.selectedPath = path
+  if (path !== null && loadSong !== undefined) {
+    await open(path, loadSong)
+  }
 }
 
 /**
  * 打开文件夹并整体替换列表（spec：重新打开整体替换 + 顶栏显示路径）。
  *
- * 纯状态编排，IPC 依赖以 `loadSongs` 注入（组件侧传 `() => invoke('list_songs',{dir})`），
- * 便于测试不依赖 Tauri。目录为 null（用户取消选择）时不改动任何状态。
+ * 换目录同时重置编辑状态（selectedPath/current/original 归零），不残留上一首
+ * 的编辑内容。纯状态编排，IPC 依赖以 `loadSongs` 注入（组件侧传
+ * `() => invoke('list_songs',{dir})`），便于测试不依赖 Tauri。
+ * 目录为 null（用户取消选择）时不改动任何状态。
  */
 export async function activateFolder(
   dir: string | null,
@@ -62,6 +95,10 @@ export async function activateFolder(
   if (dir === null || dir === '') return // 取消/空，无视
   raw.folderPath = dir
   raw.selectedPath = null
+  raw.current = null
+  raw.original = null
+  raw.readonly = false
+  raw.lyricsSource = 'none'
   raw.songs = await loadSongs(dir)
 }
 
@@ -72,9 +109,44 @@ const raw = reactive<SongEditor>({
   selectedPath: null,
   current: null,
   original: null,
-  dirty: false,
+  // dirty 为 reactive getter（Vue 3.5 会把 getter 转成 live computed）：
+  // 任何 `songStore.dirty` 读取都逐字段对比 current/original，编辑即自动翻转。
+  get dirty() {
+    const { current, original } = this
+    if (current === null || original === null) return false
+    return DIRTY_FIELDS.some((key) => current[key] !== original[key])
+  },
+  readonly: false,
   lyricsSource: 'none',
 })
+
+/**
+ * 打开一首歌：`open_song` 成功 → `current = original = song`（快照独立）、readonly=false；
+ * Err（坏标签）→ current/original=null、readonly=true（表单只读禁用，spec「坏标签只读」）。
+ *
+ * IPC 依赖以 `loadSong` 参数注入（仿 `activateFolder`），便于测试不依赖 Tauri。
+ *
+ * 并发守卫：快速连点 A→B 时，两个 `open_song` IPC 响应可能乱序（慢响应后到）。响应到达后
+ * 校验 `selectedPath` 仍是本次请求的 path，不是则丢弃（过期响应/过期错误均不得覆盖新选中，
+ * 防表单显示旧歌而列表高亮新行的错位）。selectSong 在调用 open() 前已设 `selectedPath`。
+ */
+export async function open(path: string, loadSong: (path: string) => Promise<Song>): Promise<void> {
+  try {
+    const song = await loadSong(path)
+    if (raw.selectedPath !== path) return // 已切歌/换目录，丢弃过期成功响应
+    raw.original = { ...song }
+    raw.current = { ...song }
+    raw.readonly = false
+    raw.lyricsSource = song.lyrics_source
+  } catch {
+    if (raw.selectedPath !== path) return // 过期错误同样丢弃，不误设只读
+    // open_song 读标签失败（损坏/结构错）→ 只读表单，能看不能改、不能保存
+    raw.current = null
+    raw.original = null
+    raw.readonly = true
+    raw.lyricsSource = 'none'
+  }
+}
 
 /** 只读封装 store（避免组件直接改整个对象；字段仍可单独赋值）。 */
 export const songStore = raw

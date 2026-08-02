@@ -169,8 +169,13 @@ let crResult = null
 let rounds = 0
 let crPassed = false
 const ownerFor = (finding) => {
-  if (finding.file.startsWith('src-tauri/')) return 'rust-backend'
-  if (finding.file.startsWith('src/')) return 'vue-frontend'
+  // CR 返回的 file 可能是绝对路径（/Users/.../MusicTag/src/...）或仓库相对路径（src/...）。
+  // 不依赖 process.cwd()（workflow 脚本无 Node API），改为同时匹配两种形态：
+  // 绝对路径按仓库根标记 `/MusicTag/` 切到相对形态后判断归属。
+  const f = finding.file
+  const seg = f.includes('/MusicTag/') ? f.slice(f.indexOf('/MusicTag/') + '/MusicTag/'.length) : f
+  if (seg.startsWith('src-tauri/')) return 'rust-backend'
+  if (seg.startsWith('src/')) return 'vue-frontend'
   return 'leader'
 }
 
