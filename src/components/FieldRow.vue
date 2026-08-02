@@ -8,16 +8,22 @@ import { computed } from 'vue'
 
 import { fileName, songStore } from '../store/song'
 
-const props = defineProps<{
-  /** 字段标签（如「歌名」「音轨号」）。 */
-  label: string
-  /** 字段 key（绑 current[key]）；`file`/`track` 形态可缺省。 */
-  field?: 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'genre'
-  /** 输入框占位符。 */
-  placeholder?: string
-  /** 形态：默认 text；track = 音轨号/总数对；file = 只读文件名行。 */
-  kind?: 'text' | 'track' | 'file'
-}>()
+const props = withDefaults(
+  defineProps<{
+    /** 字段标签（如「歌名」「音轨号」）。 */
+    label: string
+    /** 字段 key（绑 current[key]）；`file`/`track` 形态可缺省。 */
+    field?: 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'genre'
+    /** 输入框占位符。 */
+    placeholder?: string
+    /** 形态：默认 text；track = 音轨号/总数对；file = 只读文件名行。 */
+    kind?: 'text' | 'track' | 'file'
+  }>(),
+  {
+    /** 普通字段行（歌名/作者/专辑/专辑作者/年份/流派）不传 kind → 默认 text 输入框。 */
+    kind: 'text',
+  },
+)
 
 /** 当前编辑中歌曲（可能为 null，表单只在 current 非空时渲染）。 */
 const current = computed(() => songStore.current)

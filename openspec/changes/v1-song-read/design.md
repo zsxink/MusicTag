@@ -148,6 +148,7 @@ interface SongEditor {
 
 - **`dirty`**：`computed(() => 字段逐项对比)`；`current === null || original === null` → false（「打开即干净」场景）。对比字段 = 全部 10 个可编辑字段（`title`/`artist`/`album`/`album_artist`/`track`/`track_total`/`year`/`genre`/`lyrics`/`cover`）；`path`/`lyrics_source` 不参与 dirty 判定（不可编辑元数据）。
 - **`open(path)` action**：`invoke('open_song', { path })` → 成功则 `current = original = song`、`readonly = false`；失败（Err）则 `current = original = null`、`readonly = true`（表单显示只读提示，不进入编辑态）。
+- **并发守卫（乱序防护）**：快速连点 A→B 时两个 `open_song` IPC 响应可能乱序（慢响应后到）。`open()` 在 `await loadSong(path)` 返回后校验 `raw.selectedPath === path`，不一致则丢弃该响应（成功与错误都丢弃）——`selectSong` 在调用 `open()` 前已设 `selectedPath`，故过期响应不会覆盖新选中，防「表单显示旧歌、列表高亮新行」错位。
 - **切歌确认**：dirty 时切歌弹窗由 `v1-ux-settings` 统一实现；本变更只保证 store 持有 `dirty` 状态与选中联动。**行为底线**：本变更切歌不弹窗（spec 未要求），直接替换 current/original，`dirty` 随 computed 自动归零。
 - **store 保持单文件**：`selectSong` 已在（左栏点击设 `selectedPath`）；本变更在 `selectSong` 内追加 `open()` 调用（或由 SongRow 的 click handler 编排，见任务 2.8）。
 

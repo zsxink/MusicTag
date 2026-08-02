@@ -125,15 +125,21 @@ const raw = reactive<SongEditor>({
  * Err（坏标签）→ current/original=null、readonly=true（表单只读禁用，spec「坏标签只读」）。
  *
  * IPC 依赖以 `loadSong` 参数注入（仿 `activateFolder`），便于测试不依赖 Tauri。
+ *
+ * 并发守卫：快速连点 A→B 时，两个 `open_song` IPC 响应可能乱序（慢响应后到）。响应到达后
+ * 校验 `selectedPath` 仍是本次请求的 path，不是则丢弃（过期响应/过期错误均不得覆盖新选中，
+ * 防表单显示旧歌而列表高亮新行的错位）。selectSong 在调用 open() 前已设 `selectedPath`。
  */
 export async function open(path: string, loadSong: (path: string) => Promise<Song>): Promise<void> {
   try {
     const song = await loadSong(path)
+    if (raw.selectedPath !== path) return // 已切歌/换目录，丢弃过期成功响应
     raw.original = { ...song }
     raw.current = { ...song }
     raw.readonly = false
     raw.lyricsSource = song.lyrics_source
   } catch {
+    if (raw.selectedPath !== path) return // 过期错误同样丢弃，不误设只读
     // open_song 读标签失败（损坏/结构错）→ 只读表单，能看不能改、不能保存
     raw.current = null
     raw.original = null
