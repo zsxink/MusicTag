@@ -88,22 +88,20 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 ### ④ 结果处理
 | Workflow 返回 | 处理 |
 |--------------|------|
-| `success` | 进 ⑤ 归档（由外层 Leader 执行受控集成步骤） |
+| `success` | 已含集成结果（workflow ⑦ 派 leader 完成归档/PR/合并），向用户汇报 |
 | `verify_failed` / `test_failed` | 打回开发修复，重跑 Workflow（可续跑） |
+| `integration_failed` | 集成（归档/PR/合并）未完成：检查 `integration` 字段原因，修复后重跑或人工介入 |
 | `suspended` | **停下上报用户**：CR 三轮未通过，列各轮问题，请用户决策 |
 | `failed` | 停下报告失败原因与阶段 |
 
-### ⑤ 归档（规格随 PR 一起合回）
-- `/opsx:archive <name>` 归档变更、更新主规格（`openspec/specs/`）。
-- **在分支上执行**：归档产生的规格改动随分支提交，与代码一起进 PR，合并后主规格原子更新。
+### ⑤–⑦ 归档/PR/合并（派 `leader` subagent 执行）
+Workflow `success` 后，**派 `leader` subagent** 依次执行受控集成，主会话不直接跑这些 git/gh 命令：
 
-### ⑥ 提交 PR（git）
-- **Issue 驱动**：开发提交用 `feat(<issue>): <任务>`；合并前处理 main 上可能的冲突提交（rebase 或人工）。
-- `git push -u origin <name>` → `gh pr create --base main --head <name> --body "Closes #<issue>"`（有对应 Issue 时）。
+1. **归档**：`/opsx:archive <name>` 归档变更、更新主规格（`openspec/specs/`）。**在分支上执行**——归档产生的规格改动随分支提交，与代码一起进 PR，合并后主规格原子更新。
+2. **提交 PR**（Issue 驱动）：`git push -u origin <name>` → `gh pr create --base main --head <name> --body "Closes #<issue>"`（有对应 Issue 时）。
+3. **等 CI required checks 通过** → 合并：`gh pr merge <name> --squash` 合回 main，关联 Issue 自动关闭；`git branch -d <name>` 清理已合并分支。
 
-### ⑦ 合并 PR
-- `gh pr merge <name> --squash` 合回 main，关联 Issue 自动关闭。
-- `git branch -d <name>` 清理已合并分支。
+`leader` subagent 执行完毕后报告合并结果、分支清理、主规格变更，主会话据此向用户汇报。
 
 ## 确认点
 
@@ -121,6 +119,7 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 - **归档必须先于提交 PR**：规格更新与代码同进 PR，合并后主规格即最新。
 - 不在 main 上直接开发；merge PR 是回到 main 的唯一方式。
 - Workflow 的 `success` 仅表示质量门通过；Leader 必须归档、创建 PR、确认 CI required checks 后合并并写 checkpoint。
+- **集成派 subagent**：⑤–⑦ 的归档/PR/合并/分支清理必须由 `leader` subagent 执行；主会话不直接跑这些 git/gh 命令（只做编排与上报）。
 - **CR 只读**：审查代理不 Edit/Write 代码；问题经 Leader 中转，由开发角色修复。
 - **CR 三轮未通过即挂起**，不无限重试。
 - 未写失败测试就实现 = 违规。规格改前先改文档。

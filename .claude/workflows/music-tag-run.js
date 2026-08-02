@@ -1,6 +1,6 @@
 export const meta = {
   name: 'music-tag-run',
-  description: 'MusicTag 全自动开发流水线：前置校验→架构设计→开发→测试→CR(三轮打回)→验证',
+  description: 'MusicTag 全自动开发流水线：前置校验→架构设计→开发→测试→CR(三轮打回)→验证→集成(归档/PR/合并)',
   phases: [
     { title: '前置校验', detail: '分支、工作区与 OpenSpec artifacts 必须就绪' },
     { title: '架构设计', detail: 'Architect 细化已批准设计，判定变更域' },
@@ -8,6 +8,7 @@ export const meta = {
     { title: '测试', detail: '覆盖审计、补测试与冒烟' },
     { title: 'CR', detail: '只读审查，问题定向打回开发角色' },
     { title: '验证', detail: 'cargo/npm/openspec 全绿判定' },
+    { title: '集成', detail: 'leader 执行归档/PR/等CI/合并/分支清理' },
   ],
 }
 
@@ -220,4 +221,29 @@ if (!verify?.pass || verify.steps.some((step) => step.status !== 'pass')) {
   return { status: 'verify_failed', stage: 'verify', verify, reason: '最终验证存在失败项' }
 }
 
-return { status: 'success', change: CHANGE, domain, architect, dev: devResults, tester, cr: { rounds, result: crResult }, verify }
+// ---------- ⑦ 集成（leader 执行归档/PR/等CI/合并/分支清理） ----------
+phase('集成')
+const INTEGRATION_SCHEMA = {
+  type: 'object',
+  properties: {
+    archived: { type: 'boolean' },
+    prUrl: { type: 'string' },
+    merged: { type: 'boolean' },
+    summary: { type: 'string' },
+  },
+  required: ['archived', 'prUrl', 'merged', 'summary'],
+}
+const integration = await agent(
+  `你是流水线 Leader。变更「${CHANGE}」已通过验证，现在执行受控集成（按 pipe skill ⑤–⑦）：
+1. 归档：/opsx:archive ${CHANGE}（在分支上执行，规格改动随分支提交）
+2. 提交 PR：git push -u origin ${CHANGE} → gh pr create --base main --head ${CHANGE} --title "feat(${CHANGE}): <变更摘要>" --body "Closes #<issue>"（Issue 号从 openspec/changes/${CHANGE}/proposal.md 的「关联 Issue」段取，若无则省略 Closes）
+3. 等 CI required checks 通过 → gh pr merge ${CHANGE} --squash
+4. git branch -d ${CHANGE} 清理分支
+全部完成返回 archived=true、prUrl、merged=true、summary；任何一步失败返回 merged=false 并附失败原因。`,
+  { agentType: 'leader', schema: INTEGRATION_SCHEMA, phase: '集成', label: 'integrate' }
+)
+if (!integration?.merged) {
+  return { status: 'integration_failed', stage: 'integrate', integration, reason: '集成（归档/PR/合并）未完成' }
+}
+
+return { status: 'success', change: CHANGE, domain, architect, dev: devResults, tester, cr: { rounds, result: crResult }, verify, integration }
