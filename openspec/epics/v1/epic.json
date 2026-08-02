@@ -6,7 +6,7 @@
   "epicIssue": 5,
   "items": [
     { "name": "v1-skeleton-tauri", "issue": 6, "domain": "both", "dependsOn": [], "status": "done", "implementationCommit": "1104eb5", "slice": "FR-1 前置 · design §10.1/§7" },
-    { "name": "v1-folder-list", "issue": 7, "domain": "both", "dependsOn": ["v1-skeleton-tauri"], "status": "todo", "implementationCommit": null, "slice": "FR-1.1–5 / FR-2 / §10.3" },
+    { "name": "v1-folder-list", "issue": 7, "domain": "both", "dependsOn": ["v1-skeleton-tauri"], "status": "done", "implementationCommit": "9dd6ad7", "slice": "FR-1.1–5 / FR-2 / §10.3" },
     { "name": "v1-song-read", "issue": 8, "domain": "both", "dependsOn": ["v1-folder-list"], "status": "todo", "implementationCommit": null, "slice": "FR-3 / FR-2a / FR-5.1/F-5.7" },
     { "name": "v1-song-save", "issue": 9, "domain": "both", "dependsOn": ["v1-song-read"], "status": "todo", "implementationCommit": null, "slice": "FR-5 / FR-3.2 / §5.1/.2 / §10.3" },
     { "name": "v1-cover-embed", "issue": 10, "domain": "both", "dependsOn": ["v1-song-save"], "status": "todo", "implementationCommit": null, "slice": "FR-3.5 / FR-5.2 / §5.3 / NFR" },
@@ -16,7 +16,7 @@
     { "name": "v1-search-backend", "issue": 14, "domain": "backend", "dependsOn": ["v1-song-read", "v1-cover-embed"], "status": "todo", "implementationCommit": null, "slice": "FR-8.5/6/8a · §7" },
     { "name": "v1-search-ui", "issue": 15, "domain": "frontend", "dependsOn": ["v1-search-backend", "v1-lyrics-lrc", "v1-cover-embed"], "status": "todo", "implementationCommit": null, "slice": "FR-8 / §9 / §6.3-6.6" }
   ],
-  "cursor": 1,
+  "cursor": 2,
   "error": null,
   "sourceRevision": "5b758b48f056941fec5838094f1f754efd12db88"
 }
