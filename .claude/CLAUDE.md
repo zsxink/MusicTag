@@ -86,8 +86,9 @@ cargo fmt            # 格式化
 ## GitHub（远程 + Issue 驱动）
 
 - **远程仓库**：`git@github.com:zsxink/MusicTag.git`（SSH）。`git init` 后 `git remote add origin git@github.com:zsxink/MusicTag.git`。
-- **Issue 驱动**：需求/变更建议优先提 GitHub Issue；`/pipe` 支持从 Issue 号或 Issue 链接出发。
+- **Issue 驱动（变更前必建）**：任何变更（新功能/规格/修复）**动手前必须先建 GitHub Issue** 作为锚点；`/pipe` 支持从 Issue 号或 Issue 链接出发。无 Issue 不进入开发。
 - **Issue 关联**：变更分支用 `feat(<issue>): <任务>` 提交；PR 描述引用 `Closes #<issue>`，PR 合并即自动关闭对应 Issue。
+- **Epic 的 Issue**：`/pipe:init` 拆分子变更时，先建 1 个总 Epic Issue + 每子变更一个 Issue，子 Issue 引用 Epic Issue 号；子变更实施时按 Issue 号关联。
 - **PR 基分支**：一律 `--base main`。
 - `gh` CLI 已白名单（`gh:*`）。
 

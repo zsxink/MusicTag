@@ -37,6 +37,7 @@
 
 - **2026-08-02**：`/pipe:init` 展示 10 项子变更清单，用户选择「确认，按此拆分」。总 PRD 批准，`prdConfirmed=true`，`status=ready`。
 - `sourceRevision` = 批准时 main 的 commit：`5b758b4`。
+- **Issue 关联（2026-08-02 补建）**：Epic 总 Issue = `#5`；各子变更 Issue = `#6`~`#15`（对应 `epic.json` items 的 `issue` 字段）。实施时分支提交用 `feat(<issue>): ...`、PR `Closes #<issue>`。
 
 ## Artifact 校验结果
 

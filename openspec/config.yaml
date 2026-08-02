@@ -30,9 +30,13 @@ context: |
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
 rules:
+  all:
+    - Issue 驱动：任何变更（新功能/规格/修复）开始前必须先建 GitHub Issue 作为锚点；分支提交用 `feat(<issue>): <任务>`；PR 描述引用 `Closes #<issue>`（合并即自动关闭对应 Issue）
+    - Epic 拆分（pipe:init）：先建 1 个总 Epic Issue + 每子变更一个 Issue，子 Issue 引用 Epic Issue 号
   proposal:
     - 先读 docs/V1-PRD.md / docs/design/design.md，判断是否与已拍板决策冲突
     - 一次一首边界：涉及批量能力的提议需明确标注为 V2，V1 不做
+    - proposal 必须关联一个已创建的 GitHub Issue 号（无 Issue 不进入开发）
   specs:
     - 每条 requirement 的 scenario 用 WHEN/THEN 格式，可转化为测试用例
     - 涉及标签写入的规范必须写明 MP3/FLAC 各自的帧与版本
