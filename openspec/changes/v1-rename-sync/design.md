@@ -17,7 +17,7 @@
 
 - **改名原子性**：先检测目标存在性（音频 `new_path` 与 `new_lrc_path` 均不存在才继续），再 `std::fs::rename`。**禁止** `std::fs::rename` 覆盖已存在文件的行为（FR-4.7：POSIX 覆盖被禁止）——先 `Path::exists()` 检查，存在则返回 Err「目标已存在」。
 - **`.lrc` 同步**：若 `old_lrc = with_extension("lrc")` 存在，且新主干与旧主干不同 → 一并 rename。**纯扩展名变化**：`new_name` 与旧名去扩展名主干相同 → `.lrc` 不 rename（FR-4.6a）。
-- **前端流程**：文件名是独立字段。改名字后保存：先调 `rename_song`（撞名 Err → 顶栏「目标已存在」提示，标签仍写回原路径），成功后才 `save_song` 写新路径标签。切歌/换目录重置文件名改动。
+- **前端流程**：文件名是独立字段。改名字后保存：先调 `rename_song`——**改名成功**则 `current.path` 更新为新路径，再 `save_song` 写新路径标签；**改名失败（撞名 Err）**则顶栏提示「目标已存在」，标签仍写回**原路径**（改名被拒不影响保存），用户换名重试。切歌/换目录重置文件名改动。
 - **重命名后路径更新**：store 的 current.path / 列表项 path 同步为新路径，后续保存写新路径。
 
 ## Risks / Trade-offs

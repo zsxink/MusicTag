@@ -7,7 +7,7 @@
 - 封面区支持**点击选择图片**（系统文件选择器，`rfd` 文件对话框）与**拖拽嵌入**（前端 dragover/drop）。
 - 嵌入前压缩：图片 >5MB 自动等比缩至 ≤2048×2048（`image` crate），避免元数据膨胀。
 - **统一封面路径**：本地选择 / 网络下载（后续 `v1-search-backend`）统一为「获得 bytes → 封面区」，`save_song` 统一嵌入；封面区预览的就是压缩后小图，原图丢弃，进标签的是 ≤2048 压缩图。
-- 新增 Rust command `embed_cover(bytes, mime)` 相关处理归入保存通道，封面区预览状态由前端管理。
+- 新增 Rust command `pick_cover_file()`（`rfd` 文件对话框，返回图片 bytes + mime）；封面统一走「获得 bytes → 封面区 → `save_song` 嵌入」通道，**无独立 `embed_cover` command**（design.md §10.3 已定）；封面区预览状态由前端管理。
 
 ## Capabilities
 

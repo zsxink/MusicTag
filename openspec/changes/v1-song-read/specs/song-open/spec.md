@@ -29,6 +29,17 @@ store SHALL 持有 `current`（编辑中）/`original`（打开时快照），`d
 - **WHEN** `open_song` 对损坏标签文件读取失败
 - **THEN** 表单只读禁用，展示「标签损坏，只读」提示，不进入可编辑状态
 
+### Requirement: 编辑表单两列布局
+编辑表单 SHALL 采用两列布局：左列字段区、右列封面区（1:1 封面区），对应 design.md 的字段网格 `1fr 200px`。
+
+#### Scenario: 两列渲染
+- **WHEN** 选中歌曲渲染编辑表单
+- **THEN** 左列展示字段（歌名/作者/专辑/专辑作者/音轨号/年份/流派/文件名），右列展示 1:1 封面区
+
+#### Scenario: 封面区占位
+- **WHEN** 歌曲无封面
+- **THEN** 右列封面区显示空态占位（虚线框 + 提示）
+
 ### Requirement: 封面以 base64 data URL 传输
 `Song.cover` SHALL 在 IPC 边界序列化为 base64 data URL（`data:image/<mime>;base64,...`），前端 `<img :src>` 直接用。
 
