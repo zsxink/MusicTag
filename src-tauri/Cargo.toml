@@ -1,0 +1,19 @@
+[package]
+name = "music-tag"
+version = "0.1.0"
+description = "MusicTag — 一次一首给本地裸 FLAC/MP3 补全元数据"
+authors = ["xian"]
+edition = "2021"
+
+# mobile 兼容模板形态：lib 目标供 main.rs 调用 run()（与 create-tauri-app 等价）
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
