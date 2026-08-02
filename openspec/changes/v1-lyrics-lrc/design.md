@@ -17,7 +17,7 @@
 
 - **侧载路径**：`Path::with_extension("lrc")` 同目录同名（音频去扩展名）。读取时：内嵌非空 → Embedded；否则若 `.lrc` 存在 → SidecarLrc 读其文本；否则 None。此判定增强 `v1-song-read` 的 `lyrics_source`。
 - **`.lrc` 文件命名**：音频文件去扩展名同名、同目录（PRD §5.4）。
-- **写 `.lrc`**：`save_song` 中歌词写回逻辑扩展——若勾选 `exportLrc` 且歌词非空 → 写 `.lrc`；歌词为空则忽略复选框不生成空文件（FR-4.4a）。复选框状态作为 `Song` 外的保存参数传入（不污染 tag 结构），或放 `Song.export_lrc` 标志。
+- **写 `.lrc`**：`save_song` 中歌词写回逻辑扩展——若勾选 `exportLrc` 且歌词非空 → 写 `.lrc`；歌词为空则忽略复选框不生成空文件（FR-4.4a）。**复选框状态作为 `save_song(song, export_lrc: bool)` 的独立参数**传入（不污染 `Song` 的 tag 结构、不改 `Song` 主契约），避免向 `Song` struct 增加与标签无关的字段。
 - **并存同步**：内嵌与 `.lrc` 都写当前歌词文本（FR-4.5）。
 - **badge 文案**：`来源: 内嵌标签` / `来源: 侧载 .lrc` / `来源: 无`（design.md §6.1 歌词 badge 胶囊样式）。
 - **UI**：`LyricPanel` head 行 = 来源 badge + 「同时保存为 .lrc」复选框；下方 textarea 等宽 mono（12.5px）。
