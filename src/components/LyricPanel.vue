@@ -8,6 +8,9 @@
 // - 候选区（D8）：searching → 「搜索中…」+ 转圈（后台异步不阻塞编辑）；done 有候选 → 候选条列表；
 //   done 无 → 空态；C2 全源取词失败（lyricFetchEmpty）→ 「未找到匹配的歌词，可手动粘贴」；
 //   离线（isOffline && idle）→ 「离线：仅手动填写」。
+// - 渲染优先级（CR C2）：`lyricFetchEmpty` 分支必须**先于** done 分支——真实流程里
+//   pickLyricCandidate 全源失败置 lyricFetchEmpty 时 `lyricSearchState` 仍是 'done'、候选仍在，
+//   若空态分支排在 done 之后则永远不可达。manualSearch 清 lyricFetchEmpty，新搜索不残留旧空态。
 // 分层：组件不直呼 invoke（store 动作注入 api/search 默认），零 invoke 直呼（layering 守卫）。
 import { computed } from 'vue'
 
@@ -62,6 +65,9 @@ const canSearch = computed(() => !songStore.readonly && songStore.current !== nu
     <div v-if="songStore.lyricSearchState === 'searching'" class="cand-status">
       搜索中…<span class="spinner" aria-hidden="true"></span>
     </div>
+    <!-- C2 全源取词失败（lyricFetchEmpty）须先于 done 分支：pickLyricCandidate 置它时 state 仍是
+         'done'，排在 done 之后会被候选列表遮蔽（CR C2）。manualSearch 会清 lyricFetchEmpty。 -->
+    <div v-else-if="songStore.lyricFetchEmpty" class="cand-empty">未找到匹配的歌词，可手动粘贴</div>
     <template v-else-if="songStore.lyricSearchState === 'done'">
       <div v-if="songStore.lyricCandidates.length" class="cand-list">
         <LyricCandidate
@@ -72,7 +78,6 @@ const canSearch = computed(() => !songStore.readonly && songStore.current !== nu
       </div>
       <div v-else class="cand-empty">未找到匹配的歌词，可手动粘贴</div>
     </template>
-    <div v-else-if="songStore.lyricFetchEmpty" class="cand-empty">未找到匹配的歌词，可手动粘贴</div>
     <div v-else-if="songStore.isOffline" class="cand-empty">离线：仅手动填写</div>
 
     <textarea

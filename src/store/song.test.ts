@@ -1077,6 +1077,31 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       expect(songStore.searchedThisSong).toBe(true) // 判定一次仍置位（flag 不重算）
     })
 
+    it('不自动覆盖（spec 候选点选写入）：候选展示时未点选 → 不改变 current 的歌词/封面内容', async () => {
+      // 已有歌词（内嵌）→ 只搜封面；候选展示但未点选 → current.lyrics/cover 不被覆盖
+      songStore.current!.lyrics = '[00:00.00] 已有'
+      songStore.current!.lyrics_source = 'embedded'
+      songStore.original!.lyrics = '[00:00.00] 已有' // 与 current 一致 → dirty=false 基准
+      songStore.original!.lyrics_source = 'embedded'
+      songStore.lyricsSource = 'embedded'
+      songStore.current!.cover = null
+      const searchSongs = vi.fn(async () =>
+        result([
+          makeCand({ cover_url: 'https://x/1.jpg' }),
+          makeCand({ source: 'qqmusic', id: 'q1', cover_url: 'https://q/1.jpg' }),
+        ]),
+      )
+
+      await autoSearchOnSelect(searchSongs)
+
+      expect(songStore.coverSearchState).toBe('done')
+      expect(songStore.coverCandidates).toHaveLength(2) // 候选仅展示
+      expect(songStore.lyricSearchState).toBe('idle') // 歌词已有不搜
+      expect(songStore.current!.lyrics).toBe('[00:00.00] 已有') // 未点选 → 不覆盖歌词
+      expect(songStore.current!.cover).toBeNull() // 未点选 → 不写入封面
+      expect(songStore.dirty).toBe(false) // 内容未变
+    })
+
     it('删除内容后不重搜（FR-8.4）：searchedThisSong 置位后再次调用 → 直接 return', async () => {
       songStore.current!.cover = 'data:image/jpeg;base64,AAA'
       const searchSongs = vi.fn(async () => result([makeCand()]))
@@ -1108,6 +1133,29 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
 
       expect(songStore.isOffline).toBe(true)
       expect(songStore.lyricSearchState).toBe('idle')
+    })
+
+    it('裸文件（title 空，FR-8.13）：不自动搜、不标离线（CR：空 title 无后端短路，会白发空搜索 + 误判整会话离线）', async () => {
+      songStore.current!.title = ''
+      const searchSongs = vi.fn(async () =>
+        result([], [['netease', 0], ['qqmusic', 0], ['migu', 0]]),
+      )
+
+      await autoSearchOnSelect(searchSongs)
+
+      expect(searchSongs).not.toHaveBeenCalled() // 不白发必为空的 3 源搜索
+      expect(songStore.isOffline).toBe(false) // 不误判离线（sticky 至重启）
+      expect(songStore.lyricSearchState).toBe('idle')
+      expect(songStore.coverSearchState).toBe('idle')
+      expect(songStore.searchedThisSong).toBe(false) // 尚未「判定过」，与其它前置守卫同语义
+    })
+
+    it('裸文件守卫为前置：title 全空格同样跳过（trim 判定）', async () => {
+      songStore.current!.title = '   '
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+      await autoSearchOnSelect(searchSongs)
+      expect(searchSongs).not.toHaveBeenCalled()
+      expect(songStore.searchedThisSong).toBe(false)
     })
 
     it('离线后不再自动搜：isOffline=true 时后续调用直接 return（只留手动按钮）', async () => {
@@ -1303,6 +1351,24 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       expect(songStore.lyricCandidates).toEqual([])
       expect(songStore.lyricSearchState).toBe('done')
       expect(songStore.isOffline).toBe(false) // 不标离线
+    })
+
+    it('搜歌词清 lyricFetchEmpty（CR C2）：新搜索作废上次 C2 全源失败空态，不遮蔽新候选', async () => {
+      songStore.lyricFetchEmpty = true // 上次 C2 全源失败残留
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+
+      await manualSearch('lyrics', searchSongs)
+
+      expect(songStore.lyricFetchEmpty).toBe(false)
+      expect(songStore.lyricCandidates).toHaveLength(1) // 新候选正常展示
+    })
+
+    it('搜封面不动 lyricFetchEmpty（只清对应 kind 的歌词空态）', async () => {
+      songStore.lyricFetchEmpty = true
+      const searchSongs = vi.fn(async () => result([makeCand({ cover_url: 'https://x/1.jpg' })]))
+      await manualSearch('cover', searchSongs)
+      expect(songStore.lyricFetchEmpty).toBe(true) // 封面搜索不影响歌词 C2 空态
+      expect(songStore.coverCandidates).toHaveLength(1)
     })
 
     it('readonly → 不搜', async () => {

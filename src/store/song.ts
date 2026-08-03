@@ -343,12 +343,19 @@ function resetSearchState(): void {
  * resolve 后 `allEmpty`（songs 空 && source_stats 全 0）→ `isOffline=true`（会话级、sticky，
  * 仅自动搜索判定 D3）；IPC reject 按全源失败同样标记（防御）。搜索态归 idle →
  * 候选区显示「离线：仅手动填写」。IPC 依赖以 `searchSongs` 注入（默认 api/search.ts，测试注入桩）。
+ *
+ * 裸文件守卫（CR：避免离线误判）：`title.trim() === ''` 直接 return——后端 `search_song`
+ * 对空 title 无短路守卫（source_stats 记原始候选条数，空关键字三源很可能全 0 → allEmpty →
+ * 误判整会话离线，D3 sticky 至重启），且每次选中都白发一次必为空的 3 源并发搜索。D1 设计
+ * 明确此类应走手动按钮（FR-8.13：填歌名后手动搜）。故裸文件不自动搜、也不置 `searchedThisSong`
+ * （尚未「判定过」，与 null/readonly/offline 守卫同为前置守卫语义）。
  */
 export async function autoSearchOnSelect(
   searchSongs: (title: string, artist: string) => Promise<SearchResult> = defaultSearchSongs,
 ): Promise<void> {
   const cur = raw.current
   if (cur === null || raw.readonly || raw.searchedThisSong || raw.isOffline) return
+  if (cur.title.trim() === '') return // 裸文件（title 空，FR-8.13）：不自动搜，避免空搜索 + 离线误判；填歌名后走手动按钮
   raw.searchedThisSong = true // 本首已判定过（删除内容后 flag 不重算，切歌才清零）
   const needLyrics = cur.lyrics === '' && raw.lyricsSource !== 'sidecar'
   const needCover = cur.cover === null
@@ -385,6 +392,8 @@ export async function autoSearchOnSelect(
  * 手动搜索按钮（D7）：无视离线 / 缺失判定，用户主动发起即刷新对应 kind 候选。
  * `searchState` 各自 searching → done；手动搜索失败不标离线（D3 仅自动搜索判定），
  * 空候选 + done → 候选区空态（cand-empty）。readonly / 无歌时禁用（组件守卫，双保险）。
+ * 搜歌词时清 `lyricFetchEmpty`（CR C2）：新搜索作废上次 C2 全源失败空态，否则残留旧
+ * 空态会遮蔽本次返回的新候选（模板 lyricFetchEmpty 分支优先于 done 候选列表）。
  */
 export async function manualSearch(
   kind: 'lyrics' | 'cover',
@@ -393,8 +402,10 @@ export async function manualSearch(
   const cur = raw.current
   if (cur === null || raw.readonly) return
   const mySeq = ++raw.searchSeq // 并发守卫：搜索中重复点按钮重搜 → 旧结果作废
-  if (kind === 'lyrics') raw.lyricSearchState = 'searching'
-  else raw.coverSearchState = 'searching'
+  if (kind === 'lyrics') {
+    raw.lyricSearchState = 'searching'
+    raw.lyricFetchEmpty = false // 新搜索作废上次 C2 全源失败空态（避免残留旧空态遮蔽新候选）
+  } else raw.coverSearchState = 'searching'
   try {
     const result = await searchSongs(cur.title, cur.artist)
     if (mySeq !== raw.searchSeq) return

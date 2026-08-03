@@ -184,6 +184,8 @@ describe('LyricPanel — 歌词候选区（v1-search-ui D8：status/列表/空�
     expect(status.exists()).toBe(true)
     expect(status.text()).toContain('搜索中…')
     expect(status.find('.spinner').exists()).toBe(true)
+    // spec「后台异步不阻塞编辑」：搜索中 textarea 仍可编辑（仅 readonly 才禁用）
+    expect((w.find('textarea.lyrics-box').element as HTMLTextAreaElement).disabled).toBe(false)
   })
 
   it('done 有候选 → 候选条列表（来源标签 + 歌名 — 作者，design §6.5）', () => {
@@ -228,6 +230,50 @@ describe('LyricPanel — 歌词候选区（v1-search-ui D8：status/列表/空�
     songStore.lyricFetchEmpty = true
     const w = mount(LyricPanel)
     expect(w.find('.cand-empty').text()).toBe('未找到匹配的歌词，可手动粘贴')
+  })
+
+  it('C2 真实流程空态（CR）：state=done + 候选仍在 + lyricFetchEmpty=true → 空态优先于候选列表', () => {
+    // 真实流程：autoSearch 置 done 且填满候选 → 点选候选 → pickLyricCandidate 全源失败
+    // 置 lyricFetchEmpty=true（state 仍是 'done'、候选仍在）。lyricFetchEmpty 分支必须先于 done 分支。
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand({ source: 'netease', id: 'n1' })]
+    songStore.lyricFetchEmpty = true
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-list').exists()).toBe(false) // 候选列表被空态遮蔽
+    expect(w.find('.cand-empty').text()).toBe('未找到匹配的歌词，可手动粘贴')
+  })
+
+  it('undo 清 lyricFetchEmpty → 候选列表恢复可重选（D5：候选保留仍是当前歌）', () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand({ source: 'netease', id: 'n1' })]
+    songStore.lyricFetchEmpty = true
+    const w1 = mount(LyricPanel)
+    expect(w1.find('.cand-list').exists()).toBe(false) // 空态遮蔽候选
+
+    songStore.lyricFetchEmpty = false // undo 语义（store undo 置 false、候选保留）
+    const w2 = mount(LyricPanel)
+    expect(w2.find('.cand-list').exists()).toBe(true) // 候选恢复可重选
+  })
+
+  it('手动搜索清 lyricFetchEmpty（CR）：新搜索后旧 C2 空态不遮蔽新候选', async () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    songStore.lyricFetchEmpty = true // 上次 C2 全源失败残留
+    mockSearchSongs.mockResolvedValue({
+      songs: [makeCand()],
+      source_stats: [
+        ['netease', 1],
+        ['qqmusic', 0],
+        ['migu', 0],
+      ],
+    })
+
+    const w = mount(LyricPanel)
+    await w.find('.search-trigger').trigger('click')
+    await flushPromises()
+
+    expect(songStore.lyricFetchEmpty).toBe(false) // 新搜索作废旧空态
+    expect(w.find('.cand-list').exists()).toBe(true) // 新候选展示，不残留旧空态
   })
 
   it('isOffline && idle → 「离线：仅手动填写」（候选区不出现，只留手动按钮）', () => {
