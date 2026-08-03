@@ -2,9 +2,21 @@
 // 只从 songStore 派生展示数据，不持有/修改状态。
 import { computed } from 'vue'
 
-import type { SongSummary } from '../api/types'
+import type { MusicSourceId, SongSummary } from '../api/types'
 import { fileName, fileNameStem } from '../lib/path'
 import { songStore } from './song'
+
+/** 音乐来源平台展示文案（候选来源标签 / badge 平台来源，design §6.4/6.5）。 */
+export function sourceLabel(source: MusicSourceId): string {
+  switch (source) {
+    case 'netease':
+      return '网易云'
+    case 'qqmusic':
+      return 'QQ音乐'
+    case 'migu':
+      return '咪咕'
+  }
+}
 
 /** 行内歌名：title trim 空 → 回退文件名（去扩展名）。 */
 export function titleText(sum: SongSummary): string {

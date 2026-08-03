@@ -1,15 +1,25 @@
 <script setup lang="ts">
-// 歌词区（design.md §5 lyrics）：head 行（来源 badge + 搜索歌词占位）+ 等宽 textarea。
-// - 来源 badge：内嵌标签 / 无，对应 `lyrics_source`（v1-song-read 只有 embedded/none；
-//   sidecar 由 v1-lyrics-lrc 补充）。
-// - textarea 等宽 mono，`lyrics` v-model 绑 current。
-// - 「搜索歌词」按钮占位 disabled（搜索归 v1-search-ui）。
+// 歌词区（design.md §5 lyrics + v1-search-ui D8）：
+// - head 行（来源 badge + 「同时保存为 .lrc」opt-in）+ 等宽 textarea。
+// - 来源 badge：`lyricSourcePlatform` 非 null（点选候选平台）优先 → 「来源: 网易云/QQ音乐/咪咕」，
+//   否则沿用 `lyricsSource` 映射（内嵌标签 / 侧载 .lrc / 无）。
+// - 「搜索歌词」手动按钮（design §6.2，head 与 textarea 之间）：readonly（坏标签只读）/ 无歌禁用；
+//   点击 → store.manualSearch('lyrics')（无视离线 / 缺失判定，随时可发起）。
+// - 候选区（D8）：searching → 「搜索中…」+ 转圈（后台异步不阻塞编辑）；done 有候选 → 候选条列表；
+//   done 无 → 空态；C2 全源取词失败（lyricFetchEmpty）→ 「未找到匹配的歌词，可手动粘贴」；
+//   离线（isOffline && idle）→ 「离线：仅手动填写」。
+// 分层：组件不直呼 invoke（store 动作注入 api/search 默认），零 invoke 直呼（layering 守卫）。
 import { computed } from 'vue'
 
-import { songStore } from '../store/song'
+import { sourceLabel } from '../store/selectors'
+import { manualSearch, songStore } from '../store/song'
+import LyricCandidate from './LyricCandidate.vue'
 
-/** 来源 badge 文案（映射 lyrics_source → 展示文本，design.md D8 对齐 proposal 定稿）。 */
-const sourceText = computed(() => {
+/** 来源 badge 文案（D8：点选候选平台优先，否则 lyrics_source 映射）。 */
+const badgeText = computed(() => {
+  if (songStore.lyricSourcePlatform !== null) {
+    return `来源: ${sourceLabel(songStore.lyricSourcePlatform)}`
+  }
   switch (songStore.lyricsSource) {
     case 'embedded':
       return '来源: 内嵌标签'
@@ -19,13 +29,16 @@ const sourceText = computed(() => {
       return '来源: 无'
   }
 })
+
+/** 「搜索歌词」可用性：readonly（坏标签只读）/ 无歌禁用。 */
+const canSearch = computed(() => !songStore.readonly && songStore.current !== null)
 </script>
 
 <template>
   <section class="lyrics">
     <div class="lyrics-head">
       <span class="label">歌词</span>
-      <span class="badge">{{ sourceText }}</span>
+      <span class="badge">{{ badgeText }}</span>
       <!-- 「同时保存为 .lrc」opt-in（design.md D7）：v-model 绑 store.exportLrc，readonly 禁用 -->
       <label class="export-lrc">
         <input
@@ -37,8 +50,30 @@ const sourceText = computed(() => {
       </label>
     </div>
 
-    <!-- 搜索歌词占位（v1-search-ui 接语义） -->
-    <button class="search-trigger" type="button" disabled>🔍 搜索歌词</button>
+    <!-- 「搜索歌词」手动按钮（design §6.2：head 与 textarea 之间） -->
+    <button
+      class="search-trigger"
+      type="button"
+      :disabled="!canSearch"
+      @click="manualSearch('lyrics')"
+    >🔍 搜索歌词</button>
+
+    <!-- 歌词候选区（D8） -->
+    <div v-if="songStore.lyricSearchState === 'searching'" class="cand-status">
+      搜索中…<span class="spinner" aria-hidden="true"></span>
+    </div>
+    <template v-else-if="songStore.lyricSearchState === 'done'">
+      <div v-if="songStore.lyricCandidates.length" class="cand-list">
+        <LyricCandidate
+          v-for="c in songStore.lyricCandidates"
+          :key="`${c.source}:${c.id}`"
+          :cand="c"
+        />
+      </div>
+      <div v-else class="cand-empty">未找到匹配的歌词，可手动粘贴</div>
+    </template>
+    <div v-else-if="songStore.lyricFetchEmpty" class="cand-empty">未找到匹配的歌词，可手动粘贴</div>
+    <div v-else-if="songStore.isOffline" class="cand-empty">离线：仅手动填写</div>
 
     <textarea
       v-if="songStore.current"
@@ -103,6 +138,7 @@ const sourceText = computed(() => {
   cursor: not-allowed;
 }
 
+/* design §6.2：虚线全宽触发按钮 */
 .search-trigger {
   margin-bottom: 10px;
   width: 100%;
@@ -115,7 +151,7 @@ const sourceText = computed(() => {
   transition: border-color 0.12s, color 0.12s, transform 0.05s;
 }
 
-.search-trigger:hover {
+.search-trigger:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -128,6 +164,48 @@ const sourceText = computed(() => {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+}
+
+/* design §6.3：搜索中状态（居中 dim 文字 + 10×10 转圈） */
+.cand-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 0 10px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* design §6.5：歌词候选列表（每条顶部间距 6px） */
+.cand-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+/* design §6.6：候选空态 */
+.cand-empty {
+  padding: 8px 0 10px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .lyrics-box {

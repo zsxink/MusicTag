@@ -16,11 +16,15 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import { pickCoverFile, readCoverPath } from '../api/songs'
-import { clearCover, setCover, songStore } from '../store/song'
+import { manualSearch, clearCover, setCover, songStore } from '../store/song'
+import CoverCandidate from './CoverCandidate.vue'
 
 const cover = computed(() => songStore.current?.cover ?? null)
 const coverMime = computed(() => songStore.current?.cover_mime ?? null)
 const readonly = computed(() => songStore.readonly)
+
+/** 「搜索封面」可用性：readonly（坏标签只读）/ 无歌禁用。 */
+const canSearch = computed(() => !songStore.readonly && songStore.current !== null)
 
 /** 拖拽中高亮（dragging class：虚线框 hover 琥珀，design §6.1 封面区）。 */
 const dragging = ref(false)
@@ -147,8 +151,30 @@ onBeforeUnmount(() => {
     <!-- 一行 dim 错误提示（非图片/读失败，不污染封面、不弹窗） -->
     <div v-if="errorHint" class="cover-error" role="alert">{{ errorHint }}</div>
 
-    <!-- 搜索封面占位（v1-search-ui 接语义） -->
-    <button class="search-trigger" type="button" disabled>🔍 搜索封面</button>
+    <!-- 「搜索封面」手动按钮（design §6.2：封面框 + 元信息下方） -->
+    <button
+      class="search-trigger"
+      type="button"
+      :disabled="!canSearch"
+      @click="manualSearch('cover')"
+    >🔍 搜索封面</button>
+
+    <!-- 封面候选区（D8）：searching / done 有 → 3×N 网格 / done 无 / 离线 -->
+    <div v-if="songStore.coverSearchState === 'searching'" class="cand-status">
+      搜索中…<span class="spinner" aria-hidden="true"></span>
+    </div>
+    <template v-else-if="songStore.coverSearchState === 'done'">
+      <div v-if="songStore.coverCandidates.length" class="cand-grid">
+        <CoverCandidate
+          v-for="c in songStore.coverCandidates"
+          :key="`${c.source}:${c.id}`"
+          :cand="c"
+        />
+      </div>
+      <div v-else class="cand-empty">未找到匹配的封面</div>
+      <div v-if="songStore.coverCandidates.length" class="cand-hint">点选一张填入预览</div>
+    </template>
+    <div v-else-if="songStore.isOffline" class="cand-empty">离线：仅手动填写</div>
   </div>
 </template>
 
@@ -273,7 +299,7 @@ onBeforeUnmount(() => {
   transition: border-color 0.12s, color 0.12s, transform 0.05s;
 }
 
-.search-trigger:hover {
+.search-trigger:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -286,5 +312,54 @@ onBeforeUnmount(() => {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+}
+
+/* design §6.3：搜索中状态（居中 dim 文字 + 10×10 转圈） */
+.cand-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 0 10px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* design §6.4：3 列网格，间距 6px（每格 1:1 由 CoverCandidate 承载） */
+.cand-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.cand-hint {
+  margin-top: 6px;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+/* design §6.6：候选空态 */
+.cand-empty {
+  padding: 8px 0 10px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 </style>

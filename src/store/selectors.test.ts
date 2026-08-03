@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { SongSummary } from '../api/types'
 import { fileName } from '../lib/path'
-import { artistText, filteredSongs, titleText } from './selectors'
+import { artistText, filteredSongs, sourceLabel, titleText } from './selectors'
 import { songStore } from './song'
 
 const s = (path: string, title = '', artist = ''): SongSummary => ({ path, title, artist })
@@ -59,6 +59,18 @@ describe('store/selectors — 纯展示派生（spec: 搜索过滤 + 文件名�
     it('artist 空白回退文件名去扩展名', () => {
       expect(artistText(s('/a/z.mp3', 't', ' '))).toBe('z')
       expect(artistText(s('/a/z.mp3', 't', ''))).toBe('z')
+    })
+  })
+
+  describe('sourceLabel — 音乐来源平台展示文案（候选来源标签 / badge 平台来源，design §6.4/6.5）', () => {
+    it('netease → 网易云', () => {
+      expect(sourceLabel('netease')).toBe('网易云')
+    })
+    it('qqmusic → QQ音乐', () => {
+      expect(sourceLabel('qqmusic')).toBe('QQ音乐')
+    })
+    it('migu → 咪咕', () => {
+      expect(sourceLabel('migu')).toBe('咪咕')
     })
   })
 })

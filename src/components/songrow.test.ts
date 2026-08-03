@@ -61,6 +61,10 @@ describe('SongRow — select 走 dirty 拦截门（spec: 无修改直接切 / �
   it('干净态点击行 → 直接切歌并 open_song 读全量，不弹窗（spec「无修改直接切」）', async () => {
     mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
       if (cmd === 'open_song') return makeSong((args as { path: string }).path, '第二首')
+      // 选中行触发 autoSearch（v1-search-ui D1）：补 search_song 返回全源 0（离线首响，不阻塞选中）
+      if (cmd === 'search_song') {
+        return { songs: [], source_stats: [['netease', 0], ['qqmusic', 0], ['migu', 0]] }
+      }
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
