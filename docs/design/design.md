@@ -363,6 +363,7 @@ interface SearchResult {
 |---|---|---|
 | v1-cover-embed（封面嵌入） | `service/cover.rs` 扩展（data URL 编解码已在此） | `api/songs.ts` 既有封装 + 组件 |
 | v1-lyrics-lrc（歌词 LRC 读写） | 新增 `service/lyrics.rs` | `api/songs.ts` |
+| v1-rename-sync（文件名改名 + `.lrc` 同步） | 新增 `service/rename.rs`（`.lrc` 路径复用 `service::lyrics::sidecar_lrc_path`） | `api/songs.ts`（`rename_song` 封装） |
 | v1-search-backend（三家并发搜索 + 网易云加密） | 新增 `service/searcher/`（子模块） | — |
 | v1-search-ui（歌词/封面候选 UI） | — | 新增 `api/search.ts`（`search_song` / `fetch_lyric` / `download_cover` 封装） |
 
