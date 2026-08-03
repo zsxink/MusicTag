@@ -1,9 +1,13 @@
 // 单 store（design.md §10.2，不用 Pinia）。v1-folder-list 承载左栏列表状态，
 // v1-song-read 起承载 SongEditor 编辑状态（current/original/dirty/readonly）。
-import { computed, reactive } from 'vue'
+//
+// §10 职责拆分：本文件只留 reactive 状态 + 动作 + dirty getter；
+// 纯工具（fileName/fileNameStem）在 lib/path.ts，纯展示派生（titleText/artistText/filteredSongs）
+// 在 store/selectors.ts，IPC 类型化封装在 api/songs.ts。
+import { reactive } from 'vue'
 
-import { invokeCommand } from '../lib/tauri'
-import type { LyricsSource, Song, SongSummary } from '../lib/tauri'
+import { saveSong as defaultSave } from '../api/songs'
+import type { LyricsSource, Song, SongSummary } from '../api/types'
 
 /** 参与 dirty 判定的可编辑字段（design.md D6：path/lyrics_source 不参与）。 */
 const DIRTY_FIELDS = [
@@ -49,33 +53,10 @@ interface SongEditor {
   saveError: string
 }
 
-/** 取路径最后一段（跨平台兼容 `/` 与 `\` 分隔）。 */
-export function fileName(path: string): string {
-  const i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-  return i >= 0 ? path.slice(i + 1) : path
-}
-
-/** 去扩展名的文件名（空标签回退展示用）。 */
-function fileNameStem(path: string): string {
-  const name = fileName(path)
-  const dot = name.lastIndexOf('.')
-  return dot > 0 ? name.slice(0, dot) : name
-}
-
-/** 行内歌名：title trim 空 → 回退文件名（去扩展名）。 */
-export function titleText(sum: SongSummary): string {
-  return sum.title.trim() !== '' ? sum.title : fileNameStem(sum.path)
-}
-
-/** 行内作者：artist trim 空 → 回退文件名（去扩展名）。 */
-export function artistText(sum: SongSummary): string {
-  return sum.artist.trim() !== '' ? sum.artist : fileNameStem(sum.path)
-}
-
 /**
  * 点击选中一行（spec：点击行 → 该行被选中并高亮）。
  *
- * 传入 `loadSong`（组件侧传 `(path) => invoke('open_song', { path })`）时，选中即触发
+ * 传入 `loadSong`（组件侧传 `api/songs.ts` 的 `openSong`）时，选中即触发
  * `open()` 读全量渲染到编辑表单（spec「选中读取完整标签」）；不传则只设选中高亮
  * （v1-folder-list 遗留场景，测试用）。
  */
@@ -94,7 +75,7 @@ export async function selectSong(
  *
  * 换目录同时重置编辑状态（selectedPath/current/original 归零），不残留上一首
  * 的编辑内容。纯状态编排，IPC 依赖以 `loadSongs` 注入（组件侧传
- * `() => invoke('list_songs',{dir})`），便于测试不依赖 Tauri。
+ * `(dir) => listSongs(dir)`，即 `api/songs.ts` 的 listSongs），便于测试不依赖 Tauri。
  * 目录为 null（用户取消选择）时不改动任何状态。
  */
 export async function activateFolder(
@@ -122,6 +103,7 @@ const raw = reactive<SongEditor>({
   original: null,
   // dirty 为 reactive getter（Vue 3.5 会把 getter 转成 live computed）：
   // 任何 `songStore.dirty` 读取都逐字段对比 current/original，编辑即自动翻转。
+  // **必须原位保留在 reactive 字面量内**——挪出即失去响应式追踪，dirty 不再随编辑更新。
   get dirty() {
     const { current, original } = this
     if (current === null || original === null) return false
@@ -168,8 +150,8 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
 /**
  * 保存当前编辑 = 表单全量覆盖写回原路径（design.md D7 / D9）。
  *
- * IPC 依赖以 `saveFn` 参数注入（仿 open 的 loadSong），组件侧传
- * `(song) => invoke('save_song', { song })`，便于测试不依赖 Tauri。
+ * IPC 依赖以 `saveFn` 参数注入（仿 open 的 loadSong），默认 loader 为 `api/songs.ts`
+ * 的 `saveSong`（经 api/client → invoke），测试可注入自定义 saveFn 不依赖 Tauri。
  *
  * 状态机：`saving` → 成功快照 `original={...current}`（新对比基准，dirty 归 false）
  * + `saveState='saved'`；失败保留 `current`（可重试、dirty 保持 true）+ `saveError`
@@ -177,8 +159,7 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
  * 只读/无歌不执行；保存中禁用再次保存（防连点并发写同一文件）。
  */
 export async function save(
-  saveFn: (song: Song) => Promise<void> = (song) =>
-    invokeCommand('save_song', { song }).then(() => undefined),
+  saveFn: (song: Song) => Promise<void> = defaultSave,
 ): Promise<void> {
   if (raw.readonly || raw.current === null) return
   raw.saveState = 'saving'
@@ -205,16 +186,3 @@ export async function undo(): Promise<void> {
 
 /** 只读封装 store（避免组件直接改整个对象；字段仍可单独赋值）。 */
 export const songStore = raw
-
-/** 搜索过滤 + 文件名升序的展示列表（spec：按歌名/作者包含、忽略大小写）。 */
-export const filteredSongs = computed<SongSummary[]>(() => {
-  const q = raw.searchQuery.trim().toLowerCase()
-  const sorted = [...raw.songs].sort((a, b) =>
-    fileName(a.path).localeCompare(fileName(b.path)),
-  )
-  if (q === '') return sorted
-  return sorted.filter(
-    (x) =>
-      x.title.toLowerCase().includes(q) || x.artist.toLowerCase().includes(q),
-  )
-})
