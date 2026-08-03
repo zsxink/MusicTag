@@ -259,16 +259,21 @@ mod tests {
     /// 构造一张可解码的 DDS 图片（DXT1，RGB，`guess_format` 识别为 Dds）。
     ///
     /// 用作「解码成功但重编码失败 → 回退原 bytes」测试素材（D2：DDS 只解码无编码器）。
-    fn tiny_dds_bytes() -> Vec<u8> {
+    /// `w`/`h` 必须是 4 的倍数（image crate DXT1 解码要求，否则参数错误）；数据区为
+    /// `8 × (w/4) × (h/4)` 字节。测试用**一边 >2048** 的大 DDS（如 4096x4）才能绕过
+    /// `compress_cover` 的「小图原样返回」早退，真正走到 `resized.write_to(Dds)` 的
+    /// `Err(_)` 回退分支（CR：小 DDS 属空转测试，回退被改坏仍绿）。
+    fn dds_of_size(w: u32, h: u32) -> Vec<u8> {
+        assert!(w % 4 == 0 && h % 4 == 0, "DDS 宽高须为 4 的倍数，实际 {w}x{h}");
         let mut out = Vec::new();
         out.extend_from_slice(b"DDS ");
         // DDS_HEADER（124 字节，little-endian）
         out.extend_from_slice(&124u32.to_le_bytes()); // dwSize
         let flags: u32 = 0x1 | 0x2 | 0x4 | 0x1000; // CAPS | HEIGHT | WIDTH | PIXELFORMAT
         out.extend_from_slice(&flags.to_le_bytes());
-        out.extend_from_slice(&4u32.to_le_bytes()); // dwHeight
-        out.extend_from_slice(&4u32.to_le_bytes()); // dwWidth
-        out.extend_from_slice(&32u32.to_le_bytes()); // dwPitchOrLinearSize
+        out.extend_from_slice(&h.to_le_bytes()); // dwHeight
+        out.extend_from_slice(&w.to_le_bytes()); // dwWidth
+        out.extend_from_slice(&(8 * (w / 4)).to_le_bytes()); // dwPitchOrLinearSize = 一行 DXT1 压缩块字节数
         out.extend_from_slice(&0u32.to_le_bytes()); // dwDepth
         out.extend_from_slice(&0u32.to_le_bytes()); // dwMipMapCount
         out.extend(std::iter::repeat_n(0u8, 44)); // dwReserved1[11]
@@ -288,9 +293,11 @@ mod tests {
         out.extend_from_slice(&0u32.to_le_bytes());
         out.extend_from_slice(&0u32.to_le_bytes());
         out.extend_from_slice(&0u32.to_le_bytes());
-        // 一个 4x4 DXT1 数据块（8 字节）：color0 < color1 → 4 色表，像素全取第 4 色
-        out.extend_from_slice(&[0x00, 0x00, 0xFF, 0x7F]); // color0=0x0000 color1=0x7FFF
-        out.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]); // 每像素 2bit 全 11
+        // 每个 4x4 DXT1 数据块（8 字节）：color0 < color1 → 4 色表，像素全取第 4 色
+        let block = [0x00, 0x00, 0xFF, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF];
+        for _ in 0..(w / 4) * (h / 4) {
+            out.extend_from_slice(&block);
+        }
         out
     }
 
@@ -380,10 +387,19 @@ mod tests {
 
     #[test]
     fn compress_cover_reencode_failure_falls_back_to_original_bytes() {
-        // 可解码但重编码不支持（DDS 只有解码器）→ 回退原 bytes + 原 mime，静默不阻塞
-        let dds = tiny_dds_bytes();
-        // 先确认素材可解码（前置守卫，防止测试素材本身失效）
-        image::load_from_memory(&dds).expect("DDS 素材应可解码");
+        // 可解码但重编码不支持（DDS 只有解码器）→ 回退原 bytes + 原 mime，静默不阻塞。
+        // 必须用一边 >2048 的大 DDS（4096x4）：触发 resize(2048) → write_to(Dds) 必然 Err
+        // → 断言回退原 bytes。若用 ≤2048 的小 DDS 会走「小图原样返回」早退，回退分支永远
+        // 测不到（CR：原 4x4 素材属空转测试，回退被改坏仍绿）。
+        let dds = dds_of_size(4096, 4);
+        // 前置守卫：素材可解码，且确实触发压缩路径（至少一边 >2048），防止测试素材失效。
+        let img = image::load_from_memory(&dds).expect("DDS 素材应可解码");
+        assert!(
+            img.width() > MAX_DIM || img.height() > MAX_DIM,
+            "素材应至少一边 >2048 才能走到重编码分支，实际 {}x{}",
+            img.width(),
+            img.height()
+        );
         let (out, mime) = compress_cover(&dds, "image/dds").expect("重编码失败应回退而非 Err");
         assert_eq!(out, dds, "重编码失败应回退原 bytes");
         assert_eq!(mime, "image/dds");

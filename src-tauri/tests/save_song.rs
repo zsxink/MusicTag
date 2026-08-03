@@ -345,3 +345,61 @@ fn save_song_embeds_compressed_cover_not_original() {
     );
     assert_ne!(embedded, big, "不得嵌入原大图");
 }
+
+#[test]
+fn save_song_mp3_embeds_compressed_cover_not_original() {
+    // v1-cover-embed spec「统一写盘」的 MP3/APIC 分支：压缩图经 save_song 嵌入 APIC
+    // （FLAC PICTURE 分支由 save_song_embeds_compressed_cover_not_original 覆盖；
+    //  apply_cover 为共享写盘路径，此处验证 APIC 端到端字节一致）。
+    let tmp = TempDir::new().unwrap();
+    write_tagged_mp3(tmp.path(), "cover.mp3", "T", "A");
+    let path = tmp.path().join("cover.mp3").to_string_lossy().into_owned();
+
+    let big = {
+        use std::io::Cursor;
+        let mut buf = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            3000,
+            2000,
+            image::Rgb([12, 34, 56]),
+        ))
+        .write_to(&mut buf, image::ImageFormat::Jpeg)
+        .expect("编码测试 JPEG 失败");
+        buf.into_inner()
+    };
+    let (compressed, mime) =
+        app_lib::service::cover::compress_cover(&big, "image/jpeg").expect("大图应压缩成功");
+    assert_eq!(mime, "image/jpeg");
+    assert_eq!(
+        image::guess_format(&compressed).expect("压缩结果应为 JPEG"),
+        image::ImageFormat::Jpeg
+    );
+    let compressed_img = image::load_from_memory(&compressed).expect("压缩结果应可解码");
+    assert!(
+        compressed_img.width() <= 2048 && compressed_img.height() <= 2048,
+        "压缩后应 ≤2048×2048，实际 {}x{}",
+        compressed_img.width(),
+        compressed_img.height()
+    );
+    assert_ne!(compressed, big, "压缩图不得等于原图");
+
+    let data_url = app_lib::service::cover::encode_data_url(&compressed, "image/jpeg");
+    let mut song = full_song(path.clone());
+    song.cover = Some(data_url);
+    song.cover_mime = Some("image/jpeg".into());
+    app_lib::service::writer::save_song(song).expect("保存应成功");
+
+    let saved = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("保存后应可读");
+    let cover_url = saved.cover.expect("应有 APIC 封面");
+    assert!(cover_url.starts_with("data:image/jpeg;base64,"));
+    let b64 = cover_url.split_once(";base64,").map(|(_, b)| b).unwrap();
+    let embedded = BASE64.decode(b64).unwrap();
+    assert_eq!(embedded, compressed, "MP3 APIC 嵌入的应为压缩图字节（原图丢弃）");
+    let embedded_img = image::load_from_memory(&embedded).expect("嵌入封面应可解码");
+    assert!(
+        embedded_img.width() <= 2048 && embedded_img.height() <= 2048,
+        "MP3 嵌入封面应 ≤2048×2048，实际 {}x{}",
+        embedded_img.width(),
+        embedded_img.height()
+    );
+}
