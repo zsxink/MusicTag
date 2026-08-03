@@ -9,9 +9,16 @@
 // 单文件标签读取失败时返回空串而非报错，保证列表永不因单曲坏标签崩溃。
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use lofty::prelude::{Accessor, TaggedFileExt};
+use lofty::config::WriteOptions;
+use lofty::file::AudioFile;
+use lofty::picture::{MimeType, Picture, PictureType};
+use lofty::prelude::{Accessor, TagExt, TaggedFileExt};
 use lofty::probe::Probe;
+use lofty::tag::items::ENGLISH;
+use lofty::tag::{ItemKey, ItemValue, Tag, TagItem};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{Seek, Write};
 use std::path::Path;
 use walkdir::WalkDir;
 
@@ -233,6 +240,172 @@ fn encode_data_url(bytes: &[u8], mime: &str) -> String {
 #[tauri::command]
 pub fn open_song(path: String) -> Result<Song, String> {
     read_song_meta(Path::new(&path))
+}
+
+// ---------------------------------------------------------------------------
+// save_song：表单全量覆盖写回原路径（design.md D1–D6）
+// ---------------------------------------------------------------------------
+
+/// 保存当前编辑表单，全量覆盖写回原路径。
+///
+/// 语义（PRD FR-5.5）：`Song` 中的非空字段写入标签，空字段被清除；
+/// `cover=None` 即删除封面；写回**原路径**，不产生新文件、不改文件名。
+///
+/// 写盘策略（D6）：读入 → `clear()` 重建标签 → 写同目录临时文件 →
+/// rename 原子替换原路径。任一环节失败返回 `Err(String)`，原文件不被触碰。
+#[tauri::command]
+pub fn save_song(song: Song) -> Result<(), String> {
+    let path = Path::new(&song.path);
+
+    // 写前校验格式（PRD「稳健」）：格式损坏/不可读 → Err，原文件未动。
+    let mut tagged_file = Probe::open(path)
+        .and_then(|probed| probed.read())
+        .map_err(|e| format!("读取标签失败: {e}"))?;
+
+    // D2：primary tag `clear()` 重建，保证「最终标签 == 表单内容」。
+    let tag = tagged_file
+        .primary_tag_mut()
+        .ok_or_else(|| "读取标签失败: 文件缺少可写的主标签".to_string())?;
+    tag.clear();
+
+    apply_meta(tag, &song)?;
+
+    write_atomic(path, &tagged_file).map_err(|e| format!("写回文件失败: {e}"))
+}
+
+/// 字段映射写入（design.md D3）。非空字段 set、空字段不写（已被 clear 删除）。
+fn apply_meta(tag: &mut Tag, song: &Song) -> Result<(), String> {
+    set_text(tag, ItemKey::TrackTitle, &song.title);
+    set_text(tag, ItemKey::TrackArtist, &song.artist);
+    set_text(tag, ItemKey::AlbumTitle, &song.album);
+    set_text(tag, ItemKey::AlbumArtist, &song.album_artist);
+    set_text(tag, ItemKey::TrackNumber, &song.track);
+    set_text(tag, ItemKey::TrackTotal, &song.track_total);
+    // D3：年份统一写 RecordingDate（FLAC `DATE` / MP3 `TDRC`，与读侧优先分支对称）。
+    set_text(tag, ItemKey::RecordingDate, &song.year);
+    set_text(tag, ItemKey::Genre, &song.genre);
+
+    apply_lyrics(tag, &song.lyrics);
+    apply_cover(tag, &song.cover)
+}
+
+/// 非空字段 `insert_text`（空则跳过——clear 后未写即删除，表单全量覆盖语义）。
+fn set_text(tag: &mut Tag, key: ItemKey, value: &str) {
+    if !value.is_empty() {
+        tag.insert_text(key, value.to_string());
+    }
+}
+
+/// 歌词写入（design.md D5）：
+/// - MP3 → USLT 帧：`ItemKey::UnsyncLyrics` + `set_lang(ENGLISH)`（lofty 写 ID3v2 要求 lang 非空）。
+/// - FLAC → Vorbis `LYRICS` 帧：`ItemKey::Lyrics`（无需 lang）。
+///
+/// 按 tag 类型分支：`ItemKey::Lyrics` 在 ID3v2 不受支持（lofty 会静默丢弃），
+/// `UnsyncLyrics` 在 Vorbis 映射为多余的 `UNSYNCEDLYRICS` comment，故只写对应格式的 key。
+fn apply_lyrics(tag: &mut Tag, lyrics: &str) {
+    if lyrics.is_empty() {
+        return;
+    }
+    match tag.tag_type() {
+        lofty::tag::TagType::Id3v2 => {
+            let mut item =
+                TagItem::new(ItemKey::UnsyncLyrics, ItemValue::Text(lyrics.to_string()));
+            item.set_lang(ENGLISH);
+            tag.push(item);
+        }
+        _ => {
+            tag.insert_text(ItemKey::Lyrics, lyrics.to_string());
+        }
+    }
+}
+
+/// 封面写盘（design.md D4）：base64 data URL → 字节 + MIME → PICTURE/APIC。
+/// `cover=None` → 不 push（clear 后即删除封面）。
+fn apply_cover(tag: &mut Tag, cover: &Option<String>) -> Result<(), String> {
+    let Some(data_url) = cover else {
+        return Ok(());
+    };
+
+    let (bytes, mime) = decode_cover(data_url)?;
+    let picture = Picture::unchecked(bytes)
+        .pic_type(PictureType::CoverFront) // PRD §5.3：类型 3
+        .mime_type(MimeType::from_str(&mime))
+        .build();
+    tag.push_picture(picture);
+    Ok(())
+}
+
+/// 解码封面 base64 data URL：`data:<mime>;base64,...` → `(bytes, mime)`。
+///
+/// MIME 优先取 data URL 前缀；缺省用 `image::guess_format` 按字节探测
+/// （与读侧 `encode_cover` 对称）。探测失败返回 `Err`（拒绝写坏封面）。
+fn decode_cover(cover: &str) -> Result<(Vec<u8>, String), String> {
+    // 剥离 `data:<mime>;base64,` 前缀（无前缀时按纯 base64 处理）。
+    let (prefix, b64) = match cover.split_once(',') {
+        Some((head, tail)) if head.starts_with("data:") && head.ends_with(";base64") => {
+            let mime = head
+                .strip_prefix("data:")
+                .and_then(|m| m.strip_suffix(";base64"))
+                .unwrap_or_default();
+            (Some(mime.to_string()), tail)
+        }
+        _ => (None, cover),
+    };
+
+    let bytes = BASE64
+        .decode(b64)
+        .map_err(|e| format!("封面 base64 解码失败: {e}"))?;
+
+    let mime = match prefix {
+        Some(m) if !m.is_empty() && m != "application/octet-stream" => m,
+        _ => {
+            image::guess_format(&bytes)
+                .map(|f| f.to_mime_type().to_string())
+                .map_err(|_| "封面格式无法识别".to_string())?
+        }
+    };
+
+    Ok((bytes, mime))
+}
+
+/// 原子写回（design.md D6）：同目录临时文件写标签 → rename 覆盖原路径。
+///
+/// `Tag::save_to`（lofty 0.24）会**就地** `truncate(0)` 重写整个文件——若直接对原
+/// 文件调用，中途写失败会损坏原文件。故先把原文件完整拷贝到同目录临时文件，
+/// 再对临时文件写标签，最后 `rename`（同卷原子替换）覆盖原路径。任一环节失败
+/// 返回 `Err`，原文件零触碰（临时文件由 `Drop` 自动清理）。
+fn write_atomic(path: &Path, tagged_file: &lofty::file::TaggedFile) -> std::io::Result<()> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "路径缺少父目录"))?;
+
+    let mut temp = tempfile::Builder::new()
+        .suffix(".tmp")
+        .tempfile_in(dir)?;
+
+    // 1. 原文件完整拷贝到临时文件（保留音频帧与其余内容）。
+    {
+        let mut src = fs::File::open(path)?;
+        let mut dst = temp.as_file_mut();
+        std::io::copy(&mut src, &mut dst)?;
+        dst.flush()?;
+    }
+
+    // 2. 对临时文件写标签。`save_to` 会 probe 临时文件内容猜测格式——临时文件
+    //    已含完整音频字节，格式可识别。写失败时临时文件被 Drop 清理，原文件未动。
+    {
+        let mut dst = temp.as_file_mut();
+        dst.rewind()?;
+        tagged_file
+            .save_to(&mut dst, WriteOptions::default())
+            .map_err(std::io::Error::other)?;
+        dst.flush()?;
+        dst.sync_all()?;
+    }
+
+    // 3. rename 原子替换原路径（同目录保证同卷，POSIX/Windows 均为原子替换）。
+    temp.persist(path)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -713,5 +886,302 @@ mod tests {
         // 不存在的路径 → Err（区别于空串）
         let res = open_song("/nonexistent/definitely/missing.flac".to_string());
         assert!(res.is_err());
+    }
+
+    // ---------------------------------------------------------------------------
+    // save_song 写回（design.md D1–D6）
+    // ---------------------------------------------------------------------------
+
+    /// 构造一个完整表单（全字段 + 歌词 + 封面 data URL），path 由调用方填。
+    fn full_song(path: String) -> Song {
+        let png = tiny_png_bytes();
+        let cover = format!("data:image/png;base64,{}", BASE64.encode(&png));
+        Song {
+            path,
+            title: "保存标题".into(),
+            artist: "保存艺术家".into(),
+            album: "保存专辑".into(),
+            album_artist: "保存专辑艺术家".into(),
+            track: "7".into(),
+            track_total: "9".into(),
+            year: "2022".into(),
+            genre: "Rock".into(),
+            lyrics: "[00:00.00]保存歌词第一行\n[00:10.00]第二行".into(),
+            lyrics_source: LyricsSource::Embedded,
+            cover: Some(cover),
+            cover_mime: Some("image/png".into()),
+        }
+    }
+
+    #[test]
+    fn save_song_flac_roundtrips_all_fields() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_flac(tmp.path(), "song.flac", "旧标题", "旧艺术家");
+        let path = tmp.path().join("song.flac").to_string_lossy().into_owned();
+
+        let song = full_song(path.clone());
+        save_song(song).expect("FLAC 保存应成功");
+
+        // 读回逐字段断言一致
+        let saved = read_song_meta(Path::new(&path)).expect("保存后应可读");
+        assert_eq!(saved.title, "保存标题");
+        assert_eq!(saved.artist, "保存艺术家");
+        assert_eq!(saved.album, "保存专辑");
+        assert_eq!(saved.album_artist, "保存专辑艺术家");
+        assert_eq!(saved.track, "7");
+        assert_eq!(saved.track_total, "9");
+        assert_eq!(saved.year, "2022");
+        assert_eq!(saved.genre, "Rock");
+        assert_eq!(saved.lyrics, "[00:00.00]保存歌词第一行\n[00:10.00]第二行");
+        assert_eq!(saved.lyrics_source, LyricsSource::Embedded);
+        // 封面读回字节一致
+        let cover = saved.cover.expect("应有封面");
+        let b64 = cover.split_once(";base64,").map(|(_, b)| b).unwrap();
+        assert_eq!(BASE64.decode(b64).unwrap(), tiny_png_bytes());
+    }
+
+    #[test]
+    fn save_song_mp3_roundtrips_all_fields_id3v24() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_mp3(tmp.path(), "song.mp3", "旧标题", "旧艺术家");
+        let path = tmp.path().join("song.mp3").to_string_lossy().into_owned();
+
+        let song = full_song(path.clone());
+        save_song(song).expect("MP3 保存应成功");
+
+        let saved = read_song_meta(Path::new(&path)).expect("保存后应可读");
+        assert_eq!(saved.title, "保存标题");
+        assert_eq!(saved.artist, "保存艺术家");
+        assert_eq!(saved.album, "保存专辑");
+        assert_eq!(saved.album_artist, "保存专辑艺术家");
+        assert_eq!(saved.track, "7");
+        assert_eq!(saved.track_total, "9");
+        assert_eq!(saved.year, "2022");
+        assert_eq!(saved.genre, "Rock");
+        assert_eq!(saved.lyrics, "[00:00.00]保存歌词第一行\n[00:10.00]第二行");
+
+        // 写后文件头必须是 ID3v2.4（`ID3\x04`，非 v2.3）
+        let bytes = fs::read(&path).unwrap();
+        assert_eq!(&bytes[..3], b"ID3");
+        assert_eq!(bytes[3], 0x04, "MP3 写回必须为 ID3v2.4，实际版本: {}", bytes[3]);
+        // 封面 APIC 读回字节一致
+        let cover = saved.cover.expect("应有封面");
+        let b64 = cover.split_once(";base64,").map(|(_, b)| b).unwrap();
+        assert_eq!(BASE64.decode(b64).unwrap(), tiny_png_bytes());
+    }
+
+    #[test]
+    fn save_song_mp3_uslt_lang_is_eng() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_mp3(tmp.path(), "lyric.mp3", "T", "A");
+        let path = tmp.path().join("lyric.mp3").to_string_lossy().into_owned();
+
+        let mut song = full_song(path.clone());
+        song.lyrics = "一段歌词".into();
+        save_song(song).expect("MP3 保存应成功");
+
+        // 读回 USLT 帧并断言 lang=eng
+        let tagged = Probe::open(&path)
+            .and_then(|p| p.read())
+            .expect("应可读");
+        let tag = tagged.primary_tag().expect("应有主标签");
+        let uslt = tag
+            .get(lofty::tag::ItemKey::UnsyncLyrics)
+            .expect("应有 USLT 帧");
+        assert_eq!(uslt.lang(), &ENGLISH, "USLT lang 必须为 eng");
+    }
+
+    #[test]
+    fn save_song_clears_empty_fields_and_removes_lyrics_cover() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_flac(tmp.path(), "full.flac", "旧标题", "旧艺术家");
+        add_tags(
+            &tmp.path().join("full.flac"),
+            Some("[00:00.00]旧歌词"),
+            Some(tiny_png_bytes()),
+        );
+        let path = tmp.path().join("full.flac").to_string_lossy().into_owned();
+
+        // 表单全空 + 无封面 → 保存后标签被清空
+        let song = Song {
+            path: path.clone(),
+            title: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            album_artist: String::new(),
+            track: String::new(),
+            track_total: String::new(),
+            year: String::new(),
+            genre: String::new(),
+            lyrics: String::new(),
+            lyrics_source: LyricsSource::None,
+            cover: None,
+            cover_mime: None,
+        };
+        save_song(song).expect("保存应成功");
+
+        let saved = read_song_meta(Path::new(&path)).expect("应可读");
+        assert_eq!(saved.title, "");
+        assert_eq!(saved.artist, "");
+        assert_eq!(saved.album, "");
+        assert_eq!(saved.lyrics, "");
+        assert_eq!(saved.lyrics_source, LyricsSource::None);
+        assert_eq!(saved.cover, None, "cover=None 后标签应无封面");
+        assert_eq!(saved.cover_mime, None);
+    }
+
+    #[test]
+    fn save_song_removes_cover_when_cover_none() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_mp3(tmp.path(), "cover.mp3", "T", "A");
+        add_tags(
+            &tmp.path().join("cover.mp3"),
+            None,
+            Some(tiny_png_bytes()),
+        );
+        let path = tmp.path().join("cover.mp3").to_string_lossy().into_owned();
+
+        // 先确认原文件有封面
+        let before = read_song_meta(Path::new(&path)).expect("应可读");
+        assert!(before.cover.is_some());
+
+        // 表单保留标题但 cover=None → 封面被删除
+        let song = Song {
+            path: path.clone(),
+            title: "保留标题".into(),
+            cover: None,
+            ..full_song(path.clone())
+        };
+        save_song(song).expect("保存应成功");
+
+        let after = read_song_meta(Path::new(&path)).expect("应可读");
+        assert_eq!(after.title, "保留标题");
+        assert_eq!(after.cover, None, "cover=None 应删除封面");
+        assert_eq!(after.cover_mime, None);
+    }
+
+    #[test]
+    fn save_song_atomic_write_failure_keeps_original_untouched() {
+        let tmp = TempDir::new().unwrap();
+        // 独立子目录（可单独改权限，不影响 TempDir 自身清理）
+        let dir = tmp.path().join("ro_dir");
+        fs::create_dir(&dir).unwrap();
+        write_tagged_flac(&dir, "song.flac", "原标题", "原艺术家");
+        let path = dir.join("song.flac");
+        let orig_bytes = fs::read(&path).unwrap();
+
+        // 写失败场景：目录只读 → 临时文件创建失败 → Err 且原文件 bytes 不变。
+        // 原文件仍可读（Probe::open 只读成功），失败发生在 write_atomic 阶段。
+        let mut perms = fs::metadata(&dir).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o555); // r-x，去掉写位
+        }
+        fs::set_permissions(&dir, perms).expect("设置只读目录失败");
+
+        let song = full_song(path.to_string_lossy().into_owned());
+        let res = save_song(song);
+        assert!(res.is_err(), "只读目录应返回 Err");
+        assert!(res.unwrap_err().contains("写回文件失败"));
+
+        // 恢复目录写权限以便后续清理
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // 原文件 bytes 完全不变
+        assert_eq!(fs::read(&path).unwrap(), orig_bytes, "原子写失败不得改动原文件");
+    }
+
+    #[test]
+    fn save_song_missing_path_returns_err_not_panic() {
+        let song = full_song("/nonexistent/missing/file.mp3".into());
+        let res = save_song(song);
+        assert!(res.is_err(), "路径不存在应返回 Err（不 panic）");
+    }
+
+    #[test]
+    fn save_song_corrupt_file_returns_err_not_panic() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("broken.mp3");
+        fs::write(&path, b"garbage bytes").unwrap();
+        let song = full_song(path.to_string_lossy().into_owned());
+        let res = save_song(song);
+        assert!(res.is_err(), "坏标签文件应返回 Err（不 panic）");
+    }
+
+    #[test]
+    fn save_song_cover_bad_mime_returns_err() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_flac(tmp.path(), "badcover.flac", "T", "A");
+        let path = tmp.path().join("badcover.flac").to_string_lossy().into_owned();
+
+        // 封面字节无法识别为图片格式（纯文本 base64）
+        let mut song = full_song(path.clone());
+        song.cover = Some(format!("data:application/octet-stream;base64,{}", BASE64.encode(b"not an image")));
+        let res = save_song(song);
+        assert!(res.is_err(), "MIME 探测失败应返回 Err");
+        assert!(res.unwrap_err().contains("封面格式无法识别"));
+    }
+
+    #[test]
+    fn save_song_track_only_writes_trck_x() {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_mp3(tmp.path(), "track.mp3", "T", "A");
+        let path = tmp.path().join("track.mp3").to_string_lossy().into_owned();
+
+        // 只有 track 无 track_total → TRCK 只写 `x`
+        let mut song = full_song(path.clone());
+        song.track = "5".into();
+        song.track_total = String::new();
+        save_song(song).expect("保存应成功");
+
+        let saved = read_song_meta(Path::new(&path)).expect("应可读");
+        assert_eq!(saved.track, "5");
+        assert_eq!(saved.track_total, "", "track_total 空则不写");
+    }
+
+    #[test]
+    fn decode_cover_strips_prefix_and_guesses_mime() {
+        // data URL 前缀 → 前缀 MIME 优先
+        let png = tiny_png_bytes();
+        let data_url = format!("data:image/png;base64,{}", BASE64.encode(&png));
+        let (bytes, mime) = decode_cover(&data_url).expect("应解码");
+        assert_eq!(bytes, png);
+        assert_eq!(mime, "image/png");
+
+        // 无前缀 → 按纯 base64 解码 + 字节探测 MIME
+        let (bytes2, mime2) = decode_cover(&BASE64.encode(&png)).expect("纯 base64 应解码");
+        assert_eq!(bytes2, png);
+        assert_eq!(mime2, "image/png");
+    }
+
+    #[test]
+    fn save_song_preserves_audio_frames() {
+        // 保存后文件仍可被 lofty 完整解析（音频帧未损坏），且不再残留临时文件。
+        let tmp = TempDir::new().unwrap();
+        write_tagged_mp3(tmp.path(), "keep.mp3", "旧标题", "旧艺术家");
+        let path = tmp.path().join("keep.mp3");
+        let orig_len = fs::metadata(&path).unwrap().len();
+
+        let song = full_song(path.to_string_lossy().into_owned());
+        save_song(song).expect("保存应成功");
+
+        // 原路径下无残留 .tmp
+        let leftovers: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "临时文件应在保存后清理: {leftovers:?}");
+
+        // 文件仍可读（audio frames 完好）
+        let tagged = Probe::open(&path).and_then(|p| p.read()).expect("保存后仍可解析");
+        assert_eq!(tagged.file_type(), lofty::file::FileType::Mpeg);
+        // 文件只增不减标签体积（音频保留）
+        assert!(fs::metadata(&path).unwrap().len() >= orig_len);
     }
 }

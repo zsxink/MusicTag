@@ -13,6 +13,7 @@ pub fn run() {
             commands::pick_folder,
             commands::list_songs,
             commands::open_song,
+            commands::save_song,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
