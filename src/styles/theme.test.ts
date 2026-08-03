@@ -132,3 +132,15 @@ describe('theme.css — 手动主题覆盖（v1-ux-settings D5: 手动优先于�
     expect(darkBlock).toMatch(/--accent:\s*#E8A33D/)
   })
 })
+
+describe('theme.css — 无障碍与过渡（v1-ux-settings §3 打磨，锁不回归）', () => {
+  it('prefers-reduced-motion 减弱过渡与动画（transition/animation 时长压到 0.01ms）', () => {
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/)
+    expect(css).toMatch(/transition-duration:\s*0\.01ms\s*!important/)
+    expect(css).toMatch(/animation-duration:\s*0\.01ms\s*!important/)
+  })
+
+  it('焦点琥珀描边（颜色 + 描边双重表达）：:focus-visible outline 用 --accent', () => {
+    expect(css).toMatch(/:focus-visible\s*{[^}]*outline:\s*2px solid var\(--accent\)/s)
+  })
+})

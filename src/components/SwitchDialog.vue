@@ -41,6 +41,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     >
       <h3 class="dialog-title" id="switch-dialog-title">保存对 <span class="file-name">{{ currentFileName() }}</span> 的修改吗？</h3>
       <p class="dialog-body">修改尚未保存，切换歌曲将丢失。</p>
+      <!-- 保存失败（save_failed）→ 弹窗保持打开、不切换（design.md D3），失败原因须在此弹窗语境可见
+           （遮罩覆盖顶栏，顶栏「✕ 保存失败」不可见；CR：弹窗内补失败态文案，danger 色 + role=alert） -->
+      <p v-if="songStore.saveState === 'save_failed'" class="dialog-error" role="alert">
+        ✕ 保存失败：{{ songStore.saveError }}
+      </p>
       <div class="dialog-actions">
         <button
           class="btn btn-primary"
@@ -106,6 +111,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   font-size: 12.5px;
   color: var(--text-dim);
   margin-bottom: 18px;
+}
+
+/* 保存失败态文案（danger 色，同 EditorBar save-state.failed；role=alert 对读屏用户） */
+.dialog-error {
+  font-size: 12.5px;
+  color: var(--danger);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 16px;
+  word-break: break-word;
 }
 
 .dialog-actions {

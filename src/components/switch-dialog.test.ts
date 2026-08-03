@@ -1,7 +1,7 @@
 // SwitchDialog 组件测试（v1-ux-settings D1–D3）：三按钮行为、Esc 取消、
 // role="dialog" aria-modal、消息文案（文件名）、保存中禁用「保存」按钮。
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
 // mock invoke：弹窗「保存」走默认 save()（invokeCommand('save_song')) 在单测中成功。
 const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }))
@@ -140,6 +140,51 @@ describe('SwitchDialog — Esc 取消 + 保存中禁用「保存」', () => {
     expect(primary.attributes('disabled')).toBeDefined()
     expect(w.get('button.btn-danger').attributes('disabled')).toBeUndefined()
     expect(w.get('button.btn-ghost').attributes('disabled')).toBeUndefined()
+  })
+
+  it('保存失败（save_failed）→ 弹窗保持打开不切换、编辑保留，可重试「保存」（D3 UI 级）', async () => {
+    mockInvoke.mockReset()
+    mockInvoke.mockRejectedValue(new Error('磁盘写入失败'))
+    songStore.current!.title = '改过'
+
+    const w = mount(SwitchDialog)
+    await w.get('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    // 保存失败 → saveState=save_failed、顶栏展示「✕ 保存失败」、弹窗不关、不切歌、dirty 保持
+    expect(songStore.saveState).toBe('save_failed')
+    expect(songStore.saveError).toBe('Error: 磁盘写入失败')
+    expect(songStore.pendingAction).not.toBeNull() // 弹窗保持打开
+    expect(w.find('[data-testid="switch-dialog"]').exists()).toBe(true)
+    expect(songStore.selectedPath).toBe('/a/告白气球.mp3') // 未切歌
+    expect(songStore.current?.title).toBe('改过') // 编辑保留
+    expect(songStore.dirty).toBe(true)
+
+    // 修复后重试「保存」成功 → 执行切歌
+    mockInvoke.mockResolvedValue(undefined)
+    await w.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(songStore.pendingAction).toBeNull()
+    expect(songStore.selectedPath).toBe('/a/第二首.flac')
+  })
+
+  it('保存失败（save_failed）→ 弹窗内直接可见失败原因（遮罩覆盖顶栏，须在弹窗语境展示，CR）', async () => {
+    mockInvoke.mockReset()
+    mockInvoke.mockRejectedValue(new Error('磁盘写入失败'))
+
+    const w = mount(SwitchDialog)
+    expect(w.find('.dialog-error').exists()).toBe(false) // 未失败时不显示
+
+    await w.get('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    // 失败原因在弹窗内可见：danger 色 + role=alert（视力与读屏用户均可见）
+    expect(songStore.saveState).toBe('save_failed')
+    const err = w.find('.dialog-error')
+    expect(err.exists()).toBe(true)
+    expect(err.attributes('role')).toBe('alert')
+    expect(err.classes()).toContain('dialog-error')
+    expect(err.text()).toBe('✕ 保存失败：Error: 磁盘写入失败')
   })
 })
 

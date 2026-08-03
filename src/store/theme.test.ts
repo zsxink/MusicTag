@@ -118,6 +118,37 @@ describe('store/theme — setTheme（手动切换 + 持久记忆，spec FR-7.3/7
     expect(getStored()).toBeNull() // key 已删
     expect(applied).toEqual(['light', null])
   })
+
+  it('重启记忆（spec 场景）：手动选择 → 模拟重启再 initTheme → 沿用上次选择', () => {
+    // 首次启动：无持久化 → 跟随系统深色
+    const { env, getStored } = makeEnv()
+    initTheme(env)
+    expect(themeStore.effective).toBe('dark')
+
+    // 用户手动切浅色 → 写 localStorage
+    setTheme('light')
+    expect(getStored()).toBe('light')
+
+    // 重启：同一 localStorage（env 桩保持 storedValue），重新 initTheme
+    themeStore.manualChoice = null
+    themeStore.effective = 'dark'
+    initTheme(env)
+    expect(themeStore.manualChoice).toBe('light') // 沿用上次手动选择
+    expect(themeStore.effective).toBe('light')
+  })
+
+  it('未手动选择时重启 → 继续跟随系统（localStorage 无 key）', () => {
+    const { env } = makeEnv({ systemLight: true })
+    initTheme(env)
+    expect(themeStore.effective).toBe('light')
+
+    // 重启：系统偏好仍是浅色、仍无持久化 → 仍跟随系统浅色
+    themeStore.manualChoice = null
+    themeStore.effective = 'dark'
+    initTheme(env)
+    expect(themeStore.manualChoice).toBeNull()
+    expect(themeStore.effective).toBe('light')
+  })
 })
 
 describe('store/theme — matchMedia 监听条件化（D7：仅未手动选择时系统偏好切换生效）', () => {
