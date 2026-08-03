@@ -140,9 +140,18 @@ pub async fn fetch_lyric(
 /// 限流双保险（design.md D2）：`Content-Length > 12MB` 预检直接拒绝；流式读取设 12MB 上限
 /// （防内存放大：服务器谎报/不报 Content-Length）。失败 → `Err(中文原因)`，前端静默忽略该张候选。
 pub async fn download_cover(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
+    download_cover_with_timeout(client, url, COVER_TIMEOUT).await
+}
+
+/// 封面下载（可注入超时，供「挂起服务器 → 超时降级」单测，同 `search_song_with_sources` seam）。
+async fn download_cover_with_timeout(
+    client: &reqwest::Client,
+    url: &str,
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
     let mut resp = client
         .get(url)
-        .timeout(COVER_TIMEOUT)
+        .timeout(timeout)
         .send()
         .await
         .map_err(|e| format!("下载封面失败: {e}"))?;
@@ -649,6 +658,36 @@ mod tests {
         let client = reqwest::Client::new();
         let err = download_cover(&client, &url).await.unwrap_err();
         assert!(err.contains("12MB"), "流式超限应拒绝，实际: {err}");
+    }
+
+    #[tokio::test]
+    async fn download_cover_times_out_on_hanging_server() {
+        // 请求级超时（spec：封面下载单独 5s；测试注入 50ms，不等真实 5s）：
+        // 服务器接受连接但挂起不返回 → reqwest 请求级 timeout 切断 → Err（前端静默忽略该张候选）。
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
+        let addr = listener.local_addr().expect("取本地端口");
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(_s) = stream else { continue };
+                // 读到请求后挂起连接（不写响应），由客户端 timeout 切断。
+                std::thread::sleep(Duration::from_secs(3600));
+                break;
+            }
+        });
+        let url = format!("http://{addr}");
+        let client = reqwest::Client::new();
+        let started = std::time::Instant::now();
+        let err = download_cover_with_timeout(&client, &url, Duration::from_millis(50))
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("下载封面失败"),
+            "挂起服务器应超时报错，实际: {err}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "应 50ms 超时即返回，不应等真实 5s/更长"
+        );
     }
 
     #[tokio::test]

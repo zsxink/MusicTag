@@ -261,6 +261,10 @@ mod tests {
             json.contains(r#""cover_url":""#),
             "cover_url 字段名应为 snake_case: {json}"
         );
+        assert!(
+            !json.contains("lyric"),
+            "候选不得携带歌词文本（惰性拉取：点选才 fetch_lyric），实际: {json}"
+        );
         assert!(!json.contains("QqMusic"), "不得出现 Rust 变体名: {json}");
         let back: SongCandidate = serde_json::from_str(&json).unwrap();
         assert_eq!(back.id, c.id);
