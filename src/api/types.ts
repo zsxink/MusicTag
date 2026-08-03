@@ -32,6 +32,13 @@ export interface SongSummary {
   artist: string
 }
 
+/** 封面选择/拖拽输入（pick_cover_file / read_cover_path 返回，与 Rust CoverInput 对齐）。
+ *  data_url 直接进 `Song.cover`（`<img :src>` 同形状，前端零转换）；mime 供 cover_mime 展示。 */
+export interface CoverInput {
+  data_url: string // base64 data URL（data:<mime>;base64,...，压缩后小图）
+  mime: string // image/jpeg | image/png | image/webp
+}
+
 /** 搜索候选（search_song 返回）。 */
 export interface SongCandidate {
   source: MusicSourceId

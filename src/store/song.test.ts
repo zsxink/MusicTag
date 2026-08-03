@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Song, SongSummary } from '../api/types'
-import { activateFolder, open, save, selectSong, songStore, undo } from './song'
+import type { CoverInput, Song, SongSummary } from '../api/types'
+import { activateFolder, clearCover, open, save, selectSong, setCover, songStore, undo } from './song'
 
 const s = (path: string, title = '', artist = ''): SongSummary => ({ path, title, artist })
 
@@ -288,6 +288,80 @@ describe('songStore — v1-song-save 保存状态机与撤销（design.md D7/D8�
     await activateFolder('/d', vi.fn(async () => []))
     expect(songStore.saveState).toBe('idle')
     expect(songStore.saveError).toBe('')
+  })
+})
+
+describe('songStore — v1-cover-embed setCover/clearCover（design.md D5）', () => {
+  beforeEach(() => {
+    songStore.selectedPath = '/a/song.flac'
+    songStore.current = { ...makeSong() }
+    songStore.original = { ...makeSong() }
+    songStore.readonly = false
+    songStore.lyricsSource = 'none'
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+  })
+
+  const cover: CoverInput = {
+    data_url: 'data:image/png;base64,AAAA',
+    mime: 'image/png',
+  }
+
+  it('setCover：current.cover = data_url、current.cover_mime = mime，且 dirty 翻转', () => {
+    expect(songStore.current!.cover).toBeNull()
+    expect(songStore.dirty).toBe(false)
+
+    setCover(cover)
+
+    expect(songStore.current!.cover).toBe('data:image/png;base64,AAAA')
+    expect(songStore.current!.cover_mime).toBe('image/png')
+    // cover 在 DIRTY_FIELDS → 预览即自动翻转 dirty，无需改 dirty 判定
+    expect(songStore.dirty).toBe(true)
+  })
+
+  it('setCover：readonly 时无视（坏标签只读，封面区已禁用）', () => {
+    songStore.readonly = true
+    setCover(cover)
+    expect(songStore.current!.cover).toBeNull()
+    expect(songStore.current!.cover_mime).toBeNull()
+    expect(songStore.dirty).toBe(false)
+  })
+
+  it('setCover：current=null 时无视（无歌不写）', () => {
+    songStore.current = null
+    setCover(cover)
+    expect(songStore.current).toBeNull()
+  })
+
+  it('clearCover：cover/cover_mime 置 null，dirty 翻转（保存后走既有删除语义）', () => {
+    songStore.current!.cover = 'data:image/png;base64,AAAA'
+    songStore.current!.cover_mime = 'image/png'
+    expect(songStore.dirty).toBe(true)
+    songStore.original = { ...songStore.current } // 模拟已保存：新基准含封面
+    expect(songStore.dirty).toBe(false)
+
+    clearCover()
+
+    expect(songStore.current!.cover).toBeNull()
+    expect(songStore.current!.cover_mime).toBeNull()
+    expect(songStore.dirty).toBe(true) // 与 original 的封面不一致 → 删除标记
+  })
+
+  it('clearCover：readonly 时无视', () => {
+    songStore.current!.cover = 'data:image/png;base64,AAAA'
+    songStore.readonly = true
+    clearCover()
+    expect(songStore.current!.cover).toBe('data:image/png;base64,AAAA')
+  })
+
+  it('setCover 后 save：写入 current.cover 并经 save_song 提交', async () => {
+    setCover(cover)
+    expect(songStore.dirty).toBe(true)
+    const saveFn = vi.fn(async () => undefined)
+    await save(saveFn)
+    expect(saveFn).toHaveBeenCalledWith(songStore.current)
+    expect(songStore.current!.cover).toBe('data:image/png;base64,AAAA')
+    expect(songStore.dirty).toBe(false) // 保存后归零（压缩图已写盘）
   })
 })
 

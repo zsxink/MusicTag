@@ -8,8 +8,8 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
 
-import type { Song } from './types'
-import { listSongs, openSong, pickFolder, saveSong } from './songs'
+import type { CoverInput, Song } from './types'
+import { listSongs, openSong, pickCoverFile, pickFolder, readCoverPath, saveSong } from './songs'
 
 const makeSong = (over: Partial<Song> = {}): Song => ({
   path: '/a/song.flac',
@@ -61,5 +61,33 @@ describe('api/songs.ts — 类型化 command 封装（命令名/参数逐字对�
     mockInvoke.mockResolvedValue(undefined)
     await saveSong(song)
     expect(mockInvoke).toHaveBeenCalledWith('save_song', { song })
+  })
+
+  it('pickCoverFile：透传 pick_cover_file 无参数；取消返回 null、选中返回 CoverInput', async () => {
+    const cover: CoverInput = {
+      data_url: 'data:image/png;base64,AAAA',
+      mime: 'image/png',
+    }
+    mockInvoke.mockResolvedValue(cover)
+    await expect(pickCoverFile()).resolves.toEqual(cover)
+    expect(mockInvoke).toHaveBeenCalledWith('pick_cover_file', undefined)
+
+    mockInvoke.mockResolvedValue(null)
+    await expect(pickCoverFile()).resolves.toBeNull()
+  })
+
+  it('readCoverPath：透传 read_cover_path + { path }，返回 CoverInput', async () => {
+    const cover: CoverInput = {
+      data_url: 'data:image/webp;base64,BBBB',
+      mime: 'image/webp',
+    }
+    mockInvoke.mockResolvedValue(cover)
+    await expect(readCoverPath('/tmp/cover.webp')).resolves.toEqual(cover)
+    expect(mockInvoke).toHaveBeenCalledWith('read_cover_path', { path: '/tmp/cover.webp' })
+  })
+
+  it('readCoverPath：读失败/非图片 → reject（中文原因透传）', async () => {
+    mockInvoke.mockRejectedValue(new Error('封面格式无法识别'))
+    await expect(readCoverPath('/tmp/not_image.txt')).rejects.toThrow('封面格式无法识别')
   })
 })
