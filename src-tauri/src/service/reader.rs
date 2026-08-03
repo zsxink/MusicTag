@@ -59,15 +59,22 @@ pub fn read_song_meta(path: &Path) -> Result<Song, String> {
     let (track, track_total) = split_track_pair(&track, &track_total);
 
     // FLAC Vorbis 用 ItemKey::Lyrics；MP3 用 UnsyncLyrics（USLT）。
-    let lyrics = get(lofty::tag::ItemKey::Lyrics);
-    let lyrics = if lyrics.is_empty() {
-        get(lofty::tag::ItemKey::UnsyncLyrics)
-    } else {
-        lyrics
-    };
+    let mut lyrics = get(lofty::tag::ItemKey::Lyrics);
+    if lyrics.is_empty() {
+        lyrics = get(lofty::tag::ItemKey::UnsyncLyrics);
+    }
 
+    // 来源判定（design.md D2）：内嵌 trim 非空 → Embedded（内嵌优先，权威字段）；
+    // 否则 `.lrc` 侧载存在 → SidecarLrc 且歌词取 `.lrc` 文本；否则 None。
+    // `.lrc` 读取失败按 None 处理（fallback，不得锁死表单）。
     let lyrics_source = if lyrics.trim().is_empty() {
-        LyricsSource::None
+        match crate::service::lyrics::read_sidecar_lrc(path) {
+            Some(sidecar) => {
+                lyrics = sidecar;
+                LyricsSource::SidecarLrc
+            }
+            None => LyricsSource::None,
+        }
     } else {
         LyricsSource::Embedded
     };

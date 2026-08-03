@@ -338,7 +338,7 @@ interface SearchResult {
 |---|---|---|
 | `list_songs(dir)` | `PathBuf → Vec<SongSummary>` | 打开文件夹，深度遍历；**只读列表项**（`path`/`title`/`artist`，歌名/作者空时前端回退显示文件名） |
 | `open_song(path)` | `PathBuf → Song` | 读取一首的**完整**标签 + 封面 base64，放进编辑区（按需读取） |
-| `save_song(song)` | `Song → Result<(), String>` | 写回原文件（cover 为 base64，Rust 侧解码） |
+| `save_song(song, exportLrc)` | `Song, bool → Result<(), String>` | 写回原文件（cover 为 base64，Rust 侧解码）；`exportLrc` 勾选时同步写同目录同名 `.lrc`（空歌词忽略） |
 | `rename_song(path, new_name)` | `PathBuf, String → Result` | 音频 + `.lrc` 改名 |
 | `search_song(title, artist)` | `String, String → SearchResult` | 三家并发搜索 |
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本 |

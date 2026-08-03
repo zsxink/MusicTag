@@ -20,7 +20,7 @@ fn save_song_flac_roundtrips_all_fields() {
     let path = tmp.path().join("song.flac").to_string_lossy().into_owned();
 
     let song = full_song(path.clone());
-    app_lib::service::writer::save_song(song).expect("FLAC 保存应成功");
+    app_lib::service::writer::save_song(song, false).expect("FLAC 保存应成功");
 
     // 读回逐字段断言一致
     let saved = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("保存后应可读");
@@ -47,7 +47,7 @@ fn save_song_mp3_roundtrips_all_fields_id3v24() {
     let path = tmp.path().join("song.mp3").to_string_lossy().into_owned();
 
     let song = full_song(path.clone());
-    app_lib::service::writer::save_song(song).expect("MP3 保存应成功");
+    app_lib::service::writer::save_song(song, false).expect("MP3 保存应成功");
 
     let saved = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("保存后应可读");
     assert_eq!(saved.title, "保存标题");
@@ -82,7 +82,7 @@ fn save_song_mp3_uslt_lang_is_eng() {
 
     let mut song = full_song(path.clone());
     song.lyrics = "一段歌词".into();
-    app_lib::service::writer::save_song(song).expect("MP3 保存应成功");
+    app_lib::service::writer::save_song(song, false).expect("MP3 保存应成功");
 
     // 读回 USLT 帧并断言 lang=eng
     let tagged = Probe::open(&path).and_then(|p| p.read()).expect("应可读");
@@ -124,7 +124,7 @@ fn save_song_clears_empty_fields_and_removes_lyrics_cover() {
         cover: None,
         cover_mime: None,
     };
-    app_lib::service::writer::save_song(song).expect("保存应成功");
+    app_lib::service::writer::save_song(song, false).expect("保存应成功");
 
     let saved = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("应可读");
     assert_eq!(saved.title, "");
@@ -154,7 +154,7 @@ fn save_song_removes_cover_when_cover_none() {
         cover: None,
         ..full_song(path.clone())
     };
-    app_lib::service::writer::save_song(song).expect("保存应成功");
+    app_lib::service::writer::save_song(song, false).expect("保存应成功");
 
     let after = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("应可读");
     assert_eq!(after.title, "保留标题");
@@ -183,7 +183,7 @@ fn save_song_atomic_write_failure_keeps_original_untouched() {
     fs::set_permissions(&dir, perms).expect("设置只读目录失败");
 
     let song = full_song(path.to_string_lossy().into_owned());
-    let res = app_lib::service::writer::save_song(song);
+    let res = app_lib::service::writer::save_song(song, false);
     assert!(res.is_err(), "只读目录应返回 Err");
     assert!(res.unwrap_err().contains("写回文件失败"));
 
@@ -205,7 +205,7 @@ fn save_song_atomic_write_failure_keeps_original_untouched() {
 #[test]
 fn save_song_missing_path_returns_err_not_panic() {
     let song = full_song("/nonexistent/missing/file.mp3".into());
-    let res = app_lib::service::writer::save_song(song);
+    let res = app_lib::service::writer::save_song(song, false);
     assert!(res.is_err(), "路径不存在应返回 Err（不 panic）");
 }
 
@@ -215,7 +215,7 @@ fn save_song_corrupt_file_returns_err_not_panic() {
     let path = tmp.path().join("broken.mp3");
     fs::write(&path, b"garbage bytes").unwrap();
     let song = full_song(path.to_string_lossy().into_owned());
-    let res = app_lib::service::writer::save_song(song);
+    let res = app_lib::service::writer::save_song(song, false);
     assert!(res.is_err(), "坏标签文件应返回 Err（不 panic）");
 }
 
@@ -235,7 +235,7 @@ fn save_song_cover_bad_mime_returns_err() {
         "data:application/octet-stream;base64,{}",
         BASE64.encode(b"not an image")
     ));
-    let res = app_lib::service::writer::save_song(song);
+    let res = app_lib::service::writer::save_song(song, false);
     assert!(res.is_err(), "MIME 探测失败应返回 Err");
     assert!(res.unwrap_err().contains("封面格式无法识别"));
 }
@@ -250,7 +250,7 @@ fn save_song_track_only_writes_trck_x() {
     let mut song = full_song(path.clone());
     song.track = "5".into();
     song.track_total = String::new();
-    app_lib::service::writer::save_song(song).expect("保存应成功");
+    app_lib::service::writer::save_song(song, false).expect("保存应成功");
 
     let saved = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("应可读");
     assert_eq!(saved.track, "5");
@@ -266,7 +266,7 @@ fn save_song_preserves_audio_frames() {
     let orig_len = fs::metadata(&path).unwrap().len();
 
     let song = full_song(path.to_string_lossy().into_owned());
-    app_lib::service::writer::save_song(song).expect("保存应成功");
+    app_lib::service::writer::save_song(song, false).expect("保存应成功");
 
     // 原路径下无残留 .tmp
     let leftovers: Vec<_> = fs::read_dir(tmp.path())
@@ -328,7 +328,7 @@ fn save_song_embeds_compressed_cover_not_original() {
     let mut song = full_song(path.clone());
     song.cover = Some(data_url);
     song.cover_mime = Some("image/png".into());
-    app_lib::service::writer::save_song(song).expect("保存应成功");
+    app_lib::service::writer::save_song(song, false).expect("保存应成功");
 
     // 读回 → 解码 → 字节 = 压缩图（≤2048），而非原大图
     let saved = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("保存后应可读");
@@ -387,7 +387,7 @@ fn save_song_mp3_embeds_compressed_cover_not_original() {
     let mut song = full_song(path.clone());
     song.cover = Some(data_url);
     song.cover_mime = Some("image/jpeg".into());
-    app_lib::service::writer::save_song(song).expect("保存应成功");
+    app_lib::service::writer::save_song(song, false).expect("保存应成功");
 
     let saved = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("保存后应可读");
     let cover_url = saved.cover.expect("应有 APIC 封面");

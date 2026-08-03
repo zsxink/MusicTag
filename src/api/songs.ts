@@ -21,9 +21,10 @@ export function openSong(path: string): Promise<Song> {
   return invokeCommand<Song>('open_song', { path })
 }
 
-/** 保存当前编辑 = 表单全量覆盖写回原路径（语义在 Rust writer::save_song）。 */
-export function saveSong(song: Song): Promise<void> {
-  return invokeCommand<void>('save_song', { song })
+/** 保存当前编辑 = 表单全量覆盖写回原路径（语义在 Rust writer::save_song）。
+ *  `exportLrc`（design.md D3）：复选框 opt-in 同步写同目录同名 `.lrc`（空歌词忽略）。 */
+export function saveSong(song: Song, exportLrc: boolean): Promise<void> {
+  return invokeCommand<void>('save_song', { song, exportLrc })
 }
 
 /** 打开原生封面文件选择器（jpg/png/webp）。取消返回 null，否则返回压缩后 data URL + mime。 */

@@ -191,9 +191,9 @@ describe('songStore — v1-song-save 保存状态机与撤销（design.md D7/D8�
     expect(songStore.dirty).toBe(true)
 
     const saveFn = vi.fn(async () => undefined)
-    await save(saveFn)
+    await save(false, saveFn)
 
-    expect(saveFn).toHaveBeenCalledWith(songStore.current) // 提交整个 current 对象
+    expect(saveFn).toHaveBeenCalledWith(songStore.current, false) // 提交整个 current 对象 + exportLrc
     expect(songStore.original).toEqual(songStore.current) // 新基准已快照
     expect(songStore.original).not.toBe(songStore.current) // 快照独立
     expect(songStore.current!.title).toBe('改过') // current 保留
@@ -208,7 +208,7 @@ describe('songStore — v1-song-save 保存状态机与撤销（design.md D7/D8�
     const originalSnapshot = { ...songStore.original }
 
     const saveFn = vi.fn(async () => { throw new Error('磁盘写入失败') })
-    await save(saveFn)
+    await save(false, saveFn)
 
     expect(songStore.current!.artist).toBe('新作者') // 内容保留
     expect(songStore.original).toEqual(originalSnapshot) // original 不更新
@@ -217,7 +217,7 @@ describe('songStore — v1-song-save 保存状态机与撤销（design.md D7/D8�
     expect(songStore.saveError).toBe('Error: 磁盘写入失败')
 
     // 修复后重试成功 → dirty 归 false、saved
-    await save(vi.fn(async () => {}))
+    await save(false, vi.fn(async () => {}))
     expect(songStore.saveState).toBe('saved')
     expect(songStore.dirty).toBe(false)
   })
@@ -225,14 +225,14 @@ describe('songStore — v1-song-save 保存状态机与撤销（design.md D7/D8�
   it('readonly 或 current=null → 不执行保存，状态不变', async () => {
     songStore.readonly = true
     const saveFn = vi.fn(async () => {})
-    await save(saveFn)
+    await save(false, saveFn)
     expect(saveFn).not.toHaveBeenCalled()
     expect(songStore.saveState).toBe('idle')
 
     // current=null 且非只读 → 同样不执行
     songStore.readonly = false
     songStore.current = null
-    await save(saveFn)
+    await save(false, saveFn)
     expect(saveFn).not.toHaveBeenCalled()
   })
 
@@ -288,6 +288,80 @@ describe('songStore — v1-song-save 保存状态机与撤销（design.md D7/D8�
     await activateFolder('/d', vi.fn(async () => []))
     expect(songStore.saveState).toBe('idle')
     expect(songStore.saveError).toBe('')
+  })
+})
+
+describe('songStore — v1-lyrics-lrc exportLrc opt-in（design.md D7）', () => {
+  beforeEach(() => {
+    songStore.selectedPath = '/a/song.flac'
+    songStore.current = { ...makeSong() }
+    songStore.original = { ...makeSong() }
+    songStore.readonly = false
+    songStore.lyricsSource = 'none'
+    songStore.exportLrc = false
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+  })
+
+  it('初始为 false（opt-in 默认不勾选）', () => {
+    expect(songStore.exportLrc).toBe(false)
+  })
+
+  it('勾选是保存期选项，不进 DIRTY_FIELDS：exportLrc=true 不翻转 dirty', () => {
+    expect(songStore.dirty).toBe(false)
+    songStore.exportLrc = true
+    expect(songStore.dirty).toBe(false) // 复选框本身不是编辑内容
+  })
+
+  it('save(exportLrc) 把 opt-in 传给 saveFn（current, true）', async () => {
+    songStore.exportLrc = true
+    const saveFn = vi.fn(async () => undefined)
+    await save(true, saveFn)
+    expect(saveFn).toHaveBeenCalledWith(songStore.current, true)
+  })
+
+  it('dirty=false 时 save(true) 也可执行（独立导出门禁：勾选 + 歌词非空即触发，CR 修复）', async () => {
+    // 核心场景：已含内嵌歌词、表单未编辑（dirty=false），勾选导出 .lrc 可直接保存
+    songStore.current!.lyrics = '[00:00.00] 已内嵌歌词'
+    songStore.original!.lyrics = '[00:00.00] 已内嵌歌词'
+    songStore.exportLrc = true
+    expect(songStore.dirty).toBe(false) // D7：复选框不脏表单
+    expect(songStore.exportLrc).toBe(true)
+
+    const saveFn = vi.fn(async () => undefined)
+    await save(true, saveFn)
+
+    expect(saveFn).toHaveBeenCalledWith(songStore.current, true)
+    expect(songStore.saveState).toBe('saved')
+    expect(songStore.dirty).toBe(false)
+  })
+
+  it('保存成功后保持勾选（D7：连续保存多首可保持导出意愿，仅切歌/换目录重置）', async () => {
+    songStore.exportLrc = true
+    await save(true, vi.fn(async () => undefined))
+    expect(songStore.saveState).toBe('saved')
+    expect(songStore.exportLrc).toBe(true) // 不因保存成功而复位
+  })
+
+  it('切歌（open 成功）→ exportLrc 重置 false', async () => {
+    songStore.exportLrc = true
+    songStore.selectedPath = '/a/next.flac'
+    await open('/a/next.flac', vi.fn(async () => makeSong({ path: '/a/next.flac', title: 'Next' })))
+    expect(songStore.exportLrc).toBe(false)
+  })
+
+  it('open 失败（坏标签）→ exportLrc 同样重置 false', async () => {
+    songStore.exportLrc = true
+    songStore.selectedPath = '/bad/x.mp3'
+    await open('/bad/x.mp3', vi.fn(async () => { throw new Error('坏标签') }))
+    expect(songStore.readonly).toBe(true)
+    expect(songStore.exportLrc).toBe(false)
+  })
+
+  it('换目录（activateFolder）→ exportLrc 重置 false', async () => {
+    songStore.exportLrc = true
+    await activateFolder('/d', vi.fn(async () => []))
+    expect(songStore.exportLrc).toBe(false)
   })
 })
 
@@ -358,8 +432,8 @@ describe('songStore — v1-cover-embed setCover/clearCover（design.md D5）', (
     setCover(cover)
     expect(songStore.dirty).toBe(true)
     const saveFn = vi.fn(async () => undefined)
-    await save(saveFn)
-    expect(saveFn).toHaveBeenCalledWith(songStore.current)
+    await save(false, saveFn)
+    expect(saveFn).toHaveBeenCalledWith(songStore.current, false)
     expect(songStore.current!.cover).toBe('data:image/png;base64,AAAA')
     expect(songStore.dirty).toBe(false) // 保存后归零（压缩图已写盘）
   })

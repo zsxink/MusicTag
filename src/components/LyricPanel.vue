@@ -8,13 +8,13 @@ import { computed } from 'vue'
 
 import { songStore } from '../store/song'
 
-/** 来源 badge 文案（映射 lyrics_source → 展示文本）。 */
+/** 来源 badge 文案（映射 lyrics_source → 展示文本，design.md D8 对齐 proposal 定稿）。 */
 const sourceText = computed(() => {
   switch (songStore.lyricsSource) {
     case 'embedded':
       return '来源: 内嵌标签'
     case 'sidecar':
-      return '来源: 同名 .lrc'
+      return '来源: 侧载 .lrc'
     default:
       return '来源: 无'
   }
@@ -26,6 +26,15 @@ const sourceText = computed(() => {
     <div class="lyrics-head">
       <span class="label">歌词</span>
       <span class="badge">{{ sourceText }}</span>
+      <!-- 「同时保存为 .lrc」opt-in（design.md D7）：v-model 绑 store.exportLrc，readonly 禁用 -->
+      <label class="export-lrc">
+        <input
+          type="checkbox"
+          v-model="songStore.exportLrc"
+          :disabled="songStore.readonly"
+        />
+        同时保存为 .lrc
+      </label>
     </div>
 
     <!-- 搜索歌词占位（v1-search-ui 接语义） -->
@@ -68,6 +77,30 @@ const sourceText = computed(() => {
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text-dim);
+}
+
+.export-lrc {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.export-lrc input[type='checkbox'] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.export-lrc:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.export-lrc input:disabled {
+  cursor: not-allowed;
 }
 
 .search-trigger {

@@ -18,7 +18,10 @@ pub fn open_song(path: String) -> Result<Song, String> {
 }
 
 /// 保存当前编辑表单，全量覆盖写回原路径（语义见 `service::writer::save_song`）。
+///
+/// `export_lrc`（D3）：复选框 opt-in 同步写同目录同名 `.lrc`，前端 `exportLrc`
+/// 经 Tauri camelCase↔snake_case 自动映射到此参数。
 #[tauri::command]
-pub fn save_song(song: Song) -> Result<(), String> {
-    crate::service::writer::save_song(song)
+pub fn save_song(song: Song, export_lrc: bool) -> Result<(), String> {
+    crate::service::writer::save_song(song, export_lrc)
 }

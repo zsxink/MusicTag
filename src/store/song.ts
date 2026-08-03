@@ -47,6 +47,8 @@ interface SongEditor {
   readonly: boolean
   /** 快照 `current.lyrics_source`（占位，供 UI badge）。 */
   lyricsSource: LyricsSource
+  /** 保存时同步写 `.lrc` 的 opt-in 复选框（design.md D7：独立 UI 状态，非 Song 字段、不进 DIRTY_FIELDS）。 */
+  exportLrc: boolean
   /** 保存动作态（design.md D7）：saving/saved/save_failed 由 save() 设置；idle 为新歌/换目录/撤销后。 */
   saveState: SaveState
   /** 保存失败原因（saveState='save_failed' 时顶栏展示「✕ 保存失败：原因」）。 */
@@ -89,6 +91,7 @@ export async function activateFolder(
   raw.original = null
   raw.readonly = false
   raw.lyricsSource = 'none'
+  raw.exportLrc = false // design.md D7：换目录重置 opt-in
   raw.saveState = 'idle'
   raw.saveError = ''
   raw.songs = await loadSongs(dir)
@@ -111,6 +114,7 @@ const raw = reactive<SongEditor>({
   },
   readonly: false,
   lyricsSource: 'none',
+  exportLrc: false,
   saveState: 'idle',
   saveError: '',
 })
@@ -133,6 +137,7 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
     raw.current = { ...song }
     raw.readonly = false
     raw.lyricsSource = song.lyrics_source
+    raw.exportLrc = false // design.md D7：切歌重置 opt-in（每首歌默认不勾选）
     raw.saveState = 'idle'
     raw.saveError = ''
   } catch {
@@ -142,6 +147,7 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
     raw.original = null
     raw.readonly = true
     raw.lyricsSource = 'none'
+    raw.exportLrc = false
     raw.saveState = 'idle'
     raw.saveError = ''
   }
@@ -149,6 +155,9 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
 
 /**
  * 保存当前编辑 = 表单全量覆盖写回原路径（design.md D7 / D9）。
+ *
+ * `exportLrc`（D3/D7）：保存期 opt-in——true 时经 `saveFn(current, true)` 同步写同目录
+ * 同名 `.lrc`（空歌词由 Rust 侧 no-op）；仅切歌/换目录重置，保存成功后保持勾选。
  *
  * IPC 依赖以 `saveFn` 参数注入（仿 open 的 loadSong），默认 loader 为 `api/songs.ts`
  * 的 `saveSong`（经 api/client → invoke），测试可注入自定义 saveFn 不依赖 Tauri。
@@ -159,12 +168,13 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
  * 只读/无歌不执行；保存中禁用再次保存（防连点并发写同一文件）。
  */
 export async function save(
-  saveFn: (song: Song) => Promise<void> = defaultSave,
+  exportLrc: boolean,
+  saveFn: (song: Song, exportLrc: boolean) => Promise<void> = defaultSave,
 ): Promise<void> {
   if (raw.readonly || raw.current === null) return
   raw.saveState = 'saving'
   try {
-    await saveFn(raw.current)
+    await saveFn(raw.current, exportLrc)
     raw.original = { ...raw.current } // 新基准：当前已写盘，dirty 归 false
     raw.saveState = 'saved'
   } catch (e) {
