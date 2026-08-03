@@ -13,11 +13,11 @@
     { "name": "v1-cover-embed", "issue": 10, "domain": "both", "dependsOn": ["v1-refactor-layering"], "status": "done", "implementationCommit": "5090ccc", "slice": "FR-3.5 / FR-5.2 / §5.3 / NFR" },
     { "name": "v1-lyrics-lrc", "issue": 11, "domain": "both", "dependsOn": ["v1-refactor-layering"], "status": "done", "implementationCommit": "50823d6", "slice": "FR-4 / §5.4 / §6.5" },
     { "name": "v1-rename-sync", "issue": 12, "domain": "both", "dependsOn": ["v1-lyrics-lrc", "v1-song-save"], "status": "done", "implementationCommit": "dad4cd5", "slice": "FR-4.6/6a/7 · FR-5.5/6 · §7" },
-    { "name": "v1-ux-settings", "issue": 13, "domain": "both", "dependsOn": ["v1-refactor-layering"], "status": "todo", "implementationCommit": null, "slice": "FR-6 / FR-7 / §2-8" },
+    { "name": "v1-ux-settings", "issue": 13, "domain": "both", "dependsOn": ["v1-refactor-layering"], "status": "done", "implementationCommit": "21edb0b", "slice": "FR-6 / FR-7 / §2-8" },
     { "name": "v1-search-backend", "issue": 14, "domain": "backend", "dependsOn": ["v1-song-read", "v1-refactor-layering"], "status": "todo", "implementationCommit": null, "slice": "FR-8.5/6/8a · §7" },
     { "name": "v1-search-ui", "issue": 15, "domain": "frontend", "dependsOn": ["v1-search-backend", "v1-lyrics-lrc", "v1-refactor-layering"], "status": "todo", "implementationCommit": null, "slice": "FR-8 / §9 / §6.3-6.6" }
   ],
-  "cursor": 8,
+  "cursor": 9,
   "error": null,
   "sourceRevision": "5b758b48f056941fec5838094f1f754efd12db88"
 }
