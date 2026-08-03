@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // mock @tauri-apps/api/core.invoke，验证 invokeCommand 透传
+// （client.ts 保留 `import { invoke } from '@tauri-apps/api/core'`，改源会静默失效 mock）。
 const mockInvoke = vi.fn()
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
 
-import { invokeCommand } from './tauri'
+import { invokeCommand } from './client'
 
 describe('invokeCommand — invoke 类型安全封装', () => {
   beforeEach(() => {

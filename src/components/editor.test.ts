@@ -6,7 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async () => undefined),
 }))
 
-import type { Song } from '../lib/tauri'
+import type { Song } from '../api/types'
 import { songStore } from '../store/song'
 import CoverPanel from './CoverPanel.vue'
 import Editor from './Editor.vue'

@@ -6,7 +6,8 @@
 // - `file`：文件名行，只读展示（mono），改名归 v1-rename-sync
 import { computed } from 'vue'
 
-import { fileName, songStore } from '../store/song'
+import { fileName } from '../lib/path'
+import { songStore } from '../store/song'
 
 const props = withDefaults(
   defineProps<{

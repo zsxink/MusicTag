@@ -1,19 +1,6 @@
-// Tauri IPC 统一封装入口（design.md §10.3）。
-//
-// 后续所有 command（list_songs / open_song / save_song / search_song ...）一律
-// 经由 invokeCommand<T>(cmd, args) 调用，保证类型安全透传。
-import { invoke } from '@tauri-apps/api/core'
-
-/** 泛型封装 Tauri invoke：透传 cmd 与 args，返回类型化结果。 */
-export function invokeCommand<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  return invoke<T>(cmd, args)
-}
-
-// ---------------------------------------------------------------------------
-// Tauri command 契约类型（design.md §10.3，与 Rust struct 对齐）
+// Tauri command 契约类型（design.md §10，与 Rust model.rs struct 对齐）。
 // Rust enum 映射：LyricsSource Embedded/SidecarLrc/None ↔ 'embedded'|'sidecar'|'none'
 //                MusicSourceId Netease/QqMusic/Migu ↔ 'netease'|'qqmusic'|'migu'
-// ---------------------------------------------------------------------------
 
 /** 音乐来源 ID：网易云 / QQ / 咪咕 */
 export type MusicSourceId = 'netease' | 'qqmusic' | 'migu'

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Song } from '../lib/tauri'
+import type { Song, SongSummary } from '../api/types'
 import { activateFolder, open, save, selectSong, songStore, undo } from './song'
+
+const s = (path: string, title = '', artist = ''): SongSummary => ({ path, title, artist })
 
 /** 构造一首完整标签的 Song（v1-song-read 契约形状）。 */
 const makeSong = (over: Partial<Song> = {}): Song => ({
@@ -286,5 +288,66 @@ describe('songStore — v1-song-save 保存状态机与撤销（design.md D7/D8�
     await activateFolder('/d', vi.fn(async () => []))
     expect(songStore.saveState).toBe('idle')
     expect(songStore.saveError).toBe('')
+  })
+})
+
+describe('songStore — v1-folder-list 状态（并入自 store.test.ts）', () => {
+  beforeEach(() => {
+    songStore.folderPath = null
+    songStore.songs = []
+    songStore.searchQuery = ''
+    songStore.selectedPath = null
+  })
+
+  it('初始为空状态：无目录、无列表、无搜索、无选中', () => {
+    expect(songStore.folderPath).toBeNull()
+    expect(songStore.songs).toEqual([])
+    expect(songStore.searchQuery).toBe('')
+    expect(songStore.selectedPath).toBeNull()
+  })
+
+  describe('selectSong — 点击选中（spec: 点击行选中高亮）', () => {
+    it('传入 path 即选中该行', () => {
+      selectSong('/a/song.flac')
+      expect(songStore.selectedPath).toBe('/a/song.flac')
+    })
+
+    it('传入 null 清除选中（换目录后无选中）', () => {
+      selectSong('/a/song.flac')
+      selectSong(null)
+      expect(songStore.selectedPath).toBeNull()
+    })
+  })
+
+  describe('activateFolder — 换目录整体替换列表 + 顶栏路径（spec: 重新打开整体替换）', () => {
+    it('目录非空：设 folderPath、加载并整体替换 songs、重置 selectedPath', async () => {
+      const dir = '/music/other'
+      const fresh = [s('/music/other/a.flac', 'A', 'AA'), s('/music/other/b.mp3', 'B', 'BB')]
+      const loadSongs = vi.fn(async () => fresh)
+
+      await activateFolder(dir, loadSongs)
+
+      expect(loadSongs).toHaveBeenCalledWith(dir)
+      expect(songStore.folderPath).toBe(dir) // 顶栏展示路径
+      expect(songStore.songs).toEqual(fresh)
+      expect(songStore.selectedPath).toBeNull() // 换目录重置选中
+    })
+
+    it('换目录前已有旧列表：结果被整体替换而非追加', async () => {
+      songStore.songs = [s('/old/zz.flac', 'Old', 'O')]
+      const fresh = [s('/new/a.flac', 'New', 'N')]
+      await activateFolder('/new', async () => fresh)
+      expect(songStore.songs).toEqual(fresh)
+      expect(songStore.folderPath).toBe('/new')
+    })
+
+    it('取消（dir 为空/null）→ 不改动任何状态、不调 loader', async () => {
+      const loader = vi.fn(async () => [])
+      await activateFolder(null, loader)
+      await activateFolder('', loader)
+      expect(songStore.folderPath).toBeNull()
+      expect(songStore.songs).toEqual([])
+      expect(loader).not.toHaveBeenCalled()
+    })
   })
 })

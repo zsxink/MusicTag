@@ -4,17 +4,16 @@
 //   → store.folderPath = dir → invoke('list_songs', { dir }) → songs 整体替换、selectedPath 重置。
 import { onMounted, onUnmounted } from 'vue'
 
-import { invokeCommand } from '../lib/tauri'
-import { activateFolder, filteredSongs, songStore } from '../store/song'
+import { listSongs, pickFolder } from '../api/songs'
+import { filteredSongs } from '../store/selectors'
+import { activateFolder, songStore } from '../store/song'
 import SongRow from './SongRow.vue'
 
 /** 打开文件夹：选择 + 遍历 + 整体替换列表（编排在 store.activateFolder）。 */
 async function openFolder() {
-  const picked = await invokeCommand<string | null>('pick_folder')
+  const picked = await pickFolder()
   if (picked === null) return // 取消，无视
-  await activateFolder(picked, (dir) =>
-    invokeCommand<typeof songStore.songs>('list_songs', { dir }),
-  )
+  await activateFolder(picked, (dir) => listSongs(dir))
 }
 
 /** ⌘O / Ctrl+O 快捷键打开文件夹。 */

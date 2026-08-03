@@ -2,7 +2,8 @@
 // 编辑顶栏（design.md §5 editor-bar）：正在编辑 + 保存状态 + 保存/撤销。
 // v1-song-save 接入保存状态机：dirty 琥珀 / 保存中 / ✓ 已保存 绿 / ✕ 保存失败：原因。
 // 保存状态由 readonly/dirty/saveState 三者合成（design.md D7，saveState 只存动作态）。
-import { fileName, save, songStore, undo } from '../store/song'
+import { fileName } from '../lib/path'
+import { save, songStore, undo } from '../store/song'
 
 // 保存中：为 true 时保存/撤销按钮均禁用（design.md D6 防连点并发写同一文件）
 const saving = () => songStore.saveState === 'saving'
