@@ -51,6 +51,18 @@ pub struct Song {
     pub cover_mime: Option<String>,
 }
 
+/// 封面选择/拖拽输入（`pick_cover_file` / `read_cover_path` 返回，v1-cover-embed）。
+///
+/// 字段与 TS `CoverInput` 契约逐字对齐（`src/api/types.ts`）：
+/// - `data_url`：压缩后小图的 base64 data URL（`data:<mime>;base64,...`），
+///   直接进 `Song.cover`（`<img :src>` 同形状，前端零转换，design.md §10.3 / D1）；
+/// - `mime`：`image/jpeg | image/png | image/webp`，供 `cover_mime` 展示。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoverInput {
+    pub data_url: String,
+    pub mime: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +153,19 @@ mod tests {
         assert!(json.contains(r#""lyrics_source":"none""#));
         assert!(json.contains(r#""cover":"data:image/png;base64,AAAA""#));
         assert!(json.contains(r#""cover_mime":"image/png""#));
+    }
+
+    #[test]
+    fn cover_input_serializes_to_contract_shape() {
+        // 契约形状冻结（design.md D1 / §10.3）：data_url + mime，与 src/api/types.ts 逐字对齐。
+        let input = CoverInput {
+            data_url: "data:image/jpeg;base64,AAAA".into(),
+            mime: "image/jpeg".into(),
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        assert_eq!(
+            json,
+            r#"{"data_url":"data:image/jpeg;base64,AAAA","mime":"image/jpeg"}"#
+        );
     }
 }
