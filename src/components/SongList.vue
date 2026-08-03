@@ -6,14 +6,15 @@ import { onMounted, onUnmounted } from 'vue'
 
 import { listSongs, pickFolder } from '../api/songs'
 import { filteredSongs } from '../store/selectors'
-import { activateFolder, songStore } from '../store/song'
+import { requestFolder, songStore } from '../store/song'
 import SongRow from './SongRow.vue'
 
-/** 打开文件夹：选择 + 遍历 + 整体替换列表（编排在 store.activateFolder）。 */
+/** 打开文件夹：选择 + 遍历 + 整体替换列表。
+ *  v1-ux-settings：走 requestFolder（dirty 拦截门——有未保存修改时复用同一三选一弹窗）。 */
 async function openFolder() {
   const picked = await pickFolder()
   if (picked === null) return // 取消，无视
-  await activateFolder(picked, (dir) => listSongs(dir))
+  await requestFolder(picked, (dir) => listSongs(dir))
 }
 
 /** ⌘O / Ctrl+O 快捷键打开文件夹。 */
