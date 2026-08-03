@@ -196,7 +196,13 @@ fn to_halfwidth(c: char) -> char {
 }
 
 /// `title_match(q, t)`（均已归一化）：相等 0.5 / 互相包含 0.2 / 否则 0（spec 权重，design.md D3）。
+///
+/// 空查询 / 空候选 title 不给分（防空串互相包含的退化命中，与 `artist_match` 对称；
+/// 裸文件无 title 标签时查询串为空，不得让所有候选统一得 0.2 分）。
 fn title_match(q: &str, t: &str) -> f32 {
+    if q.is_empty() || t.is_empty() {
+        return 0.0;
+    }
     if q == t {
         0.5
     } else if q.contains(t) || t.contains(q) {
@@ -336,6 +342,22 @@ mod tests {
         assert_eq!(title_match("晴天", "晴天娃娃"), 0.2, "t⊆q 互相包含 0.2");
         assert_eq!(title_match("晴天娃娃", "晴天"), 0.2, "q⊆t 互相包含 0.2");
         assert_eq!(title_match("晴天", "雨天"), 0.0, "零关联 0");
+        // 空查询/空候选 title 不给分（防退化命中，与 artist_match 对称）
+        assert_eq!(title_match("", "晴天"), 0.0, "空查询不得退化命中");
+        assert_eq!(title_match("晴天", ""), 0.0, "空候选 title 不得命中");
+        assert_eq!(title_match("", ""), 0.0);
+    }
+
+    #[test]
+    fn aggregate_filters_everything_on_empty_title_query() {
+        // 空 title 查询（裸文件无标签）→ 任何候选 title 都「包含空串」若不加守卫全得 0.2；
+        // 空守卫下 title_match==0 → 全部过滤，返回空而非噪声候选。
+        let songs = aggregate(
+            "",
+            "周杰伦",
+            vec![cand(MusicSourceId::Netease, "1", "晴天", "周杰伦")],
+        );
+        assert!(songs.is_empty(), "空 title 查询不得退化命中所有候选");
     }
 
     #[test]
