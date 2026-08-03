@@ -29,6 +29,6 @@
 
 ## 4. 验证
 
-- [ ] 4.1 `cargo test --manifest-path src-tauri/Cargo.toml` + `cargo clippy` 通过（压缩边界单测 + `tests/save_song.rs::save_song_embeds_compressed_cover_not_original` 压缩链路集成）
-- [ ] 4.2 `npm run test` + `npm run build` 通过
+- [x] 4.1 `cargo test --manifest-path src-tauri/Cargo.toml` + `cargo clippy` 通过（压缩边界单测 + `tests/save_song.rs::save_song_embeds_compressed_cover_not_original` 压缩链路集成）
+- [x] 4.2 `npm run test` + `npm run build` 通过
 - [ ] 4.3 `npm run tauri dev` 人工确认：点击选择/拖拽嵌入封面、>5MB 大图压缩后保存、第三方工具（Kid3/mutagen）验证嵌入的是 ≤2048 压缩图、清空封面保存后字段删除
