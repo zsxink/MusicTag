@@ -64,6 +64,7 @@ pub fn read_cover_path(path: String) -> Result<CoverInput, String> {
 - `lib.rs` `generate_handler![...]` 追加 `commands::cover::pick_cover_file, commands::cover::read_cover_path`。
 - **为什么 `data_url` 而非裸 bytes_base64**：`CoverInput.data_url` 直接进 `current.cover`（`<img :src>` 直接用，与 `open_song` 返回的 `cover` 同形状），避免前端再拼 `data:` 前缀；mime 一并返回供 `cover_mime` 展示。契约与 `Song.cover` 完全同构，前端零转换。
 - **为什么两个 command**：点击选择需要系统对话框（rfd，同步在主线程——同 `pick_folder` 既有模式，macOS 对话框必须在主线程）；拖拽走 Tauri 原生 `onDragDropEvent` 拿到的是**文件路径**（见 D4），需 Rust 读文件。两者压缩逻辑复用同一 `cover_from_path`。
+- **取消/失败同 `None`**：`pick_cover_file` 中 `cover_from_path` 失败（所选文件非图片/读失败）与用户取消**同返回 `None`**——前端无差别处理（`null` → 不操作，不弹错），与 `pick_folder` 的 null 语义对齐；拖拽路径的失败才经 `read_cover_path` 以 `Err(中文原因)` 暴露给前端一行 dim 提示（D5）。
 - **无独立 `embed_cover`**：封面不单独写盘，一律并入 `save_song`（design.md §10.3 已定）。本变更**不新增任何写盘 command**。
 
 ### D2 压缩策略（`service/cover.rs` 扩展）
@@ -72,15 +73,16 @@ pub fn read_cover_path(path: String) -> Result<CoverInput, String> {
 
 ```rust
 /// bytes + mime → 压缩后 bytes + 原 mime。
-/// 触发：任一边 > 2048 或 bytes > 5MB → 等比缩至 ≤2048×2048。
-/// 小图（≤2048×2048 且 ≤5MB）→ 原 bytes 原样返回（不放大）。
+/// 触发：任一边 > 2048 → 等比缩至 ≤2048×2048（维度目标；spec「>5MB 压缩」
+///       落在大图——维度过限才需缩，缩至 ≤2048 即消除元数据膨胀）。
+/// 双维 ≤2048 的图（无论体积，含 >5MB）→ 原 bytes 原样返回（不放大）。
 /// 解码失败 → Err；仅重编码失败（解码成功）→ 回退原 bytes（静默，不阻塞嵌入）。
 pub fn compress_cover(bytes: &[u8], mime: &str) -> Result<(Vec<u8>, String), String>
 ```
 
 实现要点：
 1. `image::load_from_memory(bytes)` 解码（`image` 0.25.10，default features 已含 jpeg/png/webp，`Cargo.lock` 确认 `image-webp` 已编入）。
-2. `img.width()` / `img.height()`：若均 ≤2048 且 `bytes.len() <= 5MB` → `Ok((bytes.to_vec(), mime.to_string()))`（小图不放大，spec「原尺寸保留嵌入」）。
+2. `img.width()` / `img.height()`：若均 ≤2048 → `Ok((bytes.to_vec(), mime.to_string()))`（小图不放大、原尺寸保留嵌入；含 >5MB 但双维 ≤2048 的罕见边界——维度目标已满足，同样原样返回，见 D7）。
 3. 否则 `img.resize(nw, nh, FilterType::Lanczos3)` 等比缩放（`DynamicImage::resize`，等比 = 保证单边 ≤2048），再按**原格式**重编码。
 4. 原格式判定：`ImageFormat::from_mime_type(mime)` 优先，兜底 `image::guess_format(bytes)`。重编码走 `img.write_to(&mut buf, format)` → `buf.into_inner()`。
 5. **格式分支**：
@@ -136,7 +138,7 @@ pub fn cover_from_path(path: &Path) -> Result<CoverInput, String>
   export function setCover(input: CoverInput): void   // current.cover = data_url; current.cover_mime = mime
   export function clearCover(): void                  // current.cover = null; current.cover_mime = null
   ```
-  - `cover` 已在 `DIRTY_FIELDS`（`store/song.ts`）→ 预览/清空自动翻转 dirty，无需改 dirty 判定。
+  - `cover` 已在 `DIRTY_FIELDS`（`store/song.ts`）→ 预览/清空自动翻转 dirty，无需改 dirty 判定；`cover_mime` 不在 `DIRTY_FIELDS`，但 `setCover`/`clearCover` 总随 `cover` 同步赋值，不会产生 dirty 漂移。
   - `readonly`（坏标签只读）时禁止 set/clear（`CoverPanel` 按钮与 drop handler 均 `:disabled="songStore.readonly"` 守卫）。
   - `clearCover` 置 `null` 后保存：`save_song` 收到 `cover=None` → `apply_cover` 不 push、`clear()` 已删封面（spec「清空封面」/「统一写盘」）。
 - **`CoverPanel.vue`**（既有组件改造，spec 场景全落）：
@@ -164,12 +166,12 @@ Rust 依赖变化：**无新增**。`image`（0.25.10，压缩 + mime 探测）�
 - `compress_cover`/`cover_from_path` 纯逻辑单测 **内联** `service/cover.rs`（无文件 I/O；`cover_from_path` 的 fs 读用 `std::fs` 写临时图片文件即可，或拆出纯 `compress_cover` 测试）。
 - command 契约单测 `commands/cover.rs` 内联（`read_cover_path` 给不存在路径 → Err）。
 - 前端 `api/songs.test.ts`（透传断言）、`store/song.test.ts`（setCover/clearCover + dirty 翻转）、`components/editor.test.ts` 或新建 `components/cover-panel.test.ts`（点击/拖拽/清空，mock `@tauri-apps/api/window` 的 `getCurrentWindow().onDragDropEvent` 返回 fake unlisten）。
-- 集成验证：压缩后 data URL 经 `save_song` 嵌入 → `read_song_meta` 读回字节尺寸 ≤2048（可选，见任务 3）。
+- 集成验证（已落位 `src-tauri/tests/save_song.rs::save_song_embeds_compressed_cover_not_original`）：大图 bytes → `compress_cover` → `encode_data_url` → `Song.cover` → `save_song` 写盘 → `read_song_meta` 读回 → 解码字节 = 压缩图（≤2048×2048 且 ≠ 原大图）——「统一写盘」「进标签的是压缩图、原图丢弃」的端到端断言。
 
 ### D7 边界与风险
 
 - **UI 短暂阻塞**：`pick_cover_file` 是同步 command（同 `pick_folder`，macOS 对话框须主线程）；压缩大图时 decode+encode 会在主线程跑几十~几百 ms。单首场景可接受（工具线，一次选一张）。若后续性能告警再改 async + rfd async API，不在本变更处理。
-- **>5MB 触发但双维 ≤2048 的图**：`compress_cover` 触发条件含 `bytes > 5MB`（spec「对 >5MB 图片自动等比缩至 ≤2048×2048」），但双维已 ≤2048 时**无法再缩**（等比目标已满足）——此时原样返回（重编码无损格式也不变小）。该场景罕见（≤2048 维度的图超过 5MB 极少），且维度不超即不会造成「元数据膨胀」，属可接受边界。
+- **>5MB 但双维 ≤2048 的图**：spec「对 >5MB 图片自动等比缩至 ≤2048×2048」按体积表述，但压缩目标是**维度**（≤2048×2048）——双维已 ≤2048 时**无法再缩**（等比目标已满足），`compress_cover` 原样返回（不放大、不重编码）。该场景罕见（≤2048 维度的图超过 5MB 极少），且维度不超即不会造成「元数据膨胀」，属可接受边界。
 - **WebP 重编码为 lossless**：image crate 仅支持 lossless WebP 编码（源码确认），重编码像素无损但体积可能偏大；不引入画质损失，单首封面体积可控（≤2048 维度）。
 - **拖拽非图片文件**：drop 任意文件 → `read_cover_path` 的 `load_from_memory` 失败 → `Err` → 前端不污染封面、显示提示。rfd 过滤器（jpg/png/webp）已拦点击路径。
 - **原图丢弃**：压缩在 Rust 侧完成，前端只拿压缩后 data URL，原图无处残留（PRD §5.3 决策 A 既定）。

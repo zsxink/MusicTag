@@ -5,12 +5,12 @@
 
 ## 1. Rust：封面选择与压缩
 
-- [ ] 1.1 `model.rs` 新增 `CoverInput { data_url: String, mime: String }`（serde 契约，与 `src/api/types.ts` 对齐）
-- [ ] 1.2 `service/cover.rs` 新增纯逻辑 `compress_cover(bytes, mime) -> Result<(Vec<u8>, String), String>`：任一边 >2048 或 bytes >5MB → `image::load_from_memory` + 等比 resize（Lanczos3）至 ≤2048×2048 → 按原格式重编码（JPEG/PNG 有损/无损，WebP 走 lossless——image crate 仅支持 lossless）；小图不放大原样返回；解码失败 `Err("封面格式无法识别")`；仅重编码失败回退原 bytes
-- [ ] 1.3 `service/cover.rs` 新增 `cover_from_path(path) -> Result<CoverInput, String>`：`std::fs::read` → `compress_cover` → `encode_data_url`（复用既有）+ mime；读失败/非图片 → Err(中文原因)
-- [ ] 1.4 `commands/cover.rs` 新增 module：`pick_cover_file() -> Option<CoverInput>`（rfd 文件对话框，`add_filter("图片", &["jpg","jpeg","png","webp"])`，取消 → None）与 `read_cover_path(path: String) -> Result<CoverInput, String>` 薄壳（只委托 `cover_from_path`）
-- [ ] 1.5 `commands/mod.rs` 追加 `pub mod cover;`；`lib.rs` `generate_handler![...]` 追加 `commands::cover::pick_cover_file, commands::cover::read_cover_path`
-- [ ] 1.6 单测（内联）：压缩边界（>2048 大图缩至 ≤2048、≤2048 小图不变、>5MB 触发、mime 保持 jpeg/png/webp）、非图片字节 → Err、重编码失败回退原 bytes、WebP lossless 重编码可解码
+- [x] 1.1 `model.rs` 新增 `CoverInput { data_url: String, mime: String }`（serde 契约，与 `src/api/types.ts` 对齐）
+- [x] 1.2 `service/cover.rs` 新增纯逻辑 `compress_cover(bytes, mime) -> Result<(Vec<u8>, String), String>`：任一边 >2048 → `image::load_from_memory` + 等比 resize（Lanczos3）至 ≤2048×2048 → 按原格式重编码（JPEG/PNG 有损/无损，WebP 走 lossless——image crate 仅支持 lossless）；双维 ≤2048 的图（无论体积，含 >5MB）不放大、原样返回；解码失败 `Err("封面格式无法识别")`；仅重编码失败回退原 bytes
+- [x] 1.3 `service/cover.rs` 新增 `cover_from_path(path) -> Result<CoverInput, String>`：`std::fs::read` → `compress_cover` → `encode_data_url`（复用既有）+ mime；读失败/非图片 → Err(中文原因)
+- [x] 1.4 `commands/cover.rs` 新增 module：`pick_cover_file() -> Option<CoverInput>`（rfd 文件对话框，`add_filter("图片", &["jpg","jpeg","png","webp"])`，取消 → None）与 `read_cover_path(path: String) -> Result<CoverInput, String>` 薄壳（只委托 `cover_from_path`）
+- [x] 1.5 `commands/mod.rs` 追加 `pub mod cover;`；`lib.rs` `generate_handler![...]` 追加 `commands::cover::pick_cover_file, commands::cover::read_cover_path`
+- [x] 1.6 单测（内联）：压缩边界（>2048 大图缩至 ≤2048、≤2048 小图不变、>5MB 触发、mime 保持 jpeg/png/webp）、非图片字节 → Err、重编码失败回退原 bytes、WebP lossless 重编码可解码
 
 ## 2. 前端 api + store
 
@@ -29,6 +29,6 @@
 
 ## 4. 验证
 
-- [ ] 4.1 `cargo test --manifest-path src-tauri/Cargo.toml` + `cargo clippy` 通过（压缩边界单测）
+- [ ] 4.1 `cargo test --manifest-path src-tauri/Cargo.toml` + `cargo clippy` 通过（压缩边界单测 + `tests/save_song.rs::save_song_embeds_compressed_cover_not_original` 压缩链路集成）
 - [ ] 4.2 `npm run test` + `npm run build` 通过
 - [ ] 4.3 `npm run tauri dev` 人工确认：点击选择/拖拽嵌入封面、>5MB 大图压缩后保存、第三方工具（Kid3/mutagen）验证嵌入的是 ≤2048 压缩图、清空封面保存后字段删除
