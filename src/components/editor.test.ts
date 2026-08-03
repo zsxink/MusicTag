@@ -1,5 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+
+// mock invoke，让组件点击保存走的默认 save（invokeCommand('save_song')) 在单测中成功
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(async () => undefined),
+}))
 
 import type { Song } from '../lib/tauri'
 import { songStore } from '../store/song'
@@ -35,6 +40,8 @@ function openSong(song: Song = makeSong()): void {
   songStore.readonly = false
   songStore.lyricsSource = song.lyrics_source
   songStore.selectedPath = song.path
+  songStore.saveState = 'idle'
+  songStore.saveError = ''
 }
 
 describe('Editor — 空态（spec: 未选中/未打开 → 右栏空态占位）', () => {
@@ -113,6 +120,100 @@ describe('EditorBar — 保存状态（spec: dirty 顶栏琥珀 / 只读 danger 
     expect(w.text()).toContain('正在编辑:')
     expect(w.text()).toContain('song.flac')
     expect(w.text()).toContain('作者')
+  })
+})
+
+describe('EditorBar — v1-song-save 保存状态渲染与按钮禁用（design.md D7/D9）', () => {
+  beforeEach(() => openSong())
+
+  const btn = (w: ReturnType<typeof mount>, cls: string) =>
+    w.find(`button.${cls}`)
+
+  it('saving → 「保存中…」+ 保存/撤销按钮都禁用', async () => {
+    songStore.saveState = 'saving'
+    const w = mount(EditorBar)
+    expect(w.text()).toContain('保存中…')
+    expect(btn(w, 'btn-primary').attributes('disabled')).toBeDefined()
+    expect(btn(w, 'btn-ghost').attributes('disabled')).toBeDefined()
+  })
+
+  it('save_failed → 「✕ 保存失败：原因」+ 保存按钮可点（脏可重试）', async () => {
+    songStore.current!.title = '改过'
+    songStore.saveState = 'save_failed'
+    songStore.saveError = '磁盘写入失败'
+    const w = mount(EditorBar)
+    expect(w.text()).toContain('✕ 保存失败：磁盘写入失败')
+    expect(w.find('.save-state.failed').exists()).toBe(true)
+    // 脏 = 可重试 → 保存按钮不禁用
+    expect(btn(w, 'btn-primary').attributes('disabled')).toBeUndefined()
+  })
+
+  it('saved → 「✓ 已保存」绿（保存后 dirty=false）', async () => {
+    songStore.saveState = 'saved'
+    songStore.current = { ...songStore.original } // dirty 归 false
+    const w = mount(EditorBar)
+    expect(w.text()).toContain('✓ 已保存')
+    expect(w.find('.save-state.saved').exists()).toBe(true)
+    expect(w.find('.save-state.dirty').exists()).toBe(false)
+  })
+
+  it('保存成功后再编辑字段 → dirty 琥珀「有未保存的修改」（绝不假报已保存，FR-5.4a）', async () => {
+    // 先构造「刚保存成功」态：saveState=saved 且 current=original（dirty=false）
+    songStore.saveState = 'saved'
+    songStore.current = { ...songStore.original }
+    // 用户随后再编辑字段 → dirty 翻转，但 saveState 仍为 saved
+    songStore.current!.title = '保存后又改'
+    expect(songStore.dirty).toBe(true)
+    expect(songStore.saveState).toBe('saved')
+    const w = mount(EditorBar)
+    // dirty 优先级高于 saved：琥珀提示，绝不显示「✓ 已保存」
+    expect(w.find('.save-state.dirty').exists()).toBe(true)
+    expect(w.text()).toContain('有未保存的修改')
+    expect(w.find('.save-state.saved').exists()).toBe(false)
+  })
+
+  it('clean 且 idle → 「已就绪」，撤销/保存按钮都禁用（无修改）', () => {
+    const w = mount(EditorBar)
+    expect(w.text()).toContain('已就绪')
+    expect(btn(w, 'btn-ghost').attributes('disabled')).toBeDefined()
+    expect(btn(w, 'btn-primary').attributes('disabled')).toBeDefined()
+  })
+
+  it('编辑（dirty）→ 撤销/保存按钮可点', () => {
+    songStore.current!.title = '改过'
+    const w = mount(EditorBar)
+    expect(btn(w, 'btn-ghost').attributes('disabled')).toBeUndefined()
+    expect(btn(w, 'btn-primary').attributes('disabled')).toBeUndefined()
+  })
+
+  it('readonly → 保存按钮禁用（只读不可保存），撤销也禁用', () => {
+    songStore.readonly = true
+    songStore.saveState = 'idle'
+    const w = mount(EditorBar)
+    expect(btn(w, 'btn-primary').attributes('disabled')).toBeDefined()
+    expect(btn(w, 'btn-ghost').attributes('disabled')).toBeDefined()
+    expect(w.text()).toContain('✕ 标签损坏，只读')
+  })
+
+  it('点击保存 → 调用 store save()（IPC 注入为 resolve）', async () => {
+    songStore.current!.title = '改过'
+    const w = mount(EditorBar)
+    // 直接验证按钮点击触发 store.save 到 saved 态（save 默认 invoke 已 mock 成功）
+    await btn(w, 'btn-primary').trigger('click')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(songStore.saveState).toBe('saved')
+    expect(songStore.dirty).toBe(false)
+  })
+
+  it('点击撤销 → current 回到 original、dirty 归 false', async () => {
+    songStore.current!.title = '改过'
+    const original = { ...songStore.original }
+    const w = mount(EditorBar)
+    await w.find('button.btn-ghost').trigger('click')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(songStore.current).toEqual(original)
+    expect(songStore.dirty).toBe(false)
+    expect(songStore.saveState).toBe('idle')
   })
 })
 

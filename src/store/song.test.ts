@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Song } from '../lib/tauri'
-import { activateFolder, open, selectSong, songStore } from './song'
+import { activateFolder, open, save, selectSong, songStore, undo } from './song'
 
 /** 构造一首完整标签的 Song（v1-song-read 契约形状）。 */
 const makeSong = (over: Partial<Song> = {}): Song => ({
@@ -37,6 +37,8 @@ describe('songStore — v1-song-read 编辑状态模型', () => {
     songStore.original = null
     songStore.readonly = false
     songStore.lyricsSource = 'none'
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
   })
 
   it('open 成功：current=original 快照、dirty=false、readonly=false', async () => {
@@ -166,5 +168,123 @@ describe('songStore — v1-song-read 编辑状态模型', () => {
     expect(songStore.original).toBeNull()
     expect(songStore.dirty).toBe(false)
     expect(songStore.readonly).toBe(false)
+    expect(songStore.saveState).toBe('idle')
+    expect(songStore.saveError).toBe('')
+  })
+})
+
+describe('songStore — v1-song-save 保存状态机与撤销（design.md D7/D8）', () => {
+  beforeEach(() => {
+    songStore.selectedPath = '/a/song.flac'
+    songStore.current = { ...makeSong() }
+    songStore.original = { ...makeSong() }
+    songStore.readonly = false
+    songStore.lyricsSource = 'none'
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+  })
+
+  it('save 默认走 invoke("save_song")：成功 → original 更新、dirty=false、saveState=saved', async () => {
+    songStore.current!.title = '改过' // 制造 dirty
+    expect(songStore.dirty).toBe(true)
+
+    const saveFn = vi.fn(async () => undefined)
+    await save(saveFn)
+
+    expect(saveFn).toHaveBeenCalledWith(songStore.current) // 提交整个 current 对象
+    expect(songStore.original).toEqual(songStore.current) // 新基准已快照
+    expect(songStore.original).not.toBe(songStore.current) // 快照独立
+    expect(songStore.current!.title).toBe('改过') // current 保留
+    expect(songStore.dirty).toBe(false) // 保存后归 false（已写盘）
+    expect(songStore.saveState).toBe('saved')
+    expect(songStore.saveError).toBe('')
+  })
+
+  it('save 失败：current 保留可重试、dirty 保持 true、saveState=save_failed、saveError 有值', async () => {
+    songStore.current!.artist = '新作者'
+    expect(songStore.dirty).toBe(true)
+    const originalSnapshot = { ...songStore.original }
+
+    const saveFn = vi.fn(async () => { throw new Error('磁盘写入失败') })
+    await save(saveFn)
+
+    expect(songStore.current!.artist).toBe('新作者') // 内容保留
+    expect(songStore.original).toEqual(originalSnapshot) // original 不更新
+    expect(songStore.dirty).toBe(true) // 绝不假报已保存
+    expect(songStore.saveState).toBe('save_failed')
+    expect(songStore.saveError).toBe('Error: 磁盘写入失败')
+
+    // 修复后重试成功 → dirty 归 false、saved
+    await save(vi.fn(async () => {}))
+    expect(songStore.saveState).toBe('saved')
+    expect(songStore.dirty).toBe(false)
+  })
+
+  it('readonly 或 current=null → 不执行保存，状态不变', async () => {
+    songStore.readonly = true
+    const saveFn = vi.fn(async () => {})
+    await save(saveFn)
+    expect(saveFn).not.toHaveBeenCalled()
+    expect(songStore.saveState).toBe('idle')
+
+    // current=null 且非只读 → 同样不执行
+    songStore.readonly = false
+    songStore.current = null
+    await save(saveFn)
+    expect(saveFn).not.toHaveBeenCalled()
+  })
+
+  it('undo：current 回到 original、dirty=false、saveState 归 idle', async () => {
+    songStore.current!.title = '改过'
+    songStore.current!.lyrics = '[00:00.00] 新词'
+    songStore.saveState = 'save_failed'
+    songStore.saveError = '某错误'
+
+    await undo()
+
+    expect(songStore.current).toEqual(songStore.original) // 恢复到打开时快照
+    expect(songStore.current).not.toBe(songStore.original) // 快照独立
+    expect(songStore.dirty).toBe(false)
+    expect(songStore.saveState).toBe('idle')
+    expect(songStore.saveError).toBe('')
+  })
+
+  it('undo 后 original 不被覆盖，再编辑可再撤销', async () => {
+    songStore.current!.title = '第一改'
+    await undo()
+    expect(songStore.current!.title).toBe('歌名')
+    songStore.current!.title = '第二改'
+    await undo()
+    expect(songStore.current!.title).toBe('歌名') // 回到同一基准
+  })
+
+  it('open 成功 → saveState 归 idle、saveError 清空（新歌作为新基准）', async () => {
+    songStore.saveState = 'saved'
+    songStore.saveError = 'old'
+    songStore.selectedPath = '/a/next.flac'
+    await open('/a/next.flac', vi.fn(async () => makeSong({ path: '/a/next.flac', title: 'Next' })))
+
+    expect(songStore.saveState).toBe('idle')
+    expect(songStore.saveError).toBe('')
+    expect(songStore.dirty).toBe(false)
+  })
+
+  it('open 失败（坏标签）→ saveState 归 idle、saveError 清空', async () => {
+    songStore.saveState = 'save_failed'
+    songStore.saveError = 'old'
+    songStore.selectedPath = '/bad/x.mp3'
+    await open('/bad/x.mp3', vi.fn(async () => { throw new Error('坏标签') }))
+
+    expect(songStore.readonly).toBe(true)
+    expect(songStore.saveState).toBe('idle')
+    expect(songStore.saveError).toBe('')
+  })
+
+  it('换目录（activateFolder）→ saveState 归 idle、saveError 清空', async () => {
+    songStore.saveState = 'saved'
+    songStore.saveError = 'old'
+    await activateFolder('/d', vi.fn(async () => []))
+    expect(songStore.saveState).toBe('idle')
+    expect(songStore.saveError).toBe('')
   })
 })
