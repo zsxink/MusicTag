@@ -207,6 +207,37 @@
 ## 10. 前端架构（Vue 3 + Vite + TypeScript）
 
 > 技术选型详见 `V1-PRD.md` §7。以下为组件结构、状态管理与 Tauri command 契约。
+> **§10.0 目录分层规范与 §10.4 测试放置约定是 V1 全量架构约束（v1-refactor-layering 定稿，由结构守卫
+> `src/styles/design-layering.test.ts` / `src/components/layering.test.ts` 校验）**——后续子变更的
+> Architect 必须服从：新逻辑落位到已定目录，不得新建平级目录或把逻辑放错层；新增测试按 §10.4 放置。
+> 改动本文件 §10 分层段落会触发守卫测试失败，须与代码一并提交。
+
+### 10.0 目录分层规范（Rust + 前端）
+
+**核心不变量**：生产代码按「薄 command 壳 → 纯业务 service → 数据模型」与「api → store → lib → components」两类分层；
+IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/client.ts`；新增子变更一律落位到下表目录。
+
+**Rust 侧（`src-tauri/src/`）**：
+
+| 目录/文件 | 职责 | 允许触碰的依赖 |
+|---|---|---|
+| `commands/` | Tauri command 薄壳：`#[tauri::command]`、参数接收、对 service 委托；lofty/IO/编解码逻辑**一律不出现** | `model`、`service` |
+| `service/` | 纯业务层：`reader.rs`（标签读）、`writer.rs`（保存编排）、`meta.rs`（字段映射/格式分支）、`cover.rs`（封面 data URL 编解码）、`fs_atomic.rs`（原子写回） | `model`、lofty、`image` |
+| `model.rs` | 数据类型：`Song` / `SongSummary` / `LyricsSource` / `MusicSourceId`（与前端 TS 类型对齐） | 无业务依赖 |
+| `lib.rs` | `pub mod model/commands/service` + `generate_handler![...]` 注册 command；模块声明必须 `pub`，供 `src-tauri/tests/` 集成测试经 `app_lib::` 访问 | — |
+
+**前端侧（`src/`）**：
+
+| 目录 | 职责 | 允许触碰的依赖 | 禁止 |
+|---|---|---|---|
+| `api/` | Tauri IPC 类型化封装：`client.ts`（`invokeCommand` 泛型透传，**唯一 `import { invoke } from '@tauri-apps/api/core'` 处**）、`types.ts`（TS 类型）、`songs.ts`（逐 command 封装） | `@tauri-apps/api/core` | 组件直接调 invoke |
+| `store/` | 单 store（非 Pinia）：`song.ts`（reactive 状态 + 动作 + dirty getter）、`selectors.ts`（纯展示派生） | `api/`、`lib/` | 组件直接改 store 对象 |
+| `lib/` | 纯工具：`path.ts`（文件名/去扩展名）；无 Vue / IPC 依赖 | 无 | Vue / Tauri 依赖 |
+| `components/` | `.vue` 组件树（见 §10.1）；**零 invoke 直呼**，IPC 一律经 `api/songs.ts` 注入 | `store/`、`api/` | `@tauri-apps/api/core` |
+
+> 前端依赖方向单向：`components → store → api → client`、`store → lib`，不得反向或成环。
+> `api/client.ts` 的 `import { invoke } from '@tauri-apps/api/core'` 是硬依赖——`vi.mock('@tauri-apps/api/core')`
+> 依赖该 import 源，改源（直接裸 invoke / 改名）会静默失效 mock、测试跑真实 invoke 即崩溃。
 
 ### 10.1 组件树
 
@@ -244,6 +275,15 @@ interface SongEditor {
 ```
 
 V1 规模用 Vue 组合式 API 的 `reactive` + `computed` 即可，不需要引入 Pinia。
+
+**store 职责拆分（§10.0 前端分层）**：
+
+- `store/song.ts` **只留** reactive 状态 + 动作（`selectSong` / `activateFolder` / `open` / `save` / `undo`）+ `dirty` getter；
+  动作的 IPC 依赖（`loadSong` / `loadSongs` / `saveFn`）一律注入（默认 loader 为 `api/songs.ts` 封装），测试可注入桩不依赖 Tauri。
+- `dirty` getter 是 **reactive 字面量内的 getter（Vue 3.5 转 live computed）**，**必须原位保留在 `reactive({...})` 内**——
+  挪出即失去响应式追踪，dirty 不再随编辑更新。
+- 纯工具（`fileName` / `fileNameStem`）在 `lib/path.ts`；纯展示派生（`titleText` / `artistText` / `filteredSongs`）在 `store/selectors.ts`；
+  两者都不持有/修改状态，selectors 依赖方向 `selectors → songStore → api` 单向无环。
 
 ### 10.3 Tauri command 契约
 
@@ -307,3 +347,25 @@ interface SearchResult {
 **封面传递**：`Song.cover` 用 **base64 data URL**（`data:image/jpeg;base64,...`），`<img :src="song.cover">` 直接用；一次只编辑一首、图不大，不必配置 asset 协议。写盘时 `save_song` 收到 base64，Rust 侧解码回 `Vec<u8>` 再写原文件（磁盘落盘形式仍是原始字节，见 PRD §5.3）。
 
 **惰性拉取**：`search_song` 一次返回候选（封面 URL + 歌词 id），点选封面才 `download_cover`、点选歌词行才 `fetch_lyric`。
+
+### 10.4 测试放置约定与未来子变更落位
+
+**测试放置约定（Rust / 前端统一）**：
+
+- **Rust 集成测试（文件 I/O）**：外置到 `src-tauri/tests/`（当前 `list_songs.rs` / `open_song.rs` / `save_song.rs`），经 `app_lib::` 访问生产代码，**不落 src/ 内**；共享 fixture（构造最小合法 FLAC/MP3、全字段标签、封面 data URL）收 `tests/common/mod.rs`，各测试 crate 按需引用子集。
+- **Rust 纯逻辑单测（无文件 I/O）**：`#[cfg(test)] mod tests` **内联**在 service / model 对应文件内（如 `cover.rs` 的 data URL 编解码、`meta.rs` 的字段映射），不进 `tests/`。
+- **前端测试**：co-located `*.test.ts` 与被测文件同目录（`src/api/*.test.ts`、`src/store/*.test.ts`、`src/lib/*.test.ts`、`src/components/*.test.ts`）；`@tauri-apps/api/core` 的 mock 只依赖 `api/client.ts` 的 import 源。
+- **结构守卫测试**：`src/styles/design-layering.test.ts`（扫描本文件 §10 断言分层/测试放置/落位说明齐全）+ `src/components/layering.test.ts`（扫描 components/ 断言零 invoke 直呼）——分层规范改代码时须同步本文件，否则守卫失败。
+
+**未来子变更落位说明（service/api 落位，读 design.md §10 的 Architect 按此规划）**：
+
+| 后续子变更（epic 项） | Rust 落位 | 前端落位 |
+|---|---|---|
+| v1-cover-embed（封面嵌入） | `service/cover.rs` 扩展（data URL 编解码已在此） | `api/songs.ts` 既有封装 + 组件 |
+| v1-lyrics-lrc（歌词 LRC 读写） | 新增 `service/lyrics.rs` | `api/songs.ts` |
+| v1-search-backend（三家并发搜索 + 网易云加密） | 新增 `service/searcher/`（子模块） | — |
+| v1-search-ui（歌词/封面候选 UI） | — | 新增 `api/search.ts`（`search_song` / `fetch_lyric` / `download_cover` 封装） |
+
+- 新 command 一律：Rust `commands/` 加薄壳 → `service/` 落业务 → `lib.rs` `generate_handler!` 注册；前端 `api/` 加封装 → store 注入 → 组件消费。
+- `searcher` 的加密（aes/cbc/rsa）与三家 HTTP 聚合是纯逻辑，无 Tauri 依赖，放 service 层（单元测试内联）。
+- `api/search.ts` 只做 IPC 透传（同 `songs.ts` 模式），候选生命周期（选中即搜、切歌即弃）逻辑在 store，不在 api 层。
