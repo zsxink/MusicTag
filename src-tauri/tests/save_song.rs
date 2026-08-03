@@ -394,7 +394,10 @@ fn save_song_mp3_embeds_compressed_cover_not_original() {
     assert!(cover_url.starts_with("data:image/jpeg;base64,"));
     let b64 = cover_url.split_once(";base64,").map(|(_, b)| b).unwrap();
     let embedded = BASE64.decode(b64).unwrap();
-    assert_eq!(embedded, compressed, "MP3 APIC 嵌入的应为压缩图字节（原图丢弃）");
+    assert_eq!(
+        embedded, compressed,
+        "MP3 APIC 嵌入的应为压缩图字节（原图丢弃）"
+    );
     let embedded_img = image::load_from_memory(&embedded).expect("嵌入封面应可解码");
     assert!(
         embedded_img.width() <= 2048 && embedded_img.height() <= 2048,

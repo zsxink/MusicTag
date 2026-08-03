@@ -84,8 +84,7 @@ const MAX_DIM: u32 = 2048;
 /// - 解码失败（非图片字节）→ `Err("封面格式无法识别")`（与 `decode_cover` 对称，前端不预览不嵌入）；
 /// - 仅重编码失败（解码已成功）→ 回退**原 bytes**（静默保留，不阻塞嵌入）。
 pub fn compress_cover(bytes: &[u8], mime: &str) -> Result<(Vec<u8>, String), String> {
-    let img = image::load_from_memory(bytes)
-        .map_err(|_| "封面格式无法识别".to_string())?;
+    let img = image::load_from_memory(bytes).map_err(|_| "封面格式无法识别".to_string())?;
 
     let (w, h) = img.dimensions();
     if w <= MAX_DIM && h <= MAX_DIM {
@@ -95,8 +94,8 @@ pub fn compress_cover(bytes: &[u8], mime: &str) -> Result<(Vec<u8>, String), Str
     }
 
     // 原格式判定：MIME 优先，兜底按字节探测。
-    let format = image::ImageFormat::from_mime_type(mime)
-        .or_else(|| image::guess_format(bytes).ok());
+    let format =
+        image::ImageFormat::from_mime_type(mime).or_else(|| image::guess_format(bytes).ok());
 
     // 触发压缩但无法判定格式（理论不可达：解码已成功即可 guess_format）→ 原样回退。
     let Some(format) = format else {
@@ -232,13 +231,9 @@ mod tests {
     fn jpeg_of_size(w: u32, h: u32) -> Vec<u8> {
         use std::io::Cursor;
         let mut buf = Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
-            w,
-            h,
-            image::Rgb([12, 34, 56]),
-        ))
-        .write_to(&mut buf, image::ImageFormat::Jpeg)
-        .expect("编码测试 JPEG 失败");
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(w, h, image::Rgb([12, 34, 56])))
+            .write_to(&mut buf, image::ImageFormat::Jpeg)
+            .expect("编码测试 JPEG 失败");
         buf.into_inner()
     }
 
@@ -264,7 +259,10 @@ mod tests {
     /// `compress_cover` 的「小图原样返回」早退，真正走到 `resized.write_to(Dds)` 的
     /// `Err(_)` 回退分支（CR：小 DDS 属空转测试，回退被改坏仍绿）。
     fn dds_of_size(w: u32, h: u32) -> Vec<u8> {
-        assert!(w % 4 == 0 && h % 4 == 0, "DDS 宽高须为 4 的倍数，实际 {w}x{h}");
+        assert!(
+            w.is_multiple_of(4) && h.is_multiple_of(4),
+            "DDS 宽高须为 4 的倍数，实际 {w}x{h}"
+        );
         let mut out = Vec::new();
         out.extend_from_slice(b"DDS ");
         // DDS_HEADER（124 字节，little-endian）
@@ -277,7 +275,7 @@ mod tests {
         out.extend_from_slice(&0u32.to_le_bytes()); // dwDepth
         out.extend_from_slice(&0u32.to_le_bytes()); // dwMipMapCount
         out.extend(std::iter::repeat_n(0u8, 44)); // dwReserved1[11]
-        // DDS_PIXELFORMAT（32 字节）
+                                                  // DDS_PIXELFORMAT（32 字节）
         out.extend_from_slice(&32u32.to_le_bytes()); // dwSize
         let pf_flags: u32 = 0x4; // DDPF_FOURCC
         out.extend_from_slice(&pf_flags.to_le_bytes());
@@ -287,7 +285,7 @@ mod tests {
         out.extend_from_slice(&0u32.to_le_bytes()); // dwGBitMask
         out.extend_from_slice(&0u32.to_le_bytes()); // dwBBitMask
         out.extend_from_slice(&0u32.to_le_bytes()); // dwABitMask
-        // dwCaps / dwCaps2 / dwCaps3 / dwCaps4 / dwReserved2
+                                                    // dwCaps / dwCaps2 / dwCaps3 / dwCaps4 / dwReserved2
         out.extend_from_slice(&0u32.to_le_bytes());
         out.extend_from_slice(&0u32.to_le_bytes());
         out.extend_from_slice(&0u32.to_le_bytes());
@@ -372,9 +370,16 @@ mod tests {
         assert!(png.len() > 5 * 1024 * 1024, "素材体积应 >5MB");
         let (out, mime) = compress_cover(&png, "image/png").expect(">5MB 小图应原样返回不报错");
         assert_eq!(mime, "image/png");
-        assert_eq!(out, png, "双维 ≤2048 的 >5MB 图应原尺寸保留，而非被放大到 2048");
+        assert_eq!(
+            out, png,
+            "双维 ≤2048 的 >5MB 图应原尺寸保留，而非被放大到 2048"
+        );
         let img = image::load_from_memory(&out).expect("原样返回的字节应可解码");
-        assert_eq!((img.width(), img.height()), (400, 300), "尺寸应保持 400x300 不被放大");
+        assert_eq!(
+            (img.width(), img.height()),
+            (400, 300),
+            "尺寸应保持 400x300 不被放大"
+        );
     }
 
     #[test]
