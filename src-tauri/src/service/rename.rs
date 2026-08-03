@@ -38,7 +38,16 @@ pub fn rename_song(old_path: &Path, new_name: &str) -> Result<(), String> {
     let lrc_to_move = stem_changed && old_lrc.is_file();
     let new_lrc = sidecar_lrc_path(&new_path);
 
-    // 撞名预检（D1）：全部 exists() 检查在任何 rename 之前一次性完成。
+    // 撞名预检（D1）：全部检查在任何 rename 之前一次性完成，禁止 POSIX 覆盖（FR-4.7）。
+    //
+    // `.lrc` 结尾的目标名（如「新歌.lrc」「song.mp3.lrc」）会令 new_path == new_lrc
+    // （sidecar_lrc_path 对已 `.lrc` 结尾的名字返回自身）。此时若放行且旧 `.lrc` 需移动，
+    // `.lrc` 先 rename 落位到 new_path，随后音频 fs::rename 会在 POSIX 下**静默覆盖**歌词
+    // （数据丢失）。故目标名解析出音频路径与自身 sidecar 路径重合时，直接拒绝——无论旧
+    // `.lrc` 是否存在，任何 rename 之前返回 Err「目标已存在」（D1 零部分状态）。
+    if new_path == new_lrc {
+        return Err("目标已存在".to_string());
+    }
     // new_path 存在 → 音频撞名；或（旧 `.lrc` 需移动且）new_lrc 存在 → `.lrc` 撞名。
     if new_path.exists() {
         return Err("目标已存在".to_string());

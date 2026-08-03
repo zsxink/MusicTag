@@ -113,6 +113,50 @@ fn rename_lrc_collision_rejected_before_any_rename() {
     );
 }
 
+#[test]
+fn rename_to_lrc_suffix_rejected_no_data_loss() {
+    // CR（v1-cover-embed 回归）：目标名以 `.lrc` 结尾（如「新歌.lrc」）时
+    // new_path == new_lrc（sidecar_lrc_path 对已 `.lrc` 结尾的名字返回自身）。
+    // 若放行，`.lrc` 先 rename 落位到 new_path、音频再 rename 会在 POSIX 下
+    // 静默覆盖歌词（FR-4.7 数据丢失）。应在任何 rename 之前拒绝（D1 零部分状态），
+    // 两个原文件均原样保留。
+    let tmp = TempDir::new().unwrap();
+    write_tagged_mp3(tmp.path(), "song.mp3", "T", "A");
+    fs::write(tmp.path().join("song.lrc"), "[00:00.00]歌词").unwrap();
+
+    let err = rename_song(&tmp.path().join("song.mp3"), "新歌.lrc").expect_err(".lrc 结尾目标名应被拒绝");
+
+    assert!(err.contains("目标已存在"), "错误应含「目标已存在」: {err}");
+    assert!(tmp.path().join("song.mp3").exists(), "原音频应保留");
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("song.lrc")).unwrap(),
+        "[00:00.00]歌词",
+        "原 .lrc 内容应原样保留，不得被音频字节覆盖"
+    );
+    assert!(!tmp.path().join("新歌.lrc").exists(), "不得生成目标文件");
+}
+
+#[test]
+fn rename_to_multi_suffix_lrc_rejected() {
+    // 多后缀变体：`song.mp3` → `song.mp3.lrc`（stem 变化 + 目标以 `.lrc` 结尾），
+    // 同样 new_path == new_lrc，必须在任何 rename 之前拒绝。
+    let tmp = TempDir::new().unwrap();
+    write_tagged_mp3(tmp.path(), "song.mp3", "T", "A");
+    fs::write(tmp.path().join("song.lrc"), "[00:00.00]歌词").unwrap();
+
+    let err =
+        rename_song(&tmp.path().join("song.mp3"), "song.mp3.lrc").expect_err(".lrc 结尾目标名应被拒绝");
+
+    assert!(err.contains("目标已存在"), "错误应含「目标已存在」: {err}");
+    assert!(tmp.path().join("song.mp3").exists(), "原音频应保留");
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("song.lrc")).unwrap(),
+        "[00:00.00]歌词",
+        "原 .lrc 内容应原样保留"
+    );
+    assert!(!tmp.path().join("song.mp3.lrc").exists(), "不得生成目标文件");
+}
+
 // ---------------------------------------------------------------------------
 // 防御校验（D7）与失败路径（FR-5.6：返回错误、原文件保留可重试）
 // ---------------------------------------------------------------------------

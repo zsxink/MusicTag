@@ -572,6 +572,29 @@ describe('songStore — v1-rename-sync 改名-保存联动（design.md D5/D6：�
     expect(songStore.dirty).toBe(false)
   })
 
+  it('撞名被拒后换名重试 → 第二次保存改名成功、路径同步、dirty 归零（spec「用户换名重试」）', async () => {
+    setPendingRename('撞名.flac')
+    const renameFn1 = vi.fn(async () => { throw new Error('目标已存在') })
+    await save(false, vi.fn(async () => undefined), renameFn1)
+    expect(songStore.renameRejected).toBe(true)
+    expect(songStore.pendingRename).toBe('撞名.flac')
+
+    // 用户换名重试：setPendingRename 即清 renameRejected（重新尝试改名）
+    setPendingRename('换名.flac')
+    expect(songStore.renameRejected).toBe(false)
+    const renameFn2 = vi.fn(async () => undefined)
+    const saveFn2 = vi.fn(async () => undefined)
+    await save(false, saveFn2, renameFn2)
+
+    expect(renameFn2).toHaveBeenCalledWith('/a/song.flac', '换名.flac')
+    expect(saveFn2).toHaveBeenCalledWith(songStore.current, false)
+    expect(songStore.current!.path).toBe('/a/换名.flac') // 换名后路径同步
+    expect(songStore.pendingRename).toBeNull()
+    expect(songStore.renameRejected).toBe(false)
+    expect(songStore.saveState).toBe('saved')
+    expect(songStore.dirty).toBe(false)
+  })
+
   it('改名被拒且标签保存也失败：saveState=save_failed、saveError=标签错误、dirty 保持 true', async () => {
     songStore.current!.title = '改过'
     setPendingRename('撞名.flac')
