@@ -234,6 +234,33 @@ describe('CoverPanel — 拖拽嵌入（v1-cover-embed D4，Tauri 原生 drag-dr
     expect(w.find('.cover-box').classes()).not.toContain('dragging')
   })
 
+  it('CR：Retina（dpr=2）下命中判定按物理像素对齐，不缩小/偏移命中框', async () => {
+    // design D4 CR 定稿：onDragDropEvent 的 position 是 PhysicalPosition，rect 是 CSS px，
+    // 必须按 devicePixelRatio 对齐——dpr=2 时封面框 CSS 200×200 对应物理 400×400。
+    mockInvoke.mockResolvedValue(cover)
+    window.devicePixelRatio = 2
+    const w = mount(CoverPanel)
+    await flushPromises()
+    stubCoverBoxRect(w)
+    const handler = dragHandler.get()!
+
+    // 物理 (350,350) 在缩放后封面框 (0..400) 内（若未按 dpr 对齐会被误判为框外）
+    handler({ payload: { type: 'enter', paths: ['/a.png'], position: { x: 350, y: 350 } } })
+    await flushPromises()
+    expect(w.find('.cover-box').classes()).toContain('dragging')
+
+    // 物理 (450,450) 超出缩放后封面框（若未对齐，450>200 也会框外，但 450>400 证明真外）
+    handler({ payload: { type: 'over', position: { x: 450, y: 450 } } })
+    await flushPromises()
+    expect(w.find('.cover-box').classes()).not.toContain('dragging')
+
+    // drop 用同样的物理坐标判定：框内 (350,350) 嵌入、框外 (450,450) 不嵌入
+    handler({ payload: { type: 'drop', paths: ['/retina.png'], position: { x: 350, y: 350 } } })
+    await flushPromises()
+    expect(mockInvoke).toHaveBeenCalledWith('read_cover_path', { path: '/retina.png' })
+    expect(songStore.current!.cover).toBe('data:image/png;base64,AAAA')
+  })
+
   it('拖拽非图片文件（readCoverPath reject）→ 不污染封面、显示错误提示', async () => {
     mockInvoke.mockRejectedValue(new Error('封面格式无法识别'))
     const w = mount(CoverPanel)

@@ -383,6 +383,28 @@ mod tests {
     }
 
     #[test]
+    fn compress_cover_over_5mb_large_image_is_downscaled() {
+        // spec「大图压缩」字面场景：>5MB 且维度过限的大图 → 等比缩至 ≤2048×2048。
+        // 既有大图测试（3000x2000 纯色 PNG）字节数远小于 5MB，未严格覆盖「>5MB」条件；
+        // 此处造一张 3000x2000 且体积 >5MB 的图（尾随字节撑大，解码忽略，与
+        // compress_cover_over_5mb_small_dim_png_returned_unchanged 同一手法），
+        // 断言触发压缩路径且嵌入的是压缩图。
+        let mut big = png_of_size(3000, 2000);
+        big.extend(std::iter::repeat_n(0u8, 6 * 1024 * 1024));
+        assert!(big.len() > 5 * 1024 * 1024, "素材体积应 >5MB");
+        let (out, mime) = compress_cover(&big, "image/png").expect(">5MB 大图应压缩成功");
+        assert_eq!(mime, "image/png");
+        let img = image::load_from_memory(&out).expect("压缩结果应可解码");
+        assert!(
+            img.width() <= MAX_DIM && img.height() <= MAX_DIM,
+            ">5MB 大图压缩后应 ≤2048×2048，实际 {}x{}",
+            img.width(),
+            img.height()
+        );
+        assert_ne!(out, big, "压缩图不得等于原大图（含尾随字节）");
+    }
+
+    #[test]
     fn compress_cover_non_image_bytes_returns_err() {
         // 非图片字节（无合法 magic）→ Err，不进入压缩/回退
         let res = compress_cover(b"not an image at all", "image/png");
