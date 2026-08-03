@@ -63,6 +63,44 @@ pub struct CoverInput {
     pub mime: String,
 }
 
+/// 搜索来源（design.md §10.3 契约形状：`"netease" | "qqmusic" | "migu"`，v1-search-backend）。
+///
+/// serde 默认会把 enum 序列化成 `{"Netease":null}` 对象形状，且 `rename_all = "snake_case"`
+/// 会把 `QqMusic` 序列化成 `"qq_music"`（≠ 前端 TS 字面量 `'qqmusic'`），必须显式
+/// `#[serde(rename = "qqmusic")]` —— 与 `LyricsSource::SidecarLrc` 显式 `rename = "sidecar"` 同款教训。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicSourceId {
+    Netease,
+    #[serde(rename = "qqmusic")]
+    QqMusic,
+    Migu,
+}
+
+/// 搜索候选（design.md §10.3 契约，v1-search-backend）。
+///
+/// 惰性拉取：候选只带 `id` + `cover_url`（随三家搜索响应带出），歌词文本 / 封面字节
+/// 点选后才 `fetch_lyric` / `download_cover`。无 `year` 字段（§10.3 TS 未定义）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SongCandidate {
+    pub source: MusicSourceId,
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub cover_url: Option<String>,
+}
+
+/// 三源并发搜索结果（design.md §10.3 契约，v1-search-backend）。
+///
+/// `source_stats` 元组序列化为 `[source, count]` 数组，对齐 TS
+/// `Array<[MusicSourceId, number]>`（各家成功返回的候选条数，失败/超时记 0，供前端离线判定）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub songs: Vec<SongCandidate>,
+    pub source_stats: Vec<(MusicSourceId, usize)>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,6 +204,85 @@ mod tests {
         assert_eq!(
             json,
             r#"{"data_url":"data:image/jpeg;base64,AAAA","mime":"image/jpeg"}"#
+        );
+    }
+
+    #[test]
+    fn music_source_id_serializes_to_contract_shape() {
+        // 契约形状冻结（design.md D6）：netease / qqmusic / migu 字面量。
+        // 杜绝 `{"Netease":null}` 对象形状与 `"qq_music"`（snake_case 陷阱，同 SidecarLrc 教训）。
+        assert_eq!(
+            serde_json::to_string(&MusicSourceId::Netease).unwrap(),
+            r#""netease""#
+        );
+        assert_eq!(
+            serde_json::to_string(&MusicSourceId::QqMusic).unwrap(),
+            r#""qqmusic""#,
+            "QqMusic 必须显式 rename 为 qqmusic，不得出现 qq_music"
+        );
+        assert_eq!(
+            serde_json::to_string(&MusicSourceId::Migu).unwrap(),
+            r#""migu""#
+        );
+        // 反序列化对称
+        assert_eq!(
+            serde_json::from_str::<MusicSourceId>(r#""qqmusic""#).unwrap(),
+            MusicSourceId::QqMusic
+        );
+        assert_eq!(
+            serde_json::from_str::<MusicSourceId>(r#""netease""#).unwrap(),
+            MusicSourceId::Netease
+        );
+        assert_eq!(
+            serde_json::from_str::<MusicSourceId>(r#""migu""#).unwrap(),
+            MusicSourceId::Migu
+        );
+    }
+
+    #[test]
+    fn song_candidate_serializes_to_contract_shape() {
+        // 契约形状冻结（design.md §10.3）：字段名与 TS SongCandidate 逐字对齐。
+        let c = SongCandidate {
+            source: MusicSourceId::QqMusic,
+            id: "004D3pK90wGyM2".into(),
+            title: "晴天".into(),
+            artist: "周杰伦".into(),
+            album: "叶惠美".into(),
+            cover_url: Some(
+                "http://y.qq.com/music/photo_new/T002R300x300M000004D3pK90wGyM2.jpg".into(),
+            ),
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(
+            json.contains(r#""source":"qqmusic""#),
+            "source 应为 qqmusic 字面量，实际: {json}"
+        );
+        assert!(
+            json.contains(r#""cover_url":""#),
+            "cover_url 字段名应为 snake_case: {json}"
+        );
+        assert!(!json.contains("QqMusic"), "不得出现 Rust 变体名: {json}");
+        let back: SongCandidate = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, c.id);
+        assert_eq!(back.source, MusicSourceId::QqMusic);
+    }
+
+    #[test]
+    fn search_result_source_stats_serializes_as_tuple_array() {
+        // 契约形状冻结（design.md §10.3）：source_stats 元组 → `[[source, count], ...]` 数组，
+        // 对齐 TS `Array<[MusicSourceId, number]>`。
+        let r = SearchResult {
+            songs: vec![],
+            source_stats: vec![
+                (MusicSourceId::Netease, 3),
+                (MusicSourceId::QqMusic, 0),
+                (MusicSourceId::Migu, 2),
+            ],
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(
+            json.contains(r#"source_stats":[["netease",3],["qqmusic",0],["migu",2]]"#),
+            "source_stats 应序列化为 [source, count] 数组，实际: {json}"
         );
     }
 }
