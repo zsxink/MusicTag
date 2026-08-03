@@ -21,7 +21,7 @@
 ## 3. 前端组件：封面区交互
 
 - [x] 3.1 `CoverPanel.vue` 点击选择：封面框 `@click` → `pickCoverFile()` → 非 null 则 `setCover`（readonly 时禁用）
-- [x] 3.2 `CoverPanel.vue` 拖拽嵌入：`onMounted` 订阅 `getCurrentWindow().onDragDropEvent`（`@tauri-apps/api/window`），`enter/over` 置 `dragging` class、`drop` 取 `paths[0]` → `readCoverPath` → `setCover`、`leave` 复位；`onBeforeUnmount` 调 `unlisten`；组件经 `api/songs.ts` 发 IPC（不直呼 invoke）
+- [x] 3.2 `CoverPanel.vue` 拖拽嵌入：`onMounted` 订阅 `getCurrentWindow().onDragDropEvent`（`@tauri-apps/api/window`），`enter/over` 命中封面框才置 `dragging` class、`drop` 命中封面框取 `paths[0]` → `readCoverPath` → `setCover`、`leave` 复位；`onBeforeUnmount` 调 `unlisten`；**命中判定按 `devicePixelRatio` 把 PhysicalPosition（物理像素）与 `getBoundingClientRect()`（CSS px）对齐**、限定封面框范围（拖到其他区域不嵌入）；readonly 忽略 drop；非 Tauri 环境 try/catch 静默降级；组件经 `api/songs.ts` 发 IPC（不直呼 invoke）
 - [x] 3.3 预览与展示：`<img :src="current.cover">` 渲染压缩后小图；`cover_mime` 展示 JPEG/PNG/WEBP；空态虚线框提示「点击选择 / 拖拽嵌入」（替换现「无封面」静态文案）
 - [x] 3.4 清空封面：有封面时提供清空操作（如 ✕ / 移除封面按钮）→ `clearCover()`；保存后 `cover=None` 走既有删除语义
 - [x] 3.5 错误处理：`pickCoverFile`/`readCoverPath` reject → 不污染现有封面，一行 dim 提示；readonly 时封面区整体禁用；「搜索封面」按钮保持 disabled 占位（v1-search-ui 接）

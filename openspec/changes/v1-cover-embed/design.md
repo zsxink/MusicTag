@@ -99,7 +99,7 @@ pub fn compress_cover(bytes: &[u8], mime: &str) -> Result<(Vec<u8>, String), Str
 pub fn cover_from_path(path: &Path) -> Result<CoverInput, String>
 ```
 
-- `std::fs::read` → `compress_cover` → `CoverInput { data_url: encode_data_url(&bytes, &mime), mime }`（复用 `cover::encode_data_url`，见 Context）。
+- `std::fs::read` → `image::guess_format` 按字节探测 mime（**非图片字节 → `Err("封面格式无法识别")`，先于解码拦截**）→ `compress_cover(&bytes, &mime)` → `CoverInput { data_url: encode_data_url(&compressed, &mime), mime }`（复用 `cover::encode_data_url`，见 Context）。**mime 探测必须先于 `compress_cover`**：小图路径原样返回字节，`CoverInput.mime` 只能由 `guess_format` 提供。
 - 返回的 `data_url` 即为压缩后小图；原图字节丢弃（PRD §5.3 决策 A：进标签的是 ≤2048 压缩图）。
 
 ### D3 统一封面路径（无独立 embed_cover）
@@ -123,7 +123,15 @@ pub fn cover_from_path(path: &Path) -> Result<CoverInput, String>
 - Tauri 2 的 WebView（尤其 macOS WKWebView）对拖入文件的 `File` 对象**不保证暴露本地路径**（安全限制），`FileReader` 可能读到空/失败；native drag-drop 由 Tauri 进程侧直接给**真实绝对路径**，`fs::read` 可靠。
 - 拖拽与点击共用 Rust 压缩路径，行为完全一致（spec「拖拽文件到封面区 → 封面区预览该图」）。
 
-前端接入点（分层约束，见 D5）：`CoverPanel.vue` 内 `onMounted` 订阅 `getCurrentWindow().onDragDropEvent`，`enter/over` 置 `dragging` class（虚线框 hover 琥珀，design §6.1 封面区样式），`drop` 且 `paths[0]` 非空 → `readCoverPath`，`leave` 复位；`onBeforeUnmount` 调返回的 `unlisten`。**组件不直接 invoke**（guard `components/layering.test.ts` 只禁 `@tauri-apps/api/core`；`@tauri-apps/api/window` 事件订阅属窗口事件、非 IPC，IPC 仍经 `api/songs.ts`，符合 §10.0 分层）。
+前端接入点（分层约束，见 D5）：`CoverPanel.vue` 内 `onMounted` 订阅 `getCurrentWindow().onDragDropEvent`
+（`@tauri-apps/api/window`；返回的 `unlisten` 在 `onBeforeUnmount` 调用释放防泄漏）：
+- `enter/over`：`isInsideCoverBox(event.payload.position)` **命中封面框矩形才**置 `dragging` class（虚线框 hover 琥珀，design §6.1 封面区样式）；
+- `drop`：命中封面框且 `paths[0]` 非空 → `readCoverPath` → `setCover`；**拖到歌词区/字段区/顶栏任意处落下一律不嵌入**（spec「拖拽文件到封面区」）；
+- `leave`：复位 `dragging`。
+- **命中判定细节（CR 定稿，易踩坑）**：`onDragDropEvent` 的 `position` 是 **PhysicalPosition（物理像素）**，而 `getBoundingClientRect()` 返回 **CSS 像素** → 须按 `window.devicePixelRatio` 把封面框矩形缩放对齐后再做包含判定；不换算会在 Retina（dpr=2）下把命中框偏移/缩小一半而错判。无 `position`（如 leave）一律视为未命中。
+- **readonly 时 drop 一律忽略**（事件回调首行 `if (readonly.value) return`，含高亮复位）。
+- **非 Tauri 环境静默降级**：`onDragDropEvent` 用 try/catch 包裹——`npm run dev` 浏览器态或单测 mock 缺失时无拖拽能力，静默降级不报错（点击选择仍可用）。
+- **组件不直接 invoke**（guard `components/layering.test.ts` 只禁 `@tauri-apps/api/core`；`@tauri-apps/api/window` 事件订阅属窗口事件、非 IPC，IPC 仍经 `api/songs.ts`，符合 §10.0 分层）。
 
 ### D5 前端接入（api / store / CoverPanel）
 
