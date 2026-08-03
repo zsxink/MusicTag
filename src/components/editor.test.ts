@@ -44,6 +44,8 @@ function openSong(song: Song = makeSong()): void {
   songStore.selectedPath = song.path
   songStore.saveState = 'idle'
   songStore.saveError = ''
+  songStore.pendingRename = null
+  songStore.renameRejected = false
 }
 
 describe('Editor — 空态（spec: 未选中/未打开 → 右栏空态占位）', () => {
@@ -316,6 +318,47 @@ describe('EditorBar — exportLrc 独立导出门禁（CR 修复：D7 非脏但�
   })
 })
 
+describe('EditorBar — v1-rename-sync renamePending 保存门禁（design.md D5：纯改名独立触发保存）', () => {
+  beforeEach(() => {
+    openSong()
+    songStore.pendingRename = null
+    songStore.renameRejected = false
+    mockInvoke.mockReset()
+    mockInvoke.mockResolvedValue(undefined)
+  })
+
+  const saveBtn = (w: ReturnType<typeof mount>) => w.find('button.btn-primary')
+
+  it('纯改名（dirty=false + renamePending=true）→ 保存按钮可点', () => {
+    expect(songStore.dirty).toBe(false)
+    songStore.pendingRename = '新歌.flac'
+    const w = mount(EditorBar)
+    expect(saveBtn(w).attributes('disabled')).toBeUndefined()
+  })
+
+  it('未改名且无字段编辑 → 保存按钮仍禁用（原 dirty 门禁保持）', () => {
+    const w = mount(EditorBar)
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+  })
+
+  it('改名被拒后（renameRejected=true、pendingRename 保留）→ 保存按钮仍可点（换名后重存即完成改名）', () => {
+    songStore.pendingRename = '撞名.flac'
+    songStore.renameRejected = true
+    const w = mount(EditorBar)
+    expect(saveBtn(w).attributes('disabled')).toBeUndefined()
+  })
+
+  it('纯改名点保存 → store.save 走 rename 成功路径：saveState=saved、pendingRename 清空、path 同步', async () => {
+    songStore.pendingRename = '新歌.flac'
+    const w = mount(EditorBar)
+    await saveBtn(w).trigger('click')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(songStore.saveState).toBe('saved')
+    expect(songStore.pendingRename).toBeNull()
+    expect(songStore.current!.path).toBe('/a/新歌.flac')
+  })
+})
+
 describe('FieldGrid — 两列布局（spec: 左字段列 + 右封面区 `1fr 200px`）', () => {
   beforeEach(() => openSong())
 
@@ -432,8 +475,8 @@ describe('FieldList 全字段行 — 字段值渲染（spec: 左列字段区 8 �
     const trackRow = w.findAll('.field').find((f) => f.find('.field-label').text() === '音轨号')!
     const trackInputs = trackRow.findAll('input').map((i) => (i.element as HTMLInputElement).value)
     expect(trackInputs).toEqual(['3', '12'])
-    // 文件名行：只读 mono 展示
+    // 文件名行：可编辑 input，显示 fileName(selectedPath)
     const fileRow = w.findAll('.field').find((f) => f.find('.field-label').text() === '文件名')!
-    expect(fileRow.find('.file-name').text()).toBe('song.flac')
+    expect((fileRow.find('input').element as HTMLInputElement).value).toBe('song.flac')
   })
 })

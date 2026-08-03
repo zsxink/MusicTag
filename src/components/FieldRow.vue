@@ -3,11 +3,12 @@
 // 三形态：
 // - `text`：普通文本字段（歌名/作者/专辑/专辑作者/年份/流派），v-model 绑 current
 // - `track`：音轨号 `track` / 共 `track_total`（inline-suffix 布局）
-// - `file`：文件名行，只读展示（mono），改名归 v1-rename-sync
+// - `file`：文件名行，可编辑（v1-rename-sync）——独立 UI 状态 `pendingRename`，
+//   非 Song 字段、不进 DIRTY_FIELDS（D5：单改文件名不脏表单）
 import { computed } from 'vue'
 
 import { fileName } from '../lib/path'
-import { songStore } from '../store/song'
+import { setPendingRename, songStore } from '../store/song'
 
 const props = withDefaults(
   defineProps<{
@@ -17,7 +18,7 @@ const props = withDefaults(
     field?: 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'genre'
     /** 输入框占位符。 */
     placeholder?: string
-    /** 形态：默认 text；track = 音轨号/总数对；file = 只读文件名行。 */
+    /** 形态：默认 text；track = 音轨号/总数对；file = 可编辑文件名行。 */
     kind?: 'text' | 'track' | 'file'
   }>(),
   {
@@ -29,8 +30,16 @@ const props = withDefaults(
 /** 当前编辑中歌曲（可能为 null，表单只在 current 非空时渲染）。 */
 const current = computed(() => songStore.current)
 
-/** 只读文件名（当前选中歌曲的路径最后一段）。 */
+/** 只读回退文件名（当前选中歌曲的路径最后一段；pendingRename 为空时展示）。 */
 const file = computed(() => fileName(songStore.selectedPath ?? ''))
+
+/** 文件名行显示值 = 改名草稿 ?? 原文件名（D5：pendingRename 独立于 Song 字段）。 */
+const fileValue = computed(() => songStore.pendingRename ?? file.value)
+
+/** 输入即写改名草稿（空串 → null，回到原文件名；同时清撞名标记）。 */
+function onRenameInput(e: Event): void {
+  setPendingRename((e.target as HTMLInputElement).value)
+}
 </script>
 
 <template>
@@ -66,9 +75,17 @@ const file = computed(() => fileName(songStore.selectedPath ?? ''))
       />
     </div>
 
-    <!-- 文件名行：只读 mono（改名归 v1-rename-sync） -->
+    <!-- 文件名行：可编辑（v1-rename-sync）。改名独立动作，保存时联动「先改名 → 再写标签」 -->
     <div v-else-if="kind === 'file'" class="file-row" :title="songStore.selectedPath ?? ''">
-      <span class="file-name">{{ file }}</span>
+      <input
+        class="field-input file-input"
+        type="text"
+        :value="fileValue"
+        :disabled="songStore.readonly"
+        @input="onRenameInput"
+      />
+      <!-- 撞名被拒行内提示（D6：标签仍写回原路径，换名后重存即完成改名） -->
+      <span v-if="songStore.renameRejected" class="file-rejected" role="alert">目标已存在</span>
     </div>
   </div>
 </template>
@@ -134,18 +151,21 @@ const file = computed(() => fileName(songStore.selectedPath ?? ''))
   white-space: nowrap;
 }
 
-/* 文件名行（mono） */
+/* 文件名行（可编辑，mono） */
 .file-row {
   min-width: 0;
 }
 
-.file-name {
-  display: block;
+.file-input {
   font-family: var(--mono);
   font-size: 12.5px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.file-rejected {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--danger);
 }
 </style>

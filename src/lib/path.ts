@@ -11,3 +11,9 @@ export function fileNameStem(path: string): string {
   const dot = name.lastIndexOf('.')
   return dot > 0 ? name.slice(0, dot) : name
 }
+
+/** 跨 `/` / `\` 替换路径末段 → 新路径（v1-rename-sync 改名成功后同步 path）。 */
+export function replaceFileName(path: string, newName: string): string {
+  const i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return i >= 0 ? path.slice(0, i + 1) + newName : newName
+}
