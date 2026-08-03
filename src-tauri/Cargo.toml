@@ -23,3 +23,11 @@ walkdir = "2.5.0"
 image = "0.25.10"
 base64 = "0.23.0"
 tempfile = "3.27.0"
+# v1-search-backend：三源并发搜索 / 网易云加密 / 封面下载
+reqwest = { version = "0.13", features = ["json", "form"] }
+tokio = { version = "1", features = ["time", "macros", "rt"] }
+async-trait = "0.1"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+rsa = "0.9"
+rand = "0.9"

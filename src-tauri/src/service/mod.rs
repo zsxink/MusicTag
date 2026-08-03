@@ -9,4 +9,5 @@ pub mod lyrics;
 pub mod meta;
 pub mod reader;
 pub mod rename;
+pub mod searcher;
 pub mod writer;

@@ -5,4 +5,5 @@
 
 pub mod cover;
 pub mod folder;
+pub mod search;
 pub mod song;

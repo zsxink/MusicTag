@@ -124,7 +124,8 @@ fn rename_to_lrc_suffix_rejected_no_data_loss() {
     write_tagged_mp3(tmp.path(), "song.mp3", "T", "A");
     fs::write(tmp.path().join("song.lrc"), "[00:00.00]歌词").unwrap();
 
-    let err = rename_song(&tmp.path().join("song.mp3"), "新歌.lrc").expect_err(".lrc 结尾目标名应被拒绝");
+    let err =
+        rename_song(&tmp.path().join("song.mp3"), "新歌.lrc").expect_err(".lrc 结尾目标名应被拒绝");
 
     assert!(err.contains("目标已存在"), "错误应含「目标已存在」: {err}");
     assert!(tmp.path().join("song.mp3").exists(), "原音频应保留");
@@ -144,8 +145,8 @@ fn rename_to_multi_suffix_lrc_rejected() {
     write_tagged_mp3(tmp.path(), "song.mp3", "T", "A");
     fs::write(tmp.path().join("song.lrc"), "[00:00.00]歌词").unwrap();
 
-    let err =
-        rename_song(&tmp.path().join("song.mp3"), "song.mp3.lrc").expect_err(".lrc 结尾目标名应被拒绝");
+    let err = rename_song(&tmp.path().join("song.mp3"), "song.mp3.lrc")
+        .expect_err(".lrc 结尾目标名应被拒绝");
 
     assert!(err.contains("目标已存在"), "错误应含「目标已存在」: {err}");
     assert!(tmp.path().join("song.mp3").exists(), "原音频应保留");
@@ -154,7 +155,10 @@ fn rename_to_multi_suffix_lrc_rejected() {
         "[00:00.00]歌词",
         "原 .lrc 内容应原样保留"
     );
-    assert!(!tmp.path().join("song.mp3.lrc").exists(), "不得生成目标文件");
+    assert!(
+        !tmp.path().join("song.mp3.lrc").exists(),
+        "不得生成目标文件"
+    );
 }
 
 // ---------------------------------------------------------------------------
