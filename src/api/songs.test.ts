@@ -56,11 +56,14 @@ describe('api/songs.ts — 类型化 command 封装（命令名/参数逐字对�
     expect(mockInvoke).toHaveBeenCalledWith('open_song', { path: '/a/song.flac' })
   })
 
-  it('saveSong：透传 save_song + { song } 整个 current 对象', async () => {
+  it('saveSong：透传 save_song + { song, exportLrc } 整个 current 对象（design.md D3 扩参）', async () => {
     const song = makeSong({ title: '改过' })
     mockInvoke.mockResolvedValue(undefined)
-    await saveSong(song)
-    expect(mockInvoke).toHaveBeenCalledWith('save_song', { song })
+    await saveSong(song, true)
+    expect(mockInvoke).toHaveBeenCalledWith('save_song', { song, exportLrc: true })
+
+    await saveSong(song, false)
+    expect(mockInvoke).toHaveBeenCalledWith('save_song', { song, exportLrc: false })
   })
 
   it('pickCoverFile：透传 pick_cover_file 无参数；取消返回 null、选中返回 CoverInput', async () => {

@@ -37,7 +37,7 @@ const saving = () => songStore.saveState === 'saving'
         class="btn btn-primary"
         type="button"
         :disabled="!songStore.dirty || saving() || songStore.readonly"
-        @click="save()"
+        @click="save(songStore.exportLrc)"
       >保存</button>
     </div>
   </div>
