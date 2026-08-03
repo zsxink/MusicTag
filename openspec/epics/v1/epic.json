@@ -8,7 +8,7 @@
     { "name": "v1-skeleton-tauri", "issue": 6, "domain": "both", "dependsOn": [], "status": "done", "implementationCommit": "1104eb5", "slice": "FR-1 前置 · design §10.1/§7" },
     { "name": "v1-folder-list", "issue": 7, "domain": "both", "dependsOn": ["v1-skeleton-tauri"], "status": "done", "implementationCommit": "9dd6ad7", "slice": "FR-1.1–5 / FR-2 / §10.3" },
     { "name": "v1-song-read", "issue": 8, "domain": "both", "dependsOn": ["v1-folder-list"], "status": "done", "implementationCommit": "84c3a12", "slice": "FR-3 / FR-2a / FR-5.1/F-5.7" },
-    { "name": "v1-song-save", "issue": 9, "domain": "both", "dependsOn": ["v1-song-read"], "status": "todo", "implementationCommit": null, "slice": "FR-5 / FR-3.2 / §5.1/.2 / §10.3" },
+    { "name": "v1-song-save", "issue": 9, "domain": "both", "dependsOn": ["v1-song-read"], "status": "done", "implementationCommit": "2b7818a", "slice": "FR-5 / FR-3.2 / §5.1/.2 / §10.3" },
     { "name": "v1-cover-embed", "issue": 10, "domain": "both", "dependsOn": ["v1-song-save"], "status": "todo", "implementationCommit": null, "slice": "FR-3.5 / FR-5.2 / §5.3 / NFR" },
     { "name": "v1-lyrics-lrc", "issue": 11, "domain": "both", "dependsOn": ["v1-song-save"], "status": "todo", "implementationCommit": null, "slice": "FR-4 / §5.4 / §6.5" },
     { "name": "v1-rename-sync", "issue": 12, "domain": "both", "dependsOn": ["v1-lyrics-lrc", "v1-song-save"], "status": "todo", "implementationCommit": null, "slice": "FR-4.6/6a/7 · FR-5.5/6 · §7" },

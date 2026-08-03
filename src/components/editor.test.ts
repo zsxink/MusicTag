@@ -157,6 +157,21 @@ describe('EditorBar — v1-song-save 保存状态渲染与按钮禁用（design.
     expect(w.find('.save-state.dirty').exists()).toBe(false)
   })
 
+  it('保存成功后再编辑字段 → dirty 琥珀「有未保存的修改」（绝不假报已保存，FR-5.4a）', async () => {
+    // 先构造「刚保存成功」态：saveState=saved 且 current=original（dirty=false）
+    songStore.saveState = 'saved'
+    songStore.current = { ...songStore.original }
+    // 用户随后再编辑字段 → dirty 翻转，但 saveState 仍为 saved
+    songStore.current!.title = '保存后又改'
+    expect(songStore.dirty).toBe(true)
+    expect(songStore.saveState).toBe('saved')
+    const w = mount(EditorBar)
+    // dirty 优先级高于 saved：琥珀提示，绝不显示「✓ 已保存」
+    expect(w.find('.save-state.dirty').exists()).toBe(true)
+    expect(w.text()).toContain('有未保存的修改')
+    expect(w.find('.save-state.saved').exists()).toBe(false)
+  })
+
   it('clean 且 idle → 「已就绪」，撤销/保存按钮都禁用（无修改）', () => {
     const w = mount(EditorBar)
     expect(w.text()).toContain('已就绪')

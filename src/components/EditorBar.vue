@@ -15,12 +15,13 @@ const saving = () => songStore.saveState === 'saving'
       <span v-if="songStore.current?.artist" class="now-artist">{{ songStore.current.artist }}</span>
     </div>
 
-    <!-- 保存状态（readonly > saving > save_failed > saved > dirty > 已就绪，design.md D7 优先级） -->
+    <!-- 保存状态（readonly > saving > save_failed > dirty > saved > 已就绪，design.md D7 优先级）
+         dirty 高于 saved：保存后用户再编辑 → 有未保存修改绝不假报已保存（FR-5.4a） -->
     <span v-if="songStore.readonly" class="save-state readonly" role="alert">✕ 标签损坏，只读</span>
     <span v-else-if="songStore.saveState === 'saving'" class="save-state saving">保存中…</span>
     <span v-else-if="songStore.saveState === 'save_failed'" class="save-state failed" role="alert">✕ 保存失败：{{ songStore.saveError }}</span>
-    <span v-else-if="songStore.saveState === 'saved'" class="save-state saved">✓ 已保存</span>
     <span v-else-if="songStore.dirty" class="save-state dirty">有未保存的修改</span>
+    <span v-else-if="songStore.saveState === 'saved'" class="save-state saved">✓ 已保存</span>
     <span v-else class="save-state">已就绪</span>
 
     <!-- 撤销 / 保存（design.md D9 接语义） -->
