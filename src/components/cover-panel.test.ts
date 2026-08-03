@@ -225,3 +225,18 @@ describe('CoverPanel — 清空封面（v1-cover-embed D5，全量覆盖删除�
     expect(w.find('.cover-clear').exists()).toBe(false)
   })
 })
+
+describe('CoverPanel — mime 展示（spec「支持常见图片格式」：mime 被探测并展示）', () => {
+  it('JPEG 封面 → cover-meta 展示 image/jpeg（点击选择/拖拽均同一条 setCover 路径）', () => {
+    openSong(makeSong({ cover: 'data:image/jpeg;base64,AAAA', cover_mime: 'image/jpeg' }))
+    const w = mount(CoverPanel)
+    expect(w.find('img.cover-img').attributes('src')).toBe('data:image/jpeg;base64,AAAA')
+    expect(w.find('.cover-meta').text()).toContain('image/jpeg')
+  })
+
+  it('WebP 封面 → cover-meta 展示 image/webp', () => {
+    openSong(makeSong({ cover: 'data:image/webp;base64,BBBB', cover_mime: 'image/webp' }))
+    const w = mount(CoverPanel)
+    expect(w.find('.cover-meta').text()).toContain('image/webp')
+  })
+})

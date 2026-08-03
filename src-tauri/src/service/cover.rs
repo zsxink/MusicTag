@@ -3,7 +3,7 @@
 // 封面跨 IPC 用 base64 data URL（`data:<mime>;base64,...`）传递：
 // - 读侧 `encode_cover`：lofty Picture → data URL + MIME；
 // - 写侧 `decode_cover`：data URL → 原始字节 + MIME；
-// - 嵌入侧 `compress_cover`（>2048 或 >5MB 等比缩至 ≤2048×2048）+ `cover_from_path`
+// - 嵌入侧 `compress_cover`（任一边 >2048 等比缩至 ≤2048×2048；双维 ≤2048 的图无论体积原样返回）+ `cover_from_path`
 //   （文件 → 压缩 → data URL），供 `pick_cover_file` / `read_cover_path`（v1-cover-embed）。
 // `encode_cover`/`decode_cover`/`compress_cover` 不触碰文件系统，纯逻辑单测内联在本文件。
 
@@ -75,11 +75,10 @@ pub fn decode_cover(cover: &str) -> Result<(Vec<u8>, String), String> {
 
 /// 封面最大边长（PRD §5.3 / D2：压缩目标 ≤2048×2048）。
 const MAX_DIM: u32 = 2048;
-/// 封面最大字节数（PRD §5.3 / D2：>5MB 触发压缩）。
-const MAX_BYTES: usize = 5 * 1024 * 1024;
 
-/// 压缩封面：任一边 >2048 或 `bytes` >5MB → 等比缩至 ≤2048×2048（Lanczos3）；
-/// 小图（≤2048×2048 且 ≤5MB）**不放大**、原尺寸保留原样返回。
+/// 压缩封面：任一边 >2048 → 等比缩至 ≤2048×2048（Lanczos3）；
+/// 双维 ≤2048 的图（无论体积，含 >5MB）**不放大**、原尺寸保留原样返回
+/// （spec「小图不放大」无 5MB 限定；design D7「>5MB 触发但双维 ≤2048 → 原样返回」）。
 ///
 /// 返回 `(压缩后 bytes, 原 mime)`。语义（D2）：
 /// - 解码失败（非图片字节）→ `Err("封面格式无法识别")`（与 `decode_cover` 对称，前端不预览不嵌入）；
@@ -89,8 +88,9 @@ pub fn compress_cover(bytes: &[u8], mime: &str) -> Result<(Vec<u8>, String), Str
         .map_err(|_| "封面格式无法识别".to_string())?;
 
     let (w, h) = img.dimensions();
-    if w <= MAX_DIM && h <= MAX_DIM && bytes.len() <= MAX_BYTES {
-        // 小图不放大、原尺寸保留嵌入（PRD §5.3）。
+    if w <= MAX_DIM && h <= MAX_DIM {
+        // 双维 ≤2048 不放大、原尺寸保留嵌入（spec「小图不放大」）；>5MB 但维度已达标
+        // 无法再缩（等比目标已满足），同样原样返回（design D7）。
         return Ok((bytes.to_vec(), mime.to_string()));
     }
 
@@ -356,18 +356,18 @@ mod tests {
     }
 
     #[test]
-    fn compress_cover_bytes_over_5mb_triggers_compression() {
-        // >5MB 但双维 ≤2048 → 触发压缩路径；维度已达标无法再缩，但不得报错
+    fn compress_cover_over_5mb_small_dim_png_returned_unchanged() {
+        // >5MB 但双维 ≤2048（design D7 边界）→ 不放大、原尺寸保留原样返回（spec「小图不放大」无 5MB 限定）
         let mut png = png_of_size(400, 300);
-        // 塞入约 6MB 尾随字节（解码忽略，仅撑大体积触发 >5MB 分支）
+        assert!(png.len() < 5 * 1024 * 1024, "400x300 PNG 本身应远小于 5MB");
+        // 塞入约 6MB 尾随字节（解码忽略，仅撑大体积到 >5MB）
         png.extend(std::iter::repeat_n(0u8, 6 * 1024 * 1024));
-        let (out, mime) = compress_cover(&png, "image/png").expect(">5MB 应触发压缩不报错");
+        assert!(png.len() > 5 * 1024 * 1024, "素材体积应 >5MB");
+        let (out, mime) = compress_cover(&png, "image/png").expect(">5MB 小图应原样返回不报错");
         assert_eq!(mime, "image/png");
-        let img = image::load_from_memory(&out).expect("压缩结果应可解码");
-        assert!(
-            img.width() <= MAX_DIM && img.height() <= MAX_DIM,
-            "压缩后应 ≤2048×2048"
-        );
+        assert_eq!(out, png, "双维 ≤2048 的 >5MB 图应原尺寸保留，而非被放大到 2048");
+        let img = image::load_from_memory(&out).expect("原样返回的字节应可解码");
+        assert_eq!((img.width(), img.height()), (400, 300), "尺寸应保持 400x300 不被放大");
     }
 
     #[test]
