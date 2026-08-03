@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CoverInput, Song, SongSummary } from '../api/types'
-import { activateFolder, clearCover, open, save, selectSong, setCover, songStore, undo } from './song'
+import { activateFolder, clearCover, open, save, selectSong, setCover, setPendingRename, songStore, undo } from './song'
 
 const s = (path: string, title = '', artist = ''): SongSummary => ({ path, title, artist })
 
@@ -497,5 +497,148 @@ describe('songStore — v1-folder-list 状态（并入自 store.test.ts）', () 
       expect(songStore.songs).toEqual([])
       expect(loader).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('songStore — v1-rename-sync 改名-保存联动（design.md D5/D6：改名独立状态、撞名不假报保存失败）', () => {
+  beforeEach(() => {
+    songStore.selectedPath = '/a/song.flac'
+    songStore.current = { ...makeSong() }
+    songStore.original = { ...makeSong() }
+    songStore.readonly = false
+    songStore.lyricsSource = 'none'
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+    songStore.pendingRename = null
+    songStore.renameRejected = false
+  })
+
+  it('初始：pendingRename=null、renameRejected=false、renamePending=false', () => {
+    expect(songStore.pendingRename).toBeNull()
+    expect(songStore.renameRejected).toBe(false)
+    expect(songStore.renamePending).toBe(false)
+  })
+
+  it('setPendingRename：写入新名并清 renameRejected；空串 → null', () => {
+    songStore.renameRejected = true
+    setPendingRename('新歌.flac')
+    expect(songStore.pendingRename).toBe('新歌.flac')
+    expect(songStore.renameRejected).toBe(false)
+    expect(songStore.renamePending).toBe(true)
+
+    setPendingRename('')
+    expect(songStore.pendingRename).toBeNull()
+    expect(songStore.renamePending).toBe(false)
+  })
+
+  it('纯改名不进 DIRTY_FIELDS：setPendingRename 不翻转 dirty（D5 独立 UI 状态）', () => {
+    expect(songStore.dirty).toBe(false)
+    setPendingRename('新歌.flac')
+    expect(songStore.dirty).toBe(false)
+  })
+
+  it('改名成功：先 renameFn → 路径同步（current/selectedPath/songs 列表）→ 再写标签，dirty 归零', async () => {
+    songStore.songs = [s('/a/song.flac', '歌名', '作者'), s('/a/other.mp3', 'Other', 'O')]
+    setPendingRename('新歌.flac')
+    const renameFn = vi.fn(async () => undefined)
+    const saveFn = vi.fn(async () => undefined)
+
+    await save(false, saveFn, renameFn)
+
+    expect(renameFn).toHaveBeenCalledWith('/a/song.flac', '新歌.flac') // rename 用旧 path + 新名
+    expect(saveFn).toHaveBeenCalledWith(songStore.current, false) // 标签写新路径
+    expect(songStore.current!.path).toBe('/a/新歌.flac') // 路径同步
+    expect(songStore.selectedPath).toBe('/a/新歌.flac')
+    expect(songStore.songs[0].path).toBe('/a/新歌.flac') // 列表项同步
+    expect(songStore.songs[1].path).toBe('/a/other.mp3') // 其它项不动
+    expect(songStore.pendingRename).toBeNull()
+    expect(songStore.renameRejected).toBe(false)
+    expect(songStore.saveState).toBe('saved')
+    expect(songStore.dirty).toBe(false)
+  })
+
+  it('改名被拒（撞名）：renameRejected=true、标签仍写回原路径、保存状态按标签写盘结果定（D6）', async () => {
+    setPendingRename('撞名.flac')
+    const renameFn = vi.fn(async () => { throw new Error('目标已存在') })
+    const saveFn = vi.fn(async () => undefined)
+
+    await save(false, saveFn, renameFn)
+
+    expect(songStore.renameRejected).toBe(true)
+    expect(songStore.pendingRename).toBe('撞名.flac') // 保留，换名后重存即完成改名
+    expect(songStore.current!.path).toBe('/a/song.flac') // 标签仍写回原路径
+    expect(saveFn).toHaveBeenCalledWith(songStore.current, false)
+    expect(songStore.saveState).toBe('saved') // 改名被拒不报「保存失败」（绝不假象）
+    expect(songStore.dirty).toBe(false)
+  })
+
+  it('改名被拒且标签保存也失败：saveState=save_failed、saveError=标签错误、dirty 保持 true', async () => {
+    songStore.current!.title = '改过'
+    setPendingRename('撞名.flac')
+    const renameFn = vi.fn(async () => { throw new Error('目标已存在') })
+    const saveFn = vi.fn(async () => { throw new Error('磁盘写入失败') })
+
+    await save(false, saveFn, renameFn)
+
+    expect(songStore.renameRejected).toBe(true)
+    expect(songStore.saveState).toBe('save_failed')
+    expect(songStore.saveError).toBe('Error: 磁盘写入失败')
+    expect(songStore.dirty).toBe(true) // 内容保留可重试，绝不假报
+  })
+
+  it('改名目标与当前同名 = 无操作：只清 pendingRename、不调 renameFn', async () => {
+    setPendingRename('song.flac') // 与 fileName(current.path) 相同
+    const renameFn = vi.fn(async () => undefined)
+    const saveFn = vi.fn(async () => undefined)
+
+    await save(false, saveFn, renameFn)
+
+    expect(renameFn).not.toHaveBeenCalled()
+    expect(songStore.pendingRename).toBeNull()
+    expect(songStore.current!.path).toBe('/a/song.flac')
+    expect(songStore.saveState).toBe('saved')
+  })
+
+  it('切歌（open 成功）→ pendingRename/renameRejected 重置（回到打开时文件名）', async () => {
+    setPendingRename('新歌.flac')
+    songStore.renameRejected = true
+    songStore.selectedPath = '/a/next.flac'
+    await open('/a/next.flac', vi.fn(async () => makeSong({ path: '/a/next.flac', title: 'Next' })))
+    expect(songStore.pendingRename).toBeNull()
+    expect(songStore.renameRejected).toBe(false)
+  })
+
+  it('open 失败（坏标签）→ 同样重置', async () => {
+    setPendingRename('新歌.flac')
+    songStore.renameRejected = true
+    songStore.selectedPath = '/bad/x.mp3'
+    await open('/bad/x.mp3', vi.fn(async () => { throw new Error('坏标签') }))
+    expect(songStore.readonly).toBe(true)
+    expect(songStore.pendingRename).toBeNull()
+    expect(songStore.renameRejected).toBe(false)
+  })
+
+  it('换目录（activateFolder）→ 重置', async () => {
+    setPendingRename('新歌.flac')
+    songStore.renameRejected = true
+    await activateFolder('/d', vi.fn(async () => []))
+    expect(songStore.pendingRename).toBeNull()
+    expect(songStore.renameRejected).toBe(false)
+  })
+
+  it('撤销（undo）→ 重置（改名草稿弃置）', async () => {
+    songStore.current!.title = '改过'
+    setPendingRename('新歌.flac')
+    songStore.renameRejected = true
+    await undo()
+    expect(songStore.pendingRename).toBeNull()
+    expect(songStore.renameRejected).toBe(false)
+  })
+
+  it('renamePending 随 save 成功归 false（pendingRename 已清）', async () => {
+    setPendingRename('新歌.flac')
+    await save(false, vi.fn(async () => undefined), vi.fn(async () => undefined))
+    expect(songStore.renamePending).toBe(false)
+    expect(songStore.pendingRename).toBeNull()
   })
 })

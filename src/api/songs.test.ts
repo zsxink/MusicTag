@@ -9,7 +9,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 import type { CoverInput, Song } from './types'
-import { listSongs, openSong, pickCoverFile, pickFolder, readCoverPath, saveSong } from './songs'
+import { listSongs, openSong, pickCoverFile, pickFolder, readCoverPath, renameSong, saveSong } from './songs'
 
 const makeSong = (over: Partial<Song> = {}): Song => ({
   path: '/a/song.flac',
@@ -92,5 +92,16 @@ describe('api/songs.ts — 类型化 command 封装（命令名/参数逐字对�
   it('readCoverPath：读失败/非图片 → reject（中文原因透传）', async () => {
     mockInvoke.mockRejectedValue(new Error('封面格式无法识别'))
     await expect(readCoverPath('/tmp/not_image.txt')).rejects.toThrow('封面格式无法识别')
+  })
+
+  it('renameSong：透传 rename_song + { path, newName }（Tauri camelCase→snake_case 自动映射 newName→new_name）', async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    await renameSong('/a/old.flac', '新歌.mp3')
+    expect(mockInvoke).toHaveBeenCalledWith('rename_song', { path: '/a/old.flac', newName: '新歌.mp3' })
+  })
+
+  it('renameSong：改名被拒（撞名）→ reject（Rust「目标已存在」中文原因透传）', async () => {
+    mockInvoke.mockRejectedValue(new Error('目标已存在'))
+    await expect(renameSong('/a/old.flac', '新歌.mp3')).rejects.toThrow('目标已存在')
   })
 })

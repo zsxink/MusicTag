@@ -27,6 +27,13 @@ export function saveSong(song: Song, exportLrc: boolean): Promise<void> {
   return invokeCommand<void>('save_song', { song, exportLrc })
 }
 
+/** 改文件名（独立动作，FR-5.5）：音频 + 同名 `.lrc` 一并改名（语义在 Rust service::rename）。
+ *  `newName` 经 Tauri camelCase↔snake_case 自动映射到 Rust 参数 `new_name`。
+ *  撞名（音频/`.lrc` 目标已存在）→ reject「目标已存在」，原文件保留可重试。 */
+export function renameSong(path: string, newName: string): Promise<void> {
+  return invokeCommand<void>('rename_song', { path, newName })
+}
+
 /** 打开原生封面文件选择器（jpg/png/webp）。取消返回 null，否则返回压缩后 data URL + mime。 */
 export function pickCoverFile(): Promise<CoverInput | null> {
   return invokeCommand<CoverInput | null>('pick_cover_file')

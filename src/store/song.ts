@@ -6,8 +6,10 @@
 // 在 store/selectors.ts，IPC 类型化封装在 api/songs.ts。
 import { reactive } from 'vue'
 
+import { renameSong as defaultRename } from '../api/songs'
 import { saveSong as defaultSave } from '../api/songs'
 import type { CoverInput, LyricsSource, Song, SongSummary } from '../api/types'
+import { fileName, replaceFileName } from '../lib/path'
 
 /** 参与 dirty 判定的可编辑字段（design.md D6：path/lyrics_source 不参与）。 */
 const DIRTY_FIELDS = [
@@ -53,6 +55,13 @@ interface SongEditor {
   saveState: SaveState
   /** 保存失败原因（saveState='save_failed' 时顶栏展示「✕ 保存失败：原因」）。 */
   saveError: string
+  /** 改名草稿（v1-rename-sync D5）：改后的新文件名，null = 未改。独立 UI 状态，
+   *  非 Song 字段、不进 DIRTY_FIELDS（单改文件名不脏表单，保存门禁单独放行 renamePending）。 */
+  pendingRename: string | null
+  /** 派生：是否存在待改名（pendingRename !== null）。保存门禁单独放行（D5，同 exportLrc 先例）。 */
+  renamePending: boolean
+  /** 改名被拒标记（撞名）：供文件名行内提示「目标已存在」，换名后重存即完成改名（D6）。 */
+  renameRejected: boolean
 }
 
 /**
@@ -94,6 +103,8 @@ export async function activateFolder(
   raw.exportLrc = false // design.md D7：换目录重置 opt-in
   raw.saveState = 'idle'
   raw.saveError = ''
+  raw.pendingRename = null // design.md D8：换目录弃置改名草稿
+  raw.renameRejected = false
   raw.songs = await loadSongs(dir)
 }
 
@@ -112,11 +123,17 @@ const raw = reactive<SongEditor>({
     if (current === null || original === null) return false
     return DIRTY_FIELDS.some((key) => current[key] !== original[key])
   },
+  /** 派生：是否存在待改名（pendingRename !== null）。保存门禁单独放行（D5，同 exportLrc 先例）。 */
+  get renamePending() {
+    return this.pendingRename !== null
+  },
   readonly: false,
   lyricsSource: 'none',
   exportLrc: false,
   saveState: 'idle',
   saveError: '',
+  pendingRename: null,
+  renameRejected: false,
 })
 
 /**
@@ -140,6 +157,8 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
     raw.exportLrc = false // design.md D7：切歌重置 opt-in（每首歌默认不勾选）
     raw.saveState = 'idle'
     raw.saveError = ''
+    raw.pendingRename = null // design.md D8：切歌弃置改名草稿（回到打开时文件名）
+    raw.renameRejected = false
   } catch {
     if (raw.selectedPath !== path) return // 过期错误同样丢弃，不误设只读
     // open_song 读标签失败（损坏/结构错）→ 只读表单，能看不能改、不能保存
@@ -150,6 +169,8 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
     raw.exportLrc = false
     raw.saveState = 'idle'
     raw.saveError = ''
+    raw.pendingRename = null
+    raw.renameRejected = false
   }
 }
 
@@ -159,22 +180,59 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
  * `exportLrc`（D3/D7）：保存期 opt-in——true 时经 `saveFn(current, true)` 同步写同目录
  * 同名 `.lrc`（空歌词由 Rust 侧 no-op）；仅切歌/换目录重置，保存成功后保持勾选。
  *
- * IPC 依赖以 `saveFn` 参数注入（仿 open 的 loadSong），默认 loader 为 `api/songs.ts`
- * 的 `saveSong`（经 api/client → invoke），测试可注入自定义 saveFn 不依赖 Tauri。
+ * v1-rename-sync（D5/D6）：保存联动改名——若 `pendingRename` 非空（改名草稿）：
+ * - 与当前文件名相同 → 无操作（清草稿）；
+ * - 否则先 `renameFn(current.path, pendingRename)` 改名成功 → 路径同步
+ *   （current.path / selectedPath / songs 列表项 = replaceFileName(old, new)）、清草稿；
+ *   改名被拒（撞名）→ `renameRejected=true`、`saveError` 置「目标已存在」，
+ *   但**不 return**：FR-5.6 标签仍写回原路径（改名被拒不影响标签保存，D6）。
+ * 再 `saveFn(current, exportLrc)`：current.path = 新路径（改名成功）或原路径（被拒）。
+ *
+ * IPC 依赖以 `saveFn` / `renameFn` 参数注入（仿 open 的 loadSong），默认 loader 为
+ * `api/songs.ts` 的 `saveSong` / `renameSong`（经 api/client → invoke），测试可注入
+ * 自定义函数不依赖 Tauri。
  *
  * 状态机：`saving` → 成功快照 `original={...current}`（新对比基准，dirty 归 false）
  * + `saveState='saved'`；失败保留 `current`（可重试、dirty 保持 true）+ `saveError`
  * + `saveState='save_failed'`（绝不假报已保存，FR-5.4a）。
+ * 保存状态按**标签写盘结果**定——改名被拒不报「保存失败」（D6 假象）。
  * 只读/无歌不执行；保存中禁用再次保存（防连点并发写同一文件）。
  */
 export async function save(
   exportLrc: boolean,
   saveFn: (song: Song, exportLrc: boolean) => Promise<void> = defaultSave,
+  renameFn: (path: string, newName: string) => Promise<void> = defaultRename,
 ): Promise<void> {
   if (raw.readonly || raw.current === null) return
   raw.saveState = 'saving'
+
+  // 改名联动（独立动作，D5）：pendingRename 非空才进改名分支
+  if (raw.pendingRename !== null) {
+    if (raw.pendingRename === fileName(raw.current.path)) {
+      // 与当前同名 = 无操作（用户改回原样再保存）
+      raw.pendingRename = null
+      raw.renameRejected = false
+    } else {
+      const oldPath = raw.current.path
+      try {
+        await renameFn(oldPath, raw.pendingRename)
+        // 改名成功 → 路径同步（当前/选中/列表项），新路径由前端 replaceFileName 计算（D4）
+        const newPath = replaceFileName(oldPath, raw.pendingRename)
+        raw.current.path = newPath
+        raw.selectedPath = newPath
+        raw.songs = raw.songs.map((s) => (s.path === oldPath ? { ...s, path: newPath } : s))
+        raw.pendingRename = null
+        raw.renameRejected = false
+      } catch (e) {
+        // 撞名被拒（或改名失败）→ 行内提示「目标已存在」；不 return：标签仍写回原路径（FR-5.6）
+        raw.renameRejected = true
+        raw.saveError = String(e)
+      }
+    }
+  }
+
   try {
-    await saveFn(raw.current, exportLrc)
+    await saveFn(raw.current, exportLrc) // current.path = 新路径（改名成功）或原路径（被拒）
     raw.original = { ...raw.current } // 新基准：当前已写盘，dirty 归 false
     raw.saveState = 'saved'
   } catch (e) {
@@ -186,12 +244,26 @@ export async function save(
 /**
  * 编辑区撤销（design.md D8）：`current` 恢复为打开时 `original` 快照（非磁盘级），
  * 回到打开时基准；`original` 不被覆盖，再编辑可再撤销。saveState 归 idle。
+ * v1-rename-sync：同时弃置改名草稿（pendingRename / renameRejected，design.md D8）。
  */
 export async function undo(): Promise<void> {
   if (raw.original === null) return
   raw.current = { ...raw.original }
   raw.saveState = 'idle'
   raw.saveError = ''
+  raw.pendingRename = null
+  raw.renameRejected = false
+}
+
+/**
+ * 写改名草稿（v1-rename-sync D5）：`pendingRename` 独立 UI 状态（非 Song 字段、
+ * 不进 DIRTY_FIELDS，单改文件名不脏表单）。空串/空 → null（回到原文件名）；写入即清
+ * `renameRejected`（换名后重存 = 重新尝试改名）。readonly（坏标签只读）时无视。
+ */
+export function setPendingRename(name: string | null): void {
+  if (raw.readonly) return
+  raw.pendingRename = name === null || name === '' ? null : name
+  raw.renameRejected = false
 }
 
 /**

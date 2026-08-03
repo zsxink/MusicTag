@@ -13,6 +13,10 @@ const saving = () => songStore.saveState === 'saving'
 // 「把已有内嵌歌词导出为 .lrc」——表单未编辑（dirty=false）也要能独立触发保存，
 // 否则保存按钮被 dirty 门禁锁死、复选框无法独立生效（CR v1-lyrics-lrc 修复）。
 const exportPending = () => songStore.exportLrc && !!songStore.current?.lyrics
+
+// v1-rename-sync 保存门禁：改名草稿（pendingRename 非空）单独放行保存（D5 同 exportLrc 先例）——
+// 单改文件名不脏表单，但纯改名也必须能独立触发「先改名 → 再写标签」的联动保存。
+const renamePending = () => songStore.renamePending
 </script>
 
 <template>
@@ -43,7 +47,7 @@ const exportPending = () => songStore.exportLrc && !!songStore.current?.lyrics
       <button
         class="btn btn-primary"
         type="button"
-        :disabled="(!songStore.dirty && !exportPending()) || saving() || songStore.readonly"
+        :disabled="(!songStore.dirty && !exportPending() && !renamePending()) || saving() || songStore.readonly"
         @click="save(songStore.exportLrc)"
       >保存</button>
     </div>
