@@ -8,6 +8,29 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
 
+// mock ../api/search + ../lib/cover → CoverPanel 经 store 动作（manualSearch/pickCoverCandidate）
+// 的默认注入兜底（downloadCover 裸 bytes + bytesToCoverInput 桩，避免真实 Image 加载）。
+const { mockSearchSongs, mockDownloadCover, mockBytesToCoverInput } = vi.hoisted(() => ({
+  mockSearchSongs: vi.fn(async () => ({
+    songs: [],
+    source_stats: [
+      ['netease', 0],
+      ['qqmusic', 0],
+      ['migu', 0],
+    ],
+  })),
+  mockDownloadCover: vi.fn(async () => []),
+  mockBytesToCoverInput: vi.fn(async () => ({ data_url: 'data:image/jpeg;base64,AAA', mime: 'image/jpeg' })),
+}))
+vi.mock('../api/search', () => ({
+  searchSongs: mockSearchSongs,
+  fetchLyric: vi.fn(async () => null),
+  downloadCover: mockDownloadCover,
+}))
+vi.mock('../lib/cover', () => ({
+  bytesToCoverInput: mockBytesToCoverInput,
+}))
+
 // mock @tauri-apps/api/window → getCurrentWindow().onDragDropEvent 捕获 handler + 返回 fake unlisten
 // （v1-cover-embed D4：拖拽用 Tauri 原生 drag-drop，非 WebView FileReader）。
 // position：Tauri DragDropEvent 的 PhysicalPosition（enter/over/drop 携带，leave 无）。
@@ -63,7 +86,7 @@ const makeSong = (over: Partial<Song> = {}): Song => ({
 
 const cover: CoverInput = { data_url: 'data:image/png;base64,AAAA', mime: 'image/png' }
 
-/** 打开一首歌进 store（等价 open() 成功态）。 */
+/** 打开一首歌进 store（等价 open() 成功态，含切歌重置搜索状态）。 */
 function openSong(song: Song = makeSong()): void {
   songStore.current = { ...song }
   songStore.original = { ...song }
@@ -72,6 +95,14 @@ function openSong(song: Song = makeSong()): void {
   songStore.selectedPath = song.path
   songStore.saveState = 'idle'
   songStore.saveError = ''
+  songStore.coverSearchState = 'idle'
+  songStore.coverCandidates = []
+  songStore.isOffline = false
+  songStore.searchedThisSong = false
+  songStore.lyricSearchState = 'idle'
+  songStore.lyricCandidates = []
+  songStore.lyricSourcePlatform = null
+  songStore.lyricFetchEmpty = false
 }
 
 describe('CoverPanel — 点击选择嵌入（v1-cover-embed D5）', () => {
@@ -334,5 +365,136 @@ describe('CoverPanel — mime 展示（spec「支持常见图片格式」：mime
     openSong(makeSong({ cover: 'data:image/webp;base64,BBBB', cover_mime: 'image/webp' }))
     const w = mount(CoverPanel)
     expect(w.find('.cover-meta').text()).toContain('image/webp')
+  })
+})
+
+describe('CoverPanel — 封面候选区（v1-search-ui D8：status/网格/空态/离线）', () => {
+  const cand = (over: Partial<import('../api/types').SongCandidate> = {}): import('../api/types').SongCandidate => ({
+    source: 'netease',
+    id: 'n1',
+    title: '歌名',
+    artist: '作者',
+    album: '专辑',
+    cover_url: 'https://p1.music.126.net/1.jpg',
+    ...over,
+  })
+
+  beforeEach(() => {
+    mockSearchSongs.mockReset()
+    mockDownloadCover.mockReset()
+    mockBytesToCoverInput.mockReset()
+    mockBytesToCoverInput.mockResolvedValue({ data_url: 'data:image/jpeg;base64,AAA', mime: 'image/jpeg' })
+    mockSearchSongs.mockResolvedValue({
+      songs: [],
+      source_stats: [
+        ['netease', 0],
+        ['qqmusic', 0],
+        ['migu', 0],
+      ],
+    })
+    openSong()
+  })
+
+  it('「搜索封面」按钮可用性：readonly / 无歌禁用', () => {
+    const w = mount(CoverPanel)
+    expect((w.find('.search-trigger').element as HTMLButtonElement).disabled).toBe(false)
+
+    songStore.current = null
+    songStore.readonly = false
+    const w2 = mount(CoverPanel)
+    expect((w2.find('.search-trigger').element as HTMLButtonElement).disabled).toBe(true)
+
+    songStore.current = { ...makeSong() }
+    songStore.readonly = true
+    const w3 = mount(CoverPanel)
+    expect((w3.find('.search-trigger').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('点击「搜索封面」→ manualSearch 以 current 的 title/artist 发起', async () => {
+    const w = mount(CoverPanel)
+    await w.find('.search-trigger').trigger('click')
+    await flushPromises()
+    expect(mockSearchSongs).toHaveBeenCalledWith('歌名', '作者')
+  })
+
+  it('searching → 显示「搜索中…」+ 转圈', () => {
+    songStore.coverSearchState = 'searching'
+    const w = mount(CoverPanel)
+    const status = w.find('.cand-status')
+    expect(status.exists()).toBe(true)
+    expect(status.text()).toContain('搜索中…')
+    expect(status.find('.spinner').exists()).toBe(true)
+  })
+
+  it('done 有候选 → 3 列网格缩略图 + 来源角标 + 提示（design §6.4）', () => {
+    songStore.coverSearchState = 'done'
+    songStore.coverCandidates = [
+      cand({ source: 'netease', id: 'n1' }),
+      cand({ source: 'qqmusic', id: 'q1', cover_url: 'https://q/1.jpg' }),
+      cand({ source: 'migu', id: 'm1', cover_url: 'https://m/1.jpg' }),
+    ]
+    const w = mount(CoverPanel)
+    const cells = w.findAll('.cand-cell')
+    expect(cells).toHaveLength(3)
+    expect(w.find('.cand-grid').classes()).toContain('cand-grid')
+    expect(cells[0].find('img').attributes('src')).toBe('https://p1.music.126.net/1.jpg')
+    expect(cells[0].find('.src-tag').text()).toBe('网易云')
+    expect(cells[1].find('.src-tag').text()).toBe('QQ音乐')
+    expect(w.find('.cand-hint').text()).toContain('点选一张填入预览')
+  })
+
+  it('done 无候选 → 空态「未找到匹配的封面」', () => {
+    songStore.coverSearchState = 'done'
+    songStore.coverCandidates = []
+    const w = mount(CoverPanel)
+    expect(w.find('.cand-empty').text()).toBe('未找到匹配的封面')
+  })
+
+  it('isOffline && idle → 「离线：仅手动填写」（候选区不出现，手动按钮可用）', () => {
+    songStore.isOffline = true
+    const w = mount(CoverPanel)
+    expect(w.find('.cand-empty').text()).toBe('离线：仅手动填写')
+    expect((w.find('.search-trigger').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('点选封面候选 → downloadCover 裸 bytes → bytesToCoverInput → setCover（dirty 翻转）', async () => {
+    songStore.coverSearchState = 'done'
+    songStore.coverCandidates = [cand({ cover_url: 'https://p1.music.126.net/1.jpg' })]
+    mockDownloadCover.mockResolvedValue([0xff, 0xd8, 0xff, 0xe0])
+    const w = mount(CoverPanel)
+
+    await w.find('.cand-cell').trigger('click')
+    await flushPromises()
+
+    expect(mockDownloadCover).toHaveBeenCalledWith('https://p1.music.126.net/1.jpg')
+    expect(mockBytesToCoverInput).toHaveBeenCalledWith([0xff, 0xd8, 0xff, 0xe0])
+    expect(songStore.current!.cover).toBe('data:image/jpeg;base64,AAA')
+    expect(songStore.current!.cover_mime).toBe('image/jpeg')
+    expect(songStore.dirty).toBe(true)
+  })
+
+  it('缩略图破图（onerror）→ 静默隐藏该格（验收 #12），其余格不受影响', async () => {
+    songStore.coverSearchState = 'done'
+    songStore.coverCandidates = [
+      cand({ source: 'netease', id: 'n1', cover_url: 'https://broken/1.jpg' }),
+      cand({ source: 'qqmusic', id: 'q1', cover_url: 'https://ok/1.jpg' }),
+    ]
+    const w = mount(CoverPanel)
+    const imgs = w.findAll('.cand-cell img')
+    expect(imgs).toHaveLength(2)
+
+    await imgs[0].trigger('error')
+
+    expect(w.findAll('.cand-cell')).toHaveLength(1) // 破图格被隐藏
+    expect(w.find('.cand-cell .src-tag').text()).toBe('QQ音乐') // 其余正常
+  })
+
+  it('readonly（坏标签只读）→ 搜索按钮禁用、不触发搜索', async () => {
+    songStore.readonly = true
+    const w = mount(CoverPanel)
+    expect((w.find('.search-trigger').element as HTMLButtonElement).disabled).toBe(true)
+    await w.find('.search-trigger').trigger('click')
+    await flushPromises()
+    expect(mockSearchSongs).not.toHaveBeenCalled()
   })
 })
