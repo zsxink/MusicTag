@@ -1,11 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 
-import type { CoverInput, Song, SongSummary } from '../api/types'
+// mock ../api/search → store/song.ts 的默认注入（autoSearchOnSelect 等默认 searchSongs/
+// fetchLyric/downloadCover）。既有 selectSong-with-loader 用例在选中行时触发 autoSearchOnSelect，
+// 必须兜底默认 searchSongs（返回全源 0 → 标离线，不影响既有断言；搜索相关新用例注入显式桩）。
+vi.mock('../api/search', () => ({
+  searchSongs: vi.fn(async () => ({
+    songs: [],
+    source_stats: [
+      ['netease', 0],
+      ['qqmusic', 0],
+      ['migu', 0],
+    ],
+  })),
+  fetchLyric: vi.fn(async () => null),
+  downloadCover: vi.fn(async () => []),
+}))
+
+import type { CoverInput, MusicSourceId, SearchResult, Song, SongCandidate, SongSummary } from '../api/types'
+import { searchSongs as mockedSearchSongs } from '../api/search'
 import {
   activateFolder,
+  autoSearchOnSelect,
   cancelPending,
   clearCover,
+  manualSearch,
   open,
+  pickCoverCandidate,
+  pickLyricCandidate,
   requestFolder,
   requestSwitch,
   resolvePending,
@@ -939,6 +961,501 @@ describe('songStore — v1-ux-settings 切歌/换目录三选一状态机（desi
       await requestSwitch('/a/two.flac')
       expect(songStore.pendingAction).toBeNull()
       expect(songStore.selectedPath).toBe('/a/two.flac')
+    })
+  })
+})
+
+describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只补缺失/离线/生命周期/手动/C2/封面静默）', () => {
+  const makeCand = (over: Partial<SongCandidate> = {}): SongCandidate => ({
+    source: 'netease',
+    id: 'n1',
+    title: '歌名',
+    artist: '作者',
+    album: '专辑',
+    cover_url: 'https://p1.music.126.net/1.jpg',
+    ...over,
+  })
+
+  const result = (songs: SongCandidate[], stats?: Array<[MusicSourceId, number]>): SearchResult => ({
+    songs,
+    source_stats: stats ?? [
+      ['netease', songs.length],
+      ['qqmusic', 0],
+      ['migu', 0],
+    ],
+  })
+
+  beforeEach(() => {
+    songStore.selectedPath = '/a/song.flac'
+    songStore.current = { ...makeSong() }
+    songStore.original = { ...makeSong() }
+    songStore.readonly = false
+    songStore.lyricsSource = 'none'
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+    songStore.isOffline = false
+    songStore.searchedThisSong = false
+    songStore.lyricCandidates = []
+    songStore.coverCandidates = []
+    songStore.lyricSearchState = 'idle'
+    songStore.coverSearchState = 'idle'
+    songStore.lyricSourcePlatform = null
+    songStore.lyricFetchEmpty = false
+    songStore.searchSeq = 0
+    vi.mocked(mockedSearchSongs).mockClear()
+  })
+
+  describe('autoSearchOnSelect — 选中即搜（D1/D2/D3：只补缺失、判定一次、离线首响）', () => {
+    it('歌词与封面都缺失 → 一次 search_song 分桶填充两类候选，state=done', async () => {
+      const searchSongs = vi.fn(async () =>
+        result([
+          makeCand({ cover_url: 'https://x/1.jpg' }),
+          makeCand({ source: 'qqmusic', id: 'q1', cover_url: null }),
+        ]),
+      )
+      await autoSearchOnSelect(searchSongs)
+
+      expect(searchSongs).toHaveBeenCalledWith('歌名', '作者')
+      expect(songStore.lyricSearchState).toBe('done')
+      expect(songStore.lyricCandidates).toHaveLength(2) // 全部候选
+      expect(songStore.coverSearchState).toBe('done')
+      expect(songStore.coverCandidates).toHaveLength(1) // 只过滤出有 cover_url 的
+      expect(songStore.coverCandidates[0].source).toBe('netease')
+      expect(songStore.searchedThisSong).toBe(true)
+      expect(songStore.isOffline).toBe(false)
+    })
+
+    it('已有封面只有歌词缺失 → 只搜歌词（coverSearchState 保持 idle，不干扰封面候选区）', async () => {
+      songStore.current!.cover = 'data:image/jpeg;base64,AAA'
+      songStore.current!.cover_mime = 'image/jpeg'
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+
+      await autoSearchOnSelect(searchSongs)
+
+      expect(songStore.lyricSearchState).toBe('done')
+      expect(songStore.lyricCandidates).toHaveLength(1)
+      expect(songStore.coverSearchState).toBe('idle') // 封面不缺 → 不进入封面搜索态
+      expect(songStore.coverCandidates).toEqual([])
+    })
+
+    it('已有歌词只缺封面 → 只搜封面', async () => {
+      songStore.current!.lyrics = '[00:00.00] 已有'
+      songStore.current!.lyrics_source = 'embedded'
+      songStore.lyricsSource = 'embedded'
+      const searchSongs = vi.fn(async () => result([makeCand({ cover_url: 'https://x/1.jpg' })]))
+
+      await autoSearchOnSelect(searchSongs)
+
+      expect(songStore.coverSearchState).toBe('done')
+      expect(songStore.coverCandidates).toHaveLength(1)
+      expect(songStore.lyricSearchState).toBe('idle')
+    })
+
+    it('侧载 .lrc 歌词存在（lyricsSource=sidecar）→ 歌词不搜；封面缺失仍搜封面（D1 needLyrics 判定）', async () => {
+      songStore.lyricsSource = 'sidecar' // 同名 .lrc 存在 → 已有歌词
+      songStore.current!.lyrics = ''
+      const searchSongs = vi.fn(async () => result([makeCand({ cover_url: 'https://x/1.jpg' })]))
+
+      await autoSearchOnSelect(searchSongs)
+
+      expect(songStore.lyricSearchState).toBe('idle')
+      expect(songStore.coverSearchState).toBe('done')
+    })
+
+    it('已有歌词且已有封面 → 不搜（searchSongs 不调用，候选区保持 idle）', async () => {
+      songStore.current!.lyrics = '[00:00.00] 已有'
+      songStore.current!.lyrics_source = 'embedded'
+      songStore.lyricsSource = 'embedded'
+      songStore.current!.cover = 'data:image/jpeg;base64,AAA'
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+
+      await autoSearchOnSelect(searchSongs)
+
+      expect(searchSongs).not.toHaveBeenCalled()
+      expect(songStore.lyricSearchState).toBe('idle')
+      expect(songStore.coverSearchState).toBe('idle')
+      expect(songStore.searchedThisSong).toBe(true) // 判定一次仍置位（flag 不重算）
+    })
+
+    it('删除内容后不重搜（FR-8.4）：searchedThisSong 置位后再次调用 → 直接 return', async () => {
+      songStore.current!.cover = 'data:image/jpeg;base64,AAA'
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+      await autoSearchOnSelect(searchSongs)
+      expect(songStore.searchedThisSong).toBe(true)
+      expect(searchSongs).toHaveBeenCalledTimes(1)
+
+      // 用户删除歌词 → 再次 autoSearch（同一次选中的场景不允许）→ 不重搜
+      songStore.current!.lyrics = ''
+      await autoSearchOnSelect(searchSongs)
+      expect(searchSongs).toHaveBeenCalledTimes(1) // 不重搜
+      expect(songStore.lyricSearchState).toBe('done') // 保持首次结果
+    })
+
+    it('离线首响（D3）：全源 0 → isOffline=true、搜索态归 idle（候选区显示离线提示）', async () => {
+      const searchSongs = vi.fn(async () => result([], [['netease', 0], ['qqmusic', 0], ['migu', 0]]))
+
+      await autoSearchOnSelect(searchSongs)
+
+      expect(songStore.isOffline).toBe(true)
+      expect(songStore.lyricSearchState).toBe('idle')
+      expect(songStore.coverSearchState).toBe('idle')
+    })
+
+    it('IPC reject（防御）：同样标记离线', async () => {
+      const searchSongs = vi.fn(async () => { throw new Error('network down') })
+
+      await autoSearchOnSelect(searchSongs)
+
+      expect(songStore.isOffline).toBe(true)
+      expect(songStore.lyricSearchState).toBe('idle')
+    })
+
+    it('离线后不再自动搜：isOffline=true 时后续调用直接 return（只留手动按钮）', async () => {
+      songStore.isOffline = true
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+
+      await autoSearchOnSelect(searchSongs)
+
+      expect(searchSongs).not.toHaveBeenCalled()
+      expect(songStore.lyricSearchState).toBe('idle')
+    })
+
+    it('readonly（坏标签只读）→ 不搜', async () => {
+      songStore.readonly = true
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+      await autoSearchOnSelect(searchSongs)
+      expect(searchSongs).not.toHaveBeenCalled()
+    })
+
+    it('current=null → 不搜', async () => {
+      songStore.current = null
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+      await autoSearchOnSelect(searchSongs)
+      expect(searchSongs).not.toHaveBeenCalled()
+    })
+
+    it('过期结果丢弃（D2.6）：切歌后旧搜索 resolve → 不覆盖新状态', async () => {
+      // 慢搜索 A：开始后立即切歌（resetSearchState 自增 searchSeq）→ A resolve 时 mySeq != searchSeq
+      let resolveA!: (r: SearchResult) => void
+      const searchA = vi.fn(() => new Promise<SearchResult>((res) => { resolveA = res }))
+      const pA = autoSearchOnSelect(searchA)
+      expect(songStore.lyricSearchState).toBe('searching')
+
+      // 切歌 → 状态重置（searchSeq++ 作废在途搜索）
+      songStore.selectedPath = '/a/next.flac'
+      songStore.current = { ...makeSong({ path: '/a/next.flac', title: 'Next' }) }
+      songStore.original = { ...makeSong({ path: '/a/next.flac', title: 'Next' }) }
+      songStore.lyricsSource = 'none'
+      songStore.lyricCandidates = []
+      songStore.coverCandidates = []
+      songStore.lyricSearchState = 'idle'
+      songStore.coverSearchState = 'idle'
+      songStore.searchedThisSong = false
+      songStore.searchSeq++ // 等价 resetSearchState 的作废在途搜索
+
+      resolveA(result([makeCand()]))
+      await pA
+
+      expect(songStore.lyricCandidates).toEqual([]) // 旧结果被丢弃
+      expect(songStore.lyricSearchState).toBe('idle') // 未被旧结果置 done
+    })
+  })
+
+  describe('selectSong 尾部触发 autoSearchOnSelect（D1：open 成功后、current 非空且 !readonly）', () => {
+    it('选中行 → open 成功 → 自动搜索（后台异步不阻塞选中）', async () => {
+      const cand = makeCand({ cover_url: 'https://x/1.jpg' })
+      vi.mocked(mockedSearchSongs).mockResolvedValue(result([cand]))
+      const loadSong = vi.fn(async (p: string) => makeSong({ path: p, title: 'T' }))
+
+      await selectSong('/a/s.flac', loadSong)
+      await flushPromises()
+
+      expect(mockedSearchSongs).toHaveBeenCalledWith('T', '作者') // 用 open 读到的 title/artist
+      expect(songStore.lyricSearchState).toBe('done')
+      expect(songStore.lyricCandidates).toEqual([cand])
+    })
+
+    it('坏标签只读 → 不触发自动搜索', async () => {
+      const loadSong = vi.fn(async () => { throw new Error('坏标签') })
+      await selectSong('/bad/x.mp3', loadSong)
+      await flushPromises()
+      expect(mockedSearchSongs).not.toHaveBeenCalled()
+      expect(songStore.readonly).toBe(true)
+    })
+
+    it('切歌（resolvePending 保存后）收敛于 selectSong → 新歌触发自动搜索、旧候选被清', async () => {
+      const cand = makeCand()
+      vi.mocked(mockedSearchSongs).mockResolvedValue(result([cand]))
+      // 打开一首、制造 dirty、切歌走弹窗
+      songStore.selectedPath = '/a/one.flac'
+      songStore.current = { ...makeSong({ path: '/a/one.flac' }) }
+      songStore.original = { ...makeSong({ path: '/a/one.flac' }) }
+      songStore.current!.title = '改过'
+      requestSwitch('/a/two.flac', vi.fn(async (p: string) => makeSong({ path: p, title: 'Two' })))
+      await resolvePending('discard') // 丢弃编辑直接切歌
+      await flushPromises()
+
+      expect(songStore.selectedPath).toBe('/a/two.flac')
+      expect(mockedSearchSongs).toHaveBeenCalledWith('Two', '作者') // 新歌触发
+    })
+  })
+
+  describe('resetSearchState — 候选生命周期 = 当前歌曲（D5）', () => {
+    it('open 成功 → 清两类候选、searchState 归 idle、searchedThisSong=false、searchSeq++', async () => {
+      songStore.lyricCandidates = [makeCand()]
+      songStore.coverCandidates = [makeCand()]
+      songStore.lyricSearchState = 'done'
+      songStore.coverSearchState = 'searching'
+      songStore.searchedThisSong = true
+      songStore.lyricSourcePlatform = 'netease'
+      songStore.lyricFetchEmpty = true
+      songStore.searchSeq = 5
+
+      songStore.selectedPath = '/a/next.flac'
+      await open('/a/next.flac', vi.fn(async () => makeSong({ path: '/a/next.flac', title: 'Next' })))
+
+      expect(songStore.lyricCandidates).toEqual([])
+      expect(songStore.coverCandidates).toEqual([])
+      expect(songStore.lyricSearchState).toBe('idle')
+      expect(songStore.coverSearchState).toBe('idle')
+      expect(songStore.searchedThisSong).toBe(false)
+      expect(songStore.lyricSourcePlatform).toBeNull()
+      expect(songStore.lyricFetchEmpty).toBe(false)
+      expect(songStore.searchSeq).toBe(6) // 作废在途搜索
+    })
+
+    it('open 失败（坏标签）→ 同样重置搜索状态', async () => {
+      songStore.lyricSearchState = 'searching'
+      songStore.searchedThisSong = true
+      songStore.lyricCandidates = [makeCand()]
+
+      songStore.selectedPath = '/bad/x.mp3'
+      await open('/bad/x.mp3', vi.fn(async () => { throw new Error('坏标签') }))
+
+      expect(songStore.readonly).toBe(true)
+      expect(songStore.lyricSearchState).toBe('idle')
+      expect(songStore.lyricCandidates).toEqual([])
+      expect(songStore.searchedThisSong).toBe(false)
+    })
+
+    it('换目录（activateFolder）→ 重置搜索状态，但 isOffline 保持（会话级）', async () => {
+      songStore.isOffline = true
+      songStore.lyricSearchState = 'searching'
+      songStore.searchedThisSong = true
+      await activateFolder('/d', vi.fn(async () => []))
+      expect(songStore.lyricSearchState).toBe('idle')
+      expect(songStore.searchedThisSong).toBe(false)
+      expect(songStore.isOffline).toBe(true) // 会话级不清
+    })
+
+    it('undo：lyricSourcePlatform/lyricFetchEmpty 重置，候选保留（D5 可重选）', async () => {
+      songStore.lyricCandidates = [makeCand()]
+      songStore.lyricSourcePlatform = 'netease'
+      songStore.lyricFetchEmpty = true
+      songStore.current!.lyrics = '[00:00.00] 改过'
+      songStore.current!.cover = 'data:image/jpeg;base64,AAA'
+
+      await undo()
+
+      expect(songStore.lyricSourcePlatform).toBeNull() // badge 回到 original 来源
+      expect(songStore.lyricFetchEmpty).toBe(false)
+      expect(songStore.lyricCandidates).toEqual([makeCand()]) // 候选保留
+    })
+  })
+
+  describe('manualSearch — 手动按钮（D7：无视离线 / 缺失判定，刷新对应 kind）', () => {
+    it('手动搜歌词：无视 isOffline 照搜，只刷 lyricCandidates', async () => {
+      songStore.isOffline = true // 离线也可手动
+      songStore.current!.cover = 'data:image/jpeg;base64,AAA' // 封面已有（不缺失）
+      const searchSongs = vi.fn(async () =>
+        result([
+          makeCand(),
+          makeCand({ source: 'qqmusic', id: 'q1', cover_url: 'https://q/1.jpg' }),
+        ]),
+      )
+
+      await manualSearch('lyrics', searchSongs)
+
+      expect(searchSongs).toHaveBeenCalledWith('歌名', '作者')
+      expect(songStore.lyricSearchState).toBe('done')
+      expect(songStore.lyricCandidates).toHaveLength(2)
+      expect(songStore.coverSearchState).toBe('idle') // 只刷歌词
+    })
+
+    it('手动搜封面：只刷 coverCandidates（过滤 cover_url），不动歌词候选', async () => {
+      songStore.lyricCandidates = [makeCand()]
+      songStore.lyricSearchState = 'done'
+      const searchSongs = vi.fn(async () =>
+        result([makeCand({ cover_url: 'https://x/1.jpg' }), makeCand({ source: 'qqmusic', id: 'q1', cover_url: null })]),
+      )
+
+      await manualSearch('cover', searchSongs)
+
+      expect(songStore.coverSearchState).toBe('done')
+      expect(songStore.coverCandidates).toHaveLength(1)
+      expect(songStore.lyricCandidates).toEqual([makeCand()]) // 歌词候选不受影响
+      expect(songStore.lyricSearchState).toBe('done')
+    })
+
+    it('手动搜索失败 → 空候选 + done（cand-empty 展示），不标离线（D3 仅自动搜索判定）', async () => {
+      const searchSongs = vi.fn(async () => { throw new Error('down') })
+      await manualSearch('lyrics', searchSongs)
+      expect(songStore.lyricCandidates).toEqual([])
+      expect(songStore.lyricSearchState).toBe('done')
+      expect(songStore.isOffline).toBe(false) // 不标离线
+    })
+
+    it('readonly → 不搜', async () => {
+      songStore.readonly = true
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+      await manualSearch('lyrics', searchSongs)
+      expect(searchSongs).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('pickLyricCandidate — 点选歌词填入 + 换源（D4：C2）', () => {
+    it('取词成功 → current.lyrics 填入 + lyricSourcePlatform=该源 + dirty 翻转', async () => {
+      songStore.lyricCandidates = [makeCand()]
+      const fetchLyric = vi.fn(async () => '[00:00.00] 歌词')
+      expect(songStore.dirty).toBe(false)
+
+      await pickLyricCandidate(makeCand(), fetchLyric)
+
+      expect(fetchLyric).toHaveBeenCalledWith('netease', 'n1')
+      expect(songStore.current!.lyrics).toBe('[00:00.00] 歌词')
+      expect(songStore.lyricSourcePlatform).toBe('netease')
+      expect(songStore.dirty).toBe(true) // 歌词在 DIRTY_FIELDS
+    })
+
+    it('C2 换源成功：原源 None → 按候选 title/artist 重搜 → 固定顺序取另一家成功 → 填 + badge=该源', async () => {
+      const cand = makeCand() // netease
+      const fetchLyric = vi.fn(async (source: MusicSourceId) =>
+        source === 'netease' ? null : source === 'qqmusic' ? '[00:00.00] QQ词' : null,
+      )
+      const searchSongs = vi.fn(async () =>
+        result([
+          makeCand({ source: 'qqmusic', id: 'q1' }),
+          makeCand({ source: 'migu', id: 'm1' }),
+        ]),
+      )
+
+      await pickLyricCandidate(cand, fetchLyric, searchSongs)
+
+      // 重搜以候选自身 title/artist 为身份（非可能被编辑的 current）
+      expect(searchSongs).toHaveBeenCalledWith('歌名', '作者')
+      expect(songStore.current!.lyrics).toBe('[00:00.00] QQ词')
+      expect(songStore.lyricSourcePlatform).toBe('qqmusic') // badge = 换源成功的源
+      expect(songStore.lyricFetchEmpty).toBe(false)
+    })
+
+    it('C2 全源失败 → lyricFetchEmpty=true（空态「未找到匹配的歌词，可手动粘贴」）', async () => {
+      const fetchLyric = vi.fn(async () => null)
+      const searchSongs = vi.fn(async () => result([makeCand({ source: 'qqmusic', id: 'q1' })]))
+
+      await pickLyricCandidate(makeCand(), fetchLyric, searchSongs)
+
+      expect(songStore.lyricFetchEmpty).toBe(true)
+      expect(songStore.current!.lyrics).toBe('') // 不降级到低分候选
+      expect(songStore.lyricSourcePlatform).toBeNull()
+    })
+
+    it('C2 跳过原源：固定顺序 netease→qqmusic→migu，不重复取原源', async () => {
+      const cand = makeCand({ source: 'qqmusic', id: 'q1' }) // 原源 qqmusic
+      const fetchCalls: MusicSourceId[] = []
+      const fetchLyric = vi.fn(async (source: MusicSourceId) => {
+        fetchCalls.push(source)
+        return null
+      })
+      const searchSongs = vi.fn(async () =>
+        result([
+          makeCand({ source: 'netease', id: 'n1' }),
+          makeCand({ source: 'qqmusic', id: 'q2' }),
+          makeCand({ source: 'migu', id: 'm1' }),
+        ]),
+      )
+
+      await pickLyricCandidate(cand, fetchLyric, searchSongs)
+
+      // 首取原源 qqmusic（点选那一下）→ None 后 C2 重试只取 netease/migu（跳过原源 qqmusic）
+      expect(fetchCalls).toEqual(['qqmusic', 'netease', 'migu'])
+      expect(songStore.lyricFetchEmpty).toBe(true)
+    })
+
+    it('已切歌（searchSeq 变化）→ 取词结果丢弃不应用', async () => {
+      let resolveFetch!: (t: string | null) => void
+      const fetchLyric = vi.fn(() => new Promise<string | null>((res) => { resolveFetch = res }))
+      const p = pickLyricCandidate(makeCand(), fetchLyric)
+      // 等待 fetch 挂起后切歌
+      await Promise.resolve()
+      songStore.searchSeq++
+      resolveFetch('[00:00.00] 迟到的歌词')
+      await p
+      expect(songStore.current!.lyrics).toBe('') // 未应用
+    })
+  })
+
+  describe('pickCoverCandidate — 点选封面下载/解码/压缩（D6）', () => {
+    it('成功：downloadCover → bytesToCoverInput → setCover（dirty 翻转）', async () => {
+      songStore.coverCandidates = [makeCand({ cover_url: 'https://x/1.jpg' })]
+      const downloadCover = vi.fn(async () => [0xff, 0xd8, 0xff, 0xe0])
+      const bytesToCoverInput = vi.fn(async () => ({ data_url: 'data:image/jpeg;base64,AAA', mime: 'image/jpeg' }))
+
+      await pickCoverCandidate(makeCand({ cover_url: 'https://x/1.jpg' }), downloadCover, bytesToCoverInput)
+
+      expect(downloadCover).toHaveBeenCalledWith('https://x/1.jpg')
+      expect(bytesToCoverInput).toHaveBeenCalledWith([0xff, 0xd8, 0xff, 0xe0])
+      expect(songStore.current!.cover).toBe('data:image/jpeg;base64,AAA')
+      expect(songStore.current!.cover_mime).toBe('image/jpeg')
+      expect(songStore.dirty).toBe(true)
+    })
+
+    it('cover_url 为 null → 忽略（不下载）', async () => {
+      const downloadCover = vi.fn(async () => [])
+      await pickCoverCandidate(makeCand({ cover_url: null }), downloadCover)
+      expect(downloadCover).not.toHaveBeenCalled()
+    })
+
+    it('下载失败 → 静默从 coverCandidates 移除该张，其余不受影响（验收 #12）', async () => {
+      const keep = makeCand({ source: 'qqmusic', id: 'q1', cover_url: 'https://q/1.jpg' })
+      songStore.coverCandidates = [makeCand({ cover_url: 'https://x/1.jpg' }), keep]
+      const downloadCover = vi.fn(async () => { throw new Error('下载超时') })
+
+      await pickCoverCandidate(makeCand({ cover_url: 'https://x/1.jpg' }), downloadCover)
+
+      expect(songStore.coverCandidates).toEqual([keep]) // 该张被移除、其余保留
+      expect(songStore.current!.cover).toBeNull() // 不写入
+      expect(songStore.dirty).toBe(false)
+    })
+
+    it('解码/压缩失败 → 同样静默移除（bytesToCoverInput reject）', async () => {
+      const keep = makeCand({ source: 'qqmusic', id: 'q1', cover_url: 'https://q/1.jpg' })
+      songStore.coverCandidates = [makeCand({ cover_url: 'https://x/1.jpg' }), keep]
+      const downloadCover = vi.fn(async () => [0xff, 0xd8, 0xff])
+      const bytesToCoverInput = vi.fn(async () => { throw new Error('封面格式无法识别') })
+
+      await pickCoverCandidate(makeCand({ cover_url: 'https://x/1.jpg' }), downloadCover, bytesToCoverInput)
+
+      expect(songStore.coverCandidates).toEqual([keep])
+    })
+
+    it('已切歌（searchSeq 变化）→ 下载结果丢弃不应用、不移除', async () => {
+      songStore.coverCandidates = [makeCand({ cover_url: 'https://x/1.jpg' })]
+      let resolveDownload!: (b: number[]) => void
+      const downloadCover = vi.fn(() => new Promise<number[]>((res) => { resolveDownload = res }))
+      const p = pickCoverCandidate(makeCand({ cover_url: 'https://x/1.jpg' }), downloadCover)
+      await Promise.resolve()
+      songStore.searchSeq++
+      resolveDownload([0xff, 0xd8, 0xff])
+      await p
+      expect(songStore.current!.cover).toBeNull()
+      expect(songStore.coverCandidates).toHaveLength(1) // 不移除（已切歌）
+    })
+
+    it('readonly → 不下载', async () => {
+      songStore.readonly = true
+      const downloadCover = vi.fn(async () => [])
+      await pickCoverCandidate(makeCand({ cover_url: 'https://x/1.jpg' }), downloadCover)
+      expect(downloadCover).not.toHaveBeenCalled()
     })
   })
 })

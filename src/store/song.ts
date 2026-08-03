@@ -6,9 +6,21 @@
 // 在 store/selectors.ts，IPC 类型化封装在 api/songs.ts。
 import { reactive } from 'vue'
 
+import { downloadCover as defaultDownloadCover } from '../api/search'
+import { fetchLyric as defaultFetchLyric } from '../api/search'
+import { searchSongs as defaultSearchSongs } from '../api/search'
 import { renameSong as defaultRename } from '../api/songs'
 import { saveSong as defaultSave } from '../api/songs'
-import type { CoverInput, LyricsSource, Song, SongSummary } from '../api/types'
+import type {
+  CoverInput,
+  LyricsSource,
+  MusicSourceId,
+  SearchResult,
+  Song,
+  SongCandidate,
+  SongSummary,
+} from '../api/types'
+import { bytesToCoverInput as defaultBytesToCoverInput } from '../lib/cover'
 import { fileName, replaceFileName } from '../lib/path'
 
 /** 参与 dirty 判定的可编辑字段（design.md D6：path/lyrics_source 不参与）。 */
@@ -28,6 +40,10 @@ const DIRTY_FIELDS = [
 /** 保存动作态（design.md D7）：`idle/saving/saved/save_failed` 四态；
  *  展示态由 readonly/dirty/saveState 三者合成，saveState 只存动作态避免双写失步。 */
 type SaveState = 'idle' | 'saving' | 'saved' | 'save_failed'
+
+/** 搜索态（v1-search-ui D2：按 kind 分离，歌词/封面各管各的候选区独立状态机）。
+ *  自动搜索可同时搜两类、手动搜索只搜一类——若为全局单值，手动搜歌词会让封面面板误显「搜索中…」。 */
+type SearchState = 'idle' | 'searching' | 'done'
 
 /** 切歌/换目录未保存确认的待办动作（v1-ux-settings D1：两个入口共享同一三选一状态机）。
  *  pendingAction 非 null → App 渲染 <SwitchDialog/>；loader 闭包存 reactive 合法（仿 saveFn 注入先例）。 */
@@ -70,6 +86,24 @@ interface SongEditor {
   renameRejected: boolean
   /** 未保存时切歌/换目录的待确认动作（null = 无；非 null → App 渲染 SwitchDialog 三选一）。 */
   pendingAction: PendingAction | null
+  /** 歌词搜索态（D2）：idle/searching/done，歌词候选区独立状态机。 */
+  lyricSearchState: SearchState
+  /** 封面搜索态（D2）：idle/searching/done，封面候选区独立状态机。 */
+  coverSearchState: SearchState
+  /** 歌词候选（search_song 的 songs，后端已打分去重排序）。 */
+  lyricCandidates: SongCandidate[]
+  /** 封面候选（songs 中 cover_url 非 null 的子集）。 */
+  coverCandidates: SongCandidate[]
+  /** 会话级离线（D3）：自动搜索全源失败首响置位，sticky 到重启；后续选中不再自动搜。 */
+  isOffline: boolean
+  /** 本首已判定过「选中即搜」（D1 仅一次；删除内容不重算，切歌由 resetSearchState 清零）。 */
+  searchedThisSong: boolean
+  /** 点选歌词候选的来源平台（badge 展示「来源: 网易云 / QQ音乐 / 咪咕」；null = 未点选，沿用 lyricsSource）。 */
+  lyricSourcePlatform: MusicSourceId | null
+  /** C2 全源取词失败 → 空态「未找到匹配的歌词，可手动粘贴」。 */
+  lyricFetchEmpty: boolean
+  /** 搜索序号（D2.6 过期守卫）：每次搜索捕获 mySeq=++searchSeq，resolve 时 mySeq≠searchSeq 丢弃结果。 */
+  searchSeq: number
 }
 
 /**
@@ -86,6 +120,11 @@ export async function selectSong(
   raw.selectedPath = path
   if (path !== null && loadSong !== undefined) {
     await open(path, loadSong)
+    // D1：选中即搜——open 成功后、current 非空且 !readonly 触发（后台异步，不阻塞编辑）。
+    // resolvePending 的保存后切歌路径天然收敛于此（open 是选中唯一路径）。
+    if (raw.current !== null && !raw.readonly) {
+      void autoSearchOnSelect()
+    }
   }
 }
 
@@ -113,6 +152,7 @@ export async function activateFolder(
   raw.saveError = ''
   raw.pendingRename = null // design.md D8：换目录弃置改名草稿
   raw.renameRejected = false
+  resetSearchState() // D5：换目录候选生命周期 = 当前歌曲，作废在途搜索（isOffline 会话级不清）
   raw.songs = await loadSongs(dir)
 }
 
@@ -227,6 +267,15 @@ const raw = reactive<SongEditor>({
   pendingRename: null,
   renameRejected: false,
   pendingAction: null,
+  lyricSearchState: 'idle',
+  coverSearchState: 'idle',
+  lyricCandidates: [],
+  coverCandidates: [],
+  isOffline: false,
+  searchedThisSong: false,
+  lyricSourcePlatform: null,
+  lyricFetchEmpty: false,
+  searchSeq: 0,
 })
 
 /**
@@ -252,6 +301,7 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
     raw.saveError = ''
     raw.pendingRename = null // design.md D8：切歌弃置改名草稿（回到打开时文件名）
     raw.renameRejected = false
+    resetSearchState() // D5：候选生命周期 = 当前歌曲，作废在途搜索（isOffline 会话级不清）
   } catch {
     if (raw.selectedPath !== path) return // 过期错误同样丢弃，不误设只读
     // open_song 读标签失败（损坏/结构错）→ 只读表单，能看不能改、不能保存
@@ -264,6 +314,183 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
     raw.saveError = ''
     raw.pendingRename = null
     raw.renameRejected = false
+    resetSearchState() // D5：坏标签同样重置搜索状态（无歌可搜）
+  }
+}
+
+/**
+ * 候选生命周期 = 当前歌曲（D5）：清两类候选、searchState 归 idle、searchedThisSong=false、
+ * `lyricSourcePlatform=null`、`lyricFetchEmpty=false`、`searchSeq++`（作废在途搜索——
+ * 切歌后旧搜索结果 resolve 时 mySeq≠searchSeq 即丢弃，D2.6）。`isOffline` 不清（会话级）。
+ * open（成功+失败分支）与 activateFolder 均调用；未点选候选切歌直接丢弃、无弹窗（FR-8.14）。
+ */
+function resetSearchState(): void {
+  raw.lyricCandidates = []
+  raw.coverCandidates = []
+  raw.lyricSearchState = 'idle'
+  raw.coverSearchState = 'idle'
+  raw.searchedThisSong = false
+  raw.lyricSourcePlatform = null
+  raw.lyricFetchEmpty = false
+  raw.searchSeq++
+}
+
+/**
+ * 选中即搜（D1）：守卫 current 非空 / !readonly / !searchedThisSong / !isOffline →
+ * 判定只补缺失（`lyrics==='' && lyricsSource!=='sidecar'` 搜歌词；`cover===null` 搜封面）→
+ * 有缺失才搜 → 捕获 `mySeq=++searchSeq`（过期守卫）→ searching → 分桶填充 → done。
+ *
+ * resolve 后 `allEmpty`（songs 空 && source_stats 全 0）→ `isOffline=true`（会话级、sticky，
+ * 仅自动搜索判定 D3）；IPC reject 按全源失败同样标记（防御）。搜索态归 idle →
+ * 候选区显示「离线：仅手动填写」。IPC 依赖以 `searchSongs` 注入（默认 api/search.ts，测试注入桩）。
+ */
+export async function autoSearchOnSelect(
+  searchSongs: (title: string, artist: string) => Promise<SearchResult> = defaultSearchSongs,
+): Promise<void> {
+  const cur = raw.current
+  if (cur === null || raw.readonly || raw.searchedThisSong || raw.isOffline) return
+  raw.searchedThisSong = true // 本首已判定过（删除内容后 flag 不重算，切歌才清零）
+  const needLyrics = cur.lyrics === '' && raw.lyricsSource !== 'sidecar'
+  const needCover = cur.cover === null
+  if (!needLyrics && !needCover) return // 已有内容 → 不搜（候选区保持 idle）
+  const mySeq = ++raw.searchSeq
+  if (needLyrics) raw.lyricSearchState = 'searching'
+  if (needCover) raw.coverSearchState = 'searching'
+  try {
+    const result = await searchSongs(cur.title, cur.artist) // 一次调用同时喂两类候选（惰性拉取）
+    if (mySeq !== raw.searchSeq) return // 切歌/二次搜索后旧结果不得覆盖新状态
+    if (needLyrics) {
+      raw.lyricCandidates = result.songs
+      raw.lyricSearchState = 'done'
+    }
+    if (needCover) {
+      raw.coverCandidates = result.songs.filter((s) => s.cover_url !== null)
+      raw.coverSearchState = 'done'
+    }
+    const allEmpty = result.songs.length === 0 && result.source_stats.every(([, n]) => n === 0)
+    if (allEmpty) {
+      raw.isOffline = true // 后端 D8：三源全 0 → 前端判定离线
+      raw.lyricSearchState = 'idle'
+      raw.coverSearchState = 'idle'
+    }
+  } catch {
+    if (mySeq !== raw.searchSeq) return
+    raw.isOffline = true // IPC reject 按全源失败同样标记（防御）
+    raw.lyricSearchState = 'idle'
+    raw.coverSearchState = 'idle'
+  }
+}
+
+/**
+ * 手动搜索按钮（D7）：无视离线 / 缺失判定，用户主动发起即刷新对应 kind 候选。
+ * `searchState` 各自 searching → done；手动搜索失败不标离线（D3 仅自动搜索判定），
+ * 空候选 + done → 候选区空态（cand-empty）。readonly / 无歌时禁用（组件守卫，双保险）。
+ */
+export async function manualSearch(
+  kind: 'lyrics' | 'cover',
+  searchSongs: (title: string, artist: string) => Promise<SearchResult> = defaultSearchSongs,
+): Promise<void> {
+  const cur = raw.current
+  if (cur === null || raw.readonly) return
+  const mySeq = ++raw.searchSeq // 并发守卫：搜索中重复点按钮重搜 → 旧结果作废
+  if (kind === 'lyrics') raw.lyricSearchState = 'searching'
+  else raw.coverSearchState = 'searching'
+  try {
+    const result = await searchSongs(cur.title, cur.artist)
+    if (mySeq !== raw.searchSeq) return
+    if (kind === 'lyrics') {
+      raw.lyricCandidates = result.songs
+      raw.lyricSearchState = 'done'
+    } else {
+      raw.coverCandidates = result.songs.filter((s) => s.cover_url !== null)
+      raw.coverSearchState = 'done'
+    }
+  } catch {
+    if (mySeq !== raw.searchSeq) return
+    if (kind === 'lyrics') {
+      raw.lyricCandidates = []
+      raw.lyricSearchState = 'done'
+    } else {
+      raw.coverCandidates = []
+      raw.coverSearchState = 'done'
+    }
+  }
+}
+
+/** C2 换源固定顺序（netease → qqmusic → migu），跳过原源。 */
+const C2_SOURCE_ORDER: MusicSourceId[] = ['netease', 'qqmusic', 'migu']
+
+/**
+ * 点选歌词候选（D4）：`fetchLyric(cand.source, cand.id)` 成功 → `current.lyrics` 填入 +
+ * `lyricSourcePlatform = cand.source`（badge 显示平台，dirty 翻转，仍可编辑）。
+ * None → C2 换源：以 **cand 自身 title/artist**（点选那首歌的身份，非可能被编辑的 current）
+ * 重搜一次，按固定顺序跳过 `cand.source` 取该源第一个候选 `fetchLyric`；成功填 + badge=该源；
+ * 全源失败 → `lyricFetchEmpty=true`（空态，不降级到低分候选）。
+ * 已切歌（searchSeq 变化）→ 结果丢弃不应用。IPC 依赖以 `fetchLyric` / `searchSongs` 注入。
+ */
+export async function pickLyricCandidate(
+  cand: SongCandidate,
+  fetchLyric: (source: MusicSourceId, id: string) => Promise<string | null> = defaultFetchLyric,
+  searchSongs: (title: string, artist: string) => Promise<SearchResult> = defaultSearchSongs,
+): Promise<void> {
+  if (raw.readonly || raw.current === null) return
+  const mySeq = raw.searchSeq // 当前歌曲身份（切歌 resetSearchState 自增 → 过期丢弃）
+  const text = await fetchLyric(cand.source, cand.id)
+  if (raw.searchSeq !== mySeq) return
+  if (text !== null && text !== undefined) {
+    raw.current.lyrics = text
+    raw.lyricSourcePlatform = cand.source
+    raw.lyricFetchEmpty = false
+    return
+  }
+  // C2：取词 None → 换另一家源重试同一首歌（不降级到低分候选）
+  try {
+    const retry = await searchSongs(cand.title, cand.artist)
+    if (raw.searchSeq !== mySeq) return
+    for (const source of C2_SOURCE_ORDER) {
+      if (source === cand.source) continue // 跳过原源
+      const c = retry.songs.find((x) => x.source === source)
+      if (c === undefined) continue
+      const text2 = await fetchLyric(source, c.id)
+      if (raw.searchSeq !== mySeq) return
+      if (text2 !== null && text2 !== undefined) {
+        raw.current.lyrics = text2
+        raw.lyricSourcePlatform = source
+        raw.lyricFetchEmpty = false
+        return
+      }
+    }
+    raw.lyricFetchEmpty = true // 全源失败 → 空态
+  } catch {
+    if (raw.searchSeq !== mySeq) return
+    raw.lyricFetchEmpty = true
+  }
+}
+
+/**
+ * 点选封面候选（D6）：`cover_url` null 忽略 → `downloadCover(url)` → 裸 bytes →
+ * `bytesToCoverInput`（魔数嗅探 mime + data URL + ≤2048 压缩）→ `setCover`（复用既有动作，
+ * cover 在 DIRTY_FIELDS → 自动翻转 dirty）。下载 / 解码 / 压缩失败 → **静默从 coverCandidates
+ * 移除该张**（其余不受影响，不报错不标红，验收 #12）；已切歌（searchSeq 变化）→ 丢弃结果不应用。
+ */
+export async function pickCoverCandidate(
+  cand: SongCandidate,
+  downloadCover: (url: string) => Promise<number[]> = defaultDownloadCover,
+  bytesToCoverInput: (bytes: number[]) => Promise<CoverInput> = defaultBytesToCoverInput,
+): Promise<void> {
+  if (raw.readonly || raw.current === null) return
+  if (cand.cover_url === null) return
+  const mySeq = raw.searchSeq
+  try {
+    const bytes = await downloadCover(cand.cover_url)
+    if (raw.searchSeq !== mySeq) return // 已切歌，丢弃结果不应用
+    const input = await bytesToCoverInput(bytes)
+    if (raw.searchSeq !== mySeq) return
+    setCover(input)
+  } catch {
+    if (raw.searchSeq !== mySeq) return
+    // 静默移除该张（按 source+id 匹配——同一候选身份，不依赖对象引用，其余不受影响）
+    raw.coverCandidates = raw.coverCandidates.filter((c) => !(c.source === cand.source && c.id === cand.id))
   }
 }
 
@@ -346,6 +573,9 @@ export async function undo(): Promise<void> {
   raw.saveError = ''
   raw.pendingRename = null
   raw.renameRejected = false
+  // D5：badge 回到 original 的来源（候选保留——仍是当前歌，可重选）
+  raw.lyricSourcePlatform = null
+  raw.lyricFetchEmpty = false
 }
 
 /**
