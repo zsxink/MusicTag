@@ -58,18 +58,21 @@ SongRow.select / SongList.openFolder
 
 ```ts
 type PendingAction =
-  | { kind: 'switch'; path: string; loadSong: (p: string) => Promise<Song> }
-  | { kind: 'folder'; dir: string; loadSongs: (d: string) => Promise<SongSummary[]> }
+  | { kind: 'switch'; path: string; loadSong?: (path: string) => Promise<Song> }
+  | { kind: 'folder'; dir: string; loadSongs: (dir: string) => Promise<SongSummary[]> }
+// loadSong 可选（仿 selectSong 语义）：传则选中即读全量标签，不传只设选中高亮。
 // reactive 状态 + 动作：
 // requestSwitch(path, loadSong?)   dirty 拦截门（干净 → selectSong）
-// requestFolder(dir, loadSongs?)   dirty 拦截门（干净 → activateFolder）
-// resolvePending('save'|'discard') 保存失败不切换（keep pending）；成功/丢弃 → 执行动作 + 清 pending
+// requestFolder(dir, loadSongs?)   dirty 拦截门（干净 → activateFolder；dir=null/空 → no-op）
+// resolvePending('save'|'discard', saveFn?, renameFn?)  保存失败不切换（keep pending）；成功/丢弃 → 执行动作 + 清 pending
 // cancelPending()                  取消留在当前
 ```
 
 - loader 闭包存 reactive 合法（仿 `saveFn`/`renameFn` 注入先例），测试可注入桩不依赖 Tauri。
 - 「保存」= **完整复用 `store.save`**：saveState 状态机（顶栏「✕ 保存失败」展示）、exportLrc、rename 联动一次带齐，与顶栏保存按钮语义完全一致。
-- **边界**：坏标签只读 / 无选中时 `current`/`original` 为 null → `dirty` 恒 false → 不弹窗（spec「无修改直接切」自然满足）；保存中（`saving`）禁用弹窗「保存」按钮（防连点并发写同一文件，`save()` 自身亦有 readonly/current 守卫）。
+- **统一守卫（D9）**：① `requestSwitch` 点已选中行（`path===selectedPath`）→ no-op（防重读把编辑刷回磁盘快照）；② `requestFolder` 收到 `dir===null/''`（用户取消原生文件夹选择器）→ no-op，**即使 dirty 也不弹窗**（用户已明确取消，保持当前状态）；③ `pendingAction` 非 null（弹窗已打开）→ 忽略新请求（弹窗打开期间 ⌘O/点行不得静默改道三选一语境）。
+- **边界**：坏标签只读 / 无选中时 `current`/`original` 为 null → `dirty` 恒 false → 不弹窗（spec「无修改直接切」自然满足）；保存中（`saving`）禁用弹窗「保存」按钮（防连点并发写同一文件，`resolvePending` 自身亦有 saving 守卫双保险）。
+- **resolvePending 竞态守卫（D10）**：await `save` 之后、执行 pending 动作之前校验 `pendingAction` 身份仍为本 action——保存进行中用户取消（cancelPending）→ pending 已清 → **保存结果仅落盘、不再切换**（spec「取消留在当前」优先）；保存进行中改道 discard → **忽略**（防「意图丢弃」仍被写盘）。`saveFn`/`renameFn` 可注入（仿 `save()` 先例）供测试。
 
 **`SwitchDialog.vue`（§10.1 App 级组件）**：
 
@@ -96,7 +99,7 @@ CSS（styles/theme.css，顺序即优先级）：
 **状态层（`store/theme.ts` + `lib/theme.ts`）**：
 
 - `lib/theme.ts`（纯逻辑，无 Vue/Tauri/DOM 依赖，守 §10.0 lib 层）：`parseTheme(raw)`（校验 localStorage 值 → `'dark'|'light'|null`）、`resolveTheme(manual, systemPrefersLight)`（→ 当前生效 `'dark'|'light'`）。
-- `store/theme.ts`（reactive 单例，仿 song.ts 模式）：持 `manualChoice`/`effective` 状态 + `initTheme()` + `setTheme(choice)`。localStorage 读写、`matchMedia` 访问、`document.documentElement.dataset.theme` 应用都在此层（store 允许触碰 DOM/Web API，lib 不允许）。
+- `store/theme.ts`（reactive 单例，仿 song.ts 模式）：持 `manualChoice`/`effective` 状态 + `initTheme(env?)` + `setTheme(choice)`。localStorage 读写、`matchMedia` 访问、`document.documentElement.dataset.theme` 应用都在此层（store 允许触碰 DOM/Web API，lib 不允许）。浏览器依赖经 **`ThemeEnv` 接口注入**（`readChoice`/`writeChoice`/`systemPrefersLight`/`onSystemChange`/`applyDataTheme`，仿 `song.ts` loader 注入模式）——`initTheme` 测试传桩不依赖真实 window/document，默认实现用 Tauri WebView 环境。
 - **持久记忆**：localStorage key `music-tag-theme`，值 `'dark'`/`'light'`；手动选择 `null` = 删除 key（跟随系统）。PRD §7 主题记忆「localStorage 或 tauri-plugin-store」二选一——**取 localStorage**（V1 单机单窗口、无跨端共享/迁移需求，避免引入 store 插件依赖）。
 - **`initTheme()` 时序**：`main.ts` 在 `app.mount()` **之前**同步调用（localStorage 同步读 + 同步设 `data-theme`）——浅色手动选择的用户**启动不闪深**（防闪白是深色默认的对称保证）；同时注册 `matchMedia('(prefers-color-scheme: light)')` 的 `change` 监听。
 - **`setTheme(choice)`**：写/删 localStorage + 更新 `effective` + 应用 `data-theme`。
@@ -142,6 +145,14 @@ PRD §7 二选一取 localStorage。**为什么**：V1 单机单窗口、无跨�
 
 `effective==='dark'` 显示 ☀️、`'light'` 显示 🌙（点击后要切换到的主题）。**为什么**：与现有占位 ☀️（深色默认态显示 ☀️）一致，design.md §5 布局 `[☀️主题]` 同源；「图标指向下一步动作」比「图标表示当前状态」更直觉（深色界面配🌙易误解为当前已浅色）。
 
+### D9 弹窗入口的统一守卫（已选中行 / dir=null / 弹窗已打开）
+
+`requestSwitch`/`requestFolder`/`resolvePending` 内嵌三个 no-op 守卫：① `path===selectedPath` 重复点已选中行 → 直接返回（防重读把编辑刷回磁盘快照，与 mockup `onRowClick` 同语义）；② `dir===null/''`（用户取消原生文件夹选择器）→ 直接返回（即使 dirty 也不弹窗——用户已明确取消，保持当前状态）；③ `pendingAction !== null`（弹窗已打开）→ 忽略新请求（弹窗打开期间 ⌘O/点行不得静默改道三选一的语境）。**为什么**：这些守卫是对既有入口（`selectSong`/`activateFolder`）的收口——散在组件会在每个入口重复判断且容易漏；集中到 store 后组件退化为薄层，spec 各场景（无修改直接切 / 取消不换目录 / 取消留在当前）在重复点击与并发下仍成立。
+
+### D10 resolvePending 竞态守卫（保存中取消 / 改道 discard）
+
+await `save` 之后、执行 pending 动作之前，校验 `pendingAction` 身份仍为本 action：保存进行中用户取消（cancelPending）→ pending 已清 → **保存结果仅落盘、不再切换**（spec「取消留在当前」优先于「保存再切」，取消不应被保存动作反杀）；保存进行中改道 discard → **忽略**（防「意图丢弃」仍被写盘）。**为什么**：`resolvePending('save')` 是异步长操作，弹窗三按钮在保存中仍可能被再次点击/Esc（「保存」按钮 disabled 仅防连点，Esc 取消不受限）——不加身份校验会出现「用户取消却切了歌」「用户丢弃却写了盘」两类违反 spec 的竞态（CR 发现后修复，纳入设计）。
+
 ## 测试策略（design.md §10.4）
 
 - `src/lib/theme.test.ts`：`parseTheme`（非法值 → null）、`resolveTheme`（四组合）纯逻辑。
@@ -157,7 +168,7 @@ PRD §7 二选一取 localStorage。**为什么**：V1 单机单窗口、无跨�
 纯前端（frontend），单 worktree 串行；主题（组 1，独立自足）→ 弹窗（组 2，复用 save 通道）→ 打磨（组 3）→ 验证（组 4）。
 
 1. **主题（D4–D8）**：`theme.css` 追加 `[data-theme]` 覆盖块 + `theme.test.ts` 新增不变量 → `lib/theme.ts` 纯逻辑 + 单测 → `store/theme.ts` 状态与动作 + 单测 → `AppBar.vue` 按钮接 store + `main.ts` 挂 `initTheme` + 组件测试。
-2. **弹窗（D1–D3）**：`store/song.ts` 加 `pendingAction`/`requestSwitch`/`requestFolder`/`resolvePending`/`cancelPending` + 状态机单测 → `SwitchDialog.vue` 组件 + 单测 → `SongRow.vue`/`SongList.vue` 改走拦截 → `App.vue` 挂载。
+2. **弹窗（D1–D3、D9–D10）**：`store/song.ts` 加 `pendingAction`/`requestSwitch`/`requestFolder`/`resolvePending`/`cancelPending` + 状态机单测 → `SwitchDialog.vue` 组件 + 单测 → `SongRow.vue`/`SongList.vue` 改走拦截 → `App.vue` 挂载。
 3. **打磨（§3）**：过渡/reduced-motion/按压位移/弹窗阴影圆角/空态统一/焦点描边落位。
 4. **验证**：`npm run test` + `npm run build`；`npm run tauri dev` 人工确认（切歌/换目录三选一各按钮行为、保存失败不切换、主题切换+重启记忆、浅色跟随系统、手动选择后系统偏好不漂移）。
 
