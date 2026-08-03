@@ -3,6 +3,7 @@
 // 壳内注册业务 command：
 // - `pick_folder` / `list_songs`（v1-folder-list）
 // - `open_song` / `save_song`（v1-song-read / v1-song-save）
+// - `pick_cover_file` / `read_cover_path`（v1-cover-embed）
 // 后续子变更（v1-search 起）在此逐个追加 `tauri::generate_handler![...]`。
 //
 // 模块声明必须 `pub`：`src-tauri/tests/` 集成测试经 `app_lib::` 访问
@@ -20,6 +21,8 @@ pub fn run() {
             commands::folder::list_songs,
             commands::song::open_song,
             commands::song::save_song,
+            commands::cover::pick_cover_file,
+            commands::cover::read_cover_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

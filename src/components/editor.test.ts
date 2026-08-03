@@ -266,12 +266,12 @@ describe('CoverPanel — 封面预览与空态占位（spec: 封面 base64 data 
     expect(w.text()).toContain('image/png')
   })
 
-  it('无封面 → 虚线框空态占位 + MIME 未设置', () => {
+  it('无封面 → 虚线框空态占位 + 「点击选择 / 拖拽嵌入」提示 + MIME 未设置', () => {
     openSong(makeSong({ cover: null, cover_mime: null }))
     const w = mount(CoverPanel)
     expect(w.find('img.cover-img').exists()).toBe(false)
     expect(w.find('.cover-empty').exists()).toBe(true)
-    expect(w.text()).toContain('无封面')
+    expect(w.text()).toContain('点击选择 / 拖拽嵌入')
     expect(w.text()).toContain('未设置')
   })
 })

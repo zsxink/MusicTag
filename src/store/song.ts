@@ -7,7 +7,7 @@
 import { reactive } from 'vue'
 
 import { saveSong as defaultSave } from '../api/songs'
-import type { LyricsSource, Song, SongSummary } from '../api/types'
+import type { CoverInput, LyricsSource, Song, SongSummary } from '../api/types'
 
 /** 参与 dirty 判定的可编辑字段（design.md D6：path/lyrics_source 不参与）。 */
 const DIRTY_FIELDS = [
@@ -182,6 +182,27 @@ export async function undo(): Promise<void> {
   raw.current = { ...raw.original }
   raw.saveState = 'idle'
   raw.saveError = ''
+}
+
+/**
+ * 封面区写入封面（v1-cover-embed D5）：压缩后 data URL → `current.cover`（预览即压缩图），
+ * mime → `current.cover_mime`（badge 展示）。`cover` 已在 `DIRTY_FIELDS` → 自动翻转 dirty。
+ * 无歌（current=null）或坏标签只读时无视（组件已 `:disabled` 守卫，双保险）。
+ */
+export function setCover(input: CoverInput): void {
+  if (raw.readonly || raw.current === null) return
+  raw.current.cover = input.data_url
+  raw.current.cover_mime = input.mime
+}
+
+/**
+ * 清空封面：置 `null` → 保存后 `apply_cover` 不 push、既有封面被清除（全量覆盖语义）。
+ * `cover` 置 null 与 original 的 cover 不一致 → dirty 翻转（配合删除标记）。
+ */
+export function clearCover(): void {
+  if (raw.readonly || raw.current === null) return
+  raw.current.cover = null
+  raw.current.cover_mime = null
 }
 
 /** 只读封装 store（避免组件直接改整个对象；字段仍可单独赋值）。 */

@@ -4,7 +4,7 @@
 // model.rs）：pick_folder / list_songs / open_song / save_song。实现 = `invokeCommand` 透传，
 // 组件与 store 一律经此层发 IPC（store 动作的 loader 注入 api/songs.ts 封装）。
 import { invokeCommand } from './client'
-import type { Song, SongSummary } from './types'
+import type { CoverInput, Song, SongSummary } from './types'
 
 /** 打开原生文件夹选择器。取消返回 null，否则返回目录绝对路径。 */
 export function pickFolder(): Promise<string | null> {
@@ -24,4 +24,14 @@ export function openSong(path: string): Promise<Song> {
 /** 保存当前编辑 = 表单全量覆盖写回原路径（语义在 Rust writer::save_song）。 */
 export function saveSong(song: Song): Promise<void> {
   return invokeCommand<void>('save_song', { song })
+}
+
+/** 打开原生封面文件选择器（jpg/png/webp）。取消返回 null，否则返回压缩后 data URL + mime。 */
+export function pickCoverFile(): Promise<CoverInput | null> {
+  return invokeCommand<CoverInput | null>('pick_cover_file')
+}
+
+/** 读取拖拽路径的封面文件：读文件 → 压缩 → data URL。读失败/非图片 → reject（中文原因）。 */
+export function readCoverPath(path: string): Promise<CoverInput> {
+  return invokeCommand<CoverInput>('read_cover_path', { path })
 }
