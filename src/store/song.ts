@@ -2,6 +2,7 @@
 // v1-song-read 起承载 SongEditor 编辑状态（current/original/dirty/readonly）。
 import { computed, reactive } from 'vue'
 
+import { invokeCommand } from '../lib/tauri'
 import type { LyricsSource, Song, SongSummary } from '../lib/tauri'
 
 /** 参与 dirty 判定的可编辑字段（design.md D6：path/lyrics_source 不参与）。 */
@@ -17,6 +18,10 @@ const DIRTY_FIELDS = [
   'lyrics',
   'cover',
 ] as const
+
+/** 保存动作态（design.md D7）：`idle/saving/saved/save_failed` 四态；
+ *  展示态由 readonly/dirty/saveState 三者合成，saveState 只存动作态避免双写失步。 */
+type SaveState = 'idle' | 'saving' | 'saved' | 'save_failed'
 
 /** 文件夹列表 + SongEditor 编辑状态。 */
 interface SongEditor {
@@ -38,6 +43,10 @@ interface SongEditor {
   readonly: boolean
   /** 快照 `current.lyrics_source`（占位，供 UI badge）。 */
   lyricsSource: LyricsSource
+  /** 保存动作态（design.md D7）：saving/saved/save_failed 由 save() 设置；idle 为新歌/换目录/撤销后。 */
+  saveState: SaveState
+  /** 保存失败原因（saveState='save_failed' 时顶栏展示「✕ 保存失败：原因」）。 */
+  saveError: string
 }
 
 /** 取路径最后一段（跨平台兼容 `/` 与 `\` 分隔）。 */
@@ -99,6 +108,8 @@ export async function activateFolder(
   raw.original = null
   raw.readonly = false
   raw.lyricsSource = 'none'
+  raw.saveState = 'idle'
+  raw.saveError = ''
   raw.songs = await loadSongs(dir)
 }
 
@@ -118,6 +129,8 @@ const raw = reactive<SongEditor>({
   },
   readonly: false,
   lyricsSource: 'none',
+  saveState: 'idle',
+  saveError: '',
 })
 
 /**
@@ -138,6 +151,8 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
     raw.current = { ...song }
     raw.readonly = false
     raw.lyricsSource = song.lyrics_source
+    raw.saveState = 'idle'
+    raw.saveError = ''
   } catch {
     if (raw.selectedPath !== path) return // 过期错误同样丢弃，不误设只读
     // open_song 读标签失败（损坏/结构错）→ 只读表单，能看不能改、不能保存
@@ -145,7 +160,47 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
     raw.original = null
     raw.readonly = true
     raw.lyricsSource = 'none'
+    raw.saveState = 'idle'
+    raw.saveError = ''
   }
+}
+
+/**
+ * 保存当前编辑 = 表单全量覆盖写回原路径（design.md D7 / D9）。
+ *
+ * IPC 依赖以 `saveFn` 参数注入（仿 open 的 loadSong），组件侧传
+ * `(song) => invoke('save_song', { song })`，便于测试不依赖 Tauri。
+ *
+ * 状态机：`saving` → 成功快照 `original={...current}`（新对比基准，dirty 归 false）
+ * + `saveState='saved'`；失败保留 `current`（可重试、dirty 保持 true）+ `saveError`
+ * + `saveState='save_failed'`（绝不假报已保存，FR-5.4a）。
+ * 只读/无歌不执行；保存中禁用再次保存（防连点并发写同一文件）。
+ */
+export async function save(
+  saveFn: (song: Song) => Promise<void> = (song) =>
+    invokeCommand('save_song', { song }).then(() => undefined),
+): Promise<void> {
+  if (raw.readonly || raw.current === null) return
+  raw.saveState = 'saving'
+  try {
+    await saveFn(raw.current)
+    raw.original = { ...raw.current } // 新基准：当前已写盘，dirty 归 false
+    raw.saveState = 'saved'
+  } catch (e) {
+    raw.saveError = String(e) // current 保留、original 不更新 → dirty 保持 true
+    raw.saveState = 'save_failed'
+  }
+}
+
+/**
+ * 编辑区撤销（design.md D8）：`current` 恢复为打开时 `original` 快照（非磁盘级），
+ * 回到打开时基准；`original` 不被覆盖，再编辑可再撤销。saveState 归 idle。
+ */
+export async function undo(): Promise<void> {
+  if (raw.original === null) return
+  raw.current = { ...raw.original }
+  raw.saveState = 'idle'
+  raw.saveError = ''
 }
 
 /** 只读封装 store（避免组件直接改整个对象；字段仍可单独赋值）。 */

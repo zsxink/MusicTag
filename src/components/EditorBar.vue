@@ -1,8 +1,11 @@
 <script setup lang="ts">
-// 编辑顶栏（design.md §5 editor-bar）：正在编辑 + 保存状态 + 撤销/保存占位。
-// - 保存状态：dirty 时琥珀「有未保存的修改」；只读时 danger「标签损坏，只读」。
-// - 撤销/保存按钮本变更 disabled 占位（保存语义归 v1-song-save）。
-import { fileName, songStore } from '../store/song'
+// 编辑顶栏（design.md §5 editor-bar）：正在编辑 + 保存状态 + 保存/撤销。
+// v1-song-save 接入保存状态机：dirty 琥珀 / 保存中 / ✓ 已保存 绿 / ✕ 保存失败：原因。
+// 保存状态由 readonly/dirty/saveState 三者合成（design.md D7，saveState 只存动作态）。
+import { fileName, save, songStore, undo } from '../store/song'
+
+// 保存中：为 true 时保存/撤销按钮均禁用（design.md D6 防连点并发写同一文件）
+const saving = () => songStore.saveState === 'saving'
 </script>
 
 <template>
@@ -12,15 +15,28 @@ import { fileName, songStore } from '../store/song'
       <span v-if="songStore.current?.artist" class="now-artist">{{ songStore.current.artist }}</span>
     </div>
 
-    <!-- 保存状态 -->
+    <!-- 保存状态（readonly > saving > save_failed > saved > dirty > 已就绪，design.md D7 优先级） -->
     <span v-if="songStore.readonly" class="save-state readonly" role="alert">✕ 标签损坏，只读</span>
+    <span v-else-if="songStore.saveState === 'saving'" class="save-state saving">保存中…</span>
+    <span v-else-if="songStore.saveState === 'save_failed'" class="save-state failed" role="alert">✕ 保存失败：{{ songStore.saveError }}</span>
+    <span v-else-if="songStore.saveState === 'saved'" class="save-state saved">✓ 已保存</span>
     <span v-else-if="songStore.dirty" class="save-state dirty">有未保存的修改</span>
     <span v-else class="save-state">已就绪</span>
 
-    <!-- 撤销/保存占位（v1-song-save 接语义） -->
+    <!-- 撤销 / 保存（design.md D9 接语义） -->
     <div class="editor-actions">
-      <button class="btn btn-ghost" type="button" disabled>撤销</button>
-      <button class="btn btn-primary" type="button" disabled>保存</button>
+      <button
+        class="btn btn-ghost"
+        type="button"
+        :disabled="!songStore.dirty || saving()"
+        @click="undo"
+      >撤销</button>
+      <button
+        class="btn btn-primary"
+        type="button"
+        :disabled="!songStore.dirty || saving() || songStore.readonly"
+        @click="save()"
+      >保存</button>
     </div>
   </div>
 </template>
@@ -81,7 +97,13 @@ import { fileName, songStore } from '../store/song'
   color: var(--accent);
 }
 
-.save-state.readonly {
+.save-state.saved {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.save-state.readonly,
+.save-state.failed {
   color: var(--danger);
   font-weight: 600;
 }
