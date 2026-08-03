@@ -227,6 +227,10 @@ onBeforeUnmount(() => {
   background: var(--danger);
 }
 
+.cover-clear:active {
+  transform: translateY(1px);
+}
+
 .cover-mark {
   font-size: 30px;
   opacity: 0.4;
@@ -266,7 +270,7 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   color: var(--text-dim);
   font-size: 11.5px;
-  transition: border-color 0.12s, color 0.12s;
+  transition: border-color 0.12s, color 0.12s, transform 0.05s;
 }
 
 .search-trigger:hover {
@@ -274,8 +278,13 @@ onBeforeUnmount(() => {
   color: var(--accent);
 }
 
+.search-trigger:active {
+  transform: translateY(1px);
+}
+
 .search-trigger:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 </style>

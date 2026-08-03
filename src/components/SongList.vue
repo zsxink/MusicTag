@@ -100,10 +100,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   color: var(--text);
   border-radius: 6px;
   font-weight: 600;
+  transition: background 0.12s, border-color 0.12s;
 }
 
 .open-btn:hover {
   background: var(--hover);
+}
+
+.open-btn:active {
+  transform: translateY(1px);
 }
 
 .search-input {
@@ -126,14 +131,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   border-color: var(--accent);
 }
 
-/* ---------- 空状态（design.md §6.1：图标 40px 35% 透明 + 标题 + 副说明） ---------- */
+/* ---------- 空状态（design.md §6.1：图标 40px 35% 透明 + 标题 + 副说明统一） ---------- */
 .empty {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   padding: 24px;
   color: var(--text-dim);
   text-align: center;
@@ -146,13 +151,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 }
 
 .empty-title {
-  color: var(--text-dim);
+  color: var(--text);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .empty-desc {
-  font-size: 11.5px;
+  font-size: 12px;
   max-width: 200px;
 }
 
