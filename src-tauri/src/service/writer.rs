@@ -15,7 +15,11 @@ use std::path::Path;
 ///
 /// 写盘策略（D6）：读入 → `clear()` 重建标签 → 写同目录临时文件 →
 /// rename 原子替换原路径。任一环节失败返回 `Err(String)`，原文件不被触碰。
-pub fn save_song(song: Song) -> Result<(), String> {
+///
+/// `export_lrc`（design.md D3/D4）：复选框 opt-in 同步写 `.lrc`。写顺序**内嵌先、
+/// `.lrc` 后**——内嵌是主存储（FR-4.1）；`.lrc` 失败 `?` 并入总 Err（前缀「写 .lrc
+/// 失败:」），绝不吞错报成功（`.lrc` 为空时 `export_lrc` 内部 no-op，FR-4.4a）。
+pub fn save_song(song: Song, export_lrc: bool) -> Result<(), String> {
     let path = Path::new(&song.path);
 
     // 写前校验格式（PRD「稳健」）：格式损坏/不可读 → Err，原文件未动。
@@ -31,5 +35,11 @@ pub fn save_song(song: Song) -> Result<(), String> {
 
     apply_meta(tag, &song)?;
 
-    write_atomic(path, &tagged_file).map_err(|e| format!("写回文件失败: {e}"))
+    write_atomic(path, &tagged_file).map_err(|e| format!("写回文件失败: {e}"))?;
+
+    if export_lrc {
+        crate::service::lyrics::export_lrc(path, &song.lyrics)
+            .map_err(|e| format!("写 .lrc 失败: {e}"))?;
+    }
+    Ok(())
 }
