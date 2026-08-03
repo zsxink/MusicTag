@@ -48,7 +48,7 @@ src-tauri/src/
   → invoke('search_song', { title, artist })
   → commands/search.rs 薄壳
   → service::searcher::search_song(&client, title, artist)
-      → tokio::join_all(三源 MusicSource::search)   // 每家 6s 超时，失败 → 空列表 + source_stats 记 0
+      → JoinSet 并发（每源独立 spawn + tokio::time::timeout 单源 6s）  // 超时/失败 → 该源空列表 + source_stats 记 0
       → aggregate()：合并 → 打分去重排序 → 前 N（10）条
   → SearchResult { songs: Vec<SongCandidate>, source_stats: Vec<(MusicSourceId, usize)> }
 
@@ -77,6 +77,8 @@ src-tauri/src/
 - `download_cover`：请求级 `client.get(url).timeout(5s)`；响应体限流——`Content-Length > 12MB` 直接拒绝，且流式读取设 12MB 上限（防内存放大）。失败返回 `Err(String)`，前端静默忽略该张候选（验收 #12）。
 - **为什么 6s / 5s**：spec 冻结：单源搜索 6s、封面下载 5s。
 - 三个 command 均为 `async fn`：Tauri 在异步运行时执行，不阻塞 WebView 主线程（FR-8.12a 后台异步，前端可同时继续编辑）。
+- **并发机制**：`tokio::task::JoinSet` 每源独立 spawn，`tokio::time::timeout(6s, fut)` 包单源超时——`join_all` 无法对单源单独超时（一家卡死会拖住聚合），故用 JoinSet；spec 只冻结「并发 + 6s 超时」，未冻结具体机制。聚合抽 `search_song_with_sources(client, title, artist, sources, timeout)` seam——源列表与超时可注入，供超时降级单测不联网（同款 seam：`download_cover_with_timeout`）。
+- **依赖**：`MusicSource` 为 `#[async_trait]` trait（新增 `async-trait` crate）；`reqwest` 开 `json` + `form` features（QQ musicu.fcg JSON body / 网易云 weapi、linuxapi 的 form 编码 / 咪咕 GET）。
 
 ### D3 打分去重严格按 spec 权重
 
@@ -84,7 +86,7 @@ src-tauri/src/
 
 - 归一化 `norm(s)`：trim + 全角转半角 + `to_lowercase`（V1 不做简繁）。
 - `title_match(q, t)`：`norm(q) == norm(t)` → 0.5；否则互相包含（`q⊆t` 或 `t⊆q`）→ 0.2；否则 0。
-- `artist_match(q, a)`：`norm(q) == norm(a)` → 0.4；否则互相包含 → 0.1；否则 0。候选 artist 含 `,`/`/`（多艺人）→ 对每段分别打分取 **max**（保持权重上限，不求和溢出）。
+- `artist_match(q, a)`：`norm(q) == norm(a)` → 0.4；否则互相包含 → 0.1；否则 0。候选 artist 含 `,`/`/`（多艺人）→ 对每段分别打分取 **max**（保持权重上限，不求和溢出）；**空查询 / 空候选 artist 直接给 0**（防空串互相包含的退化命中——spec 未定义，不自行加项）。
 - `score = title_match + artist_match`（上限 0.9）。**无 album 项**——spec 未定义，不自行加项。
 - 过滤 `title_match == 0` 的候选（与查询 title 零关联不进候选集，避免噪音）。
 - 去重：按归一化 `(norm(title), norm(artist))` 分组，保留最高分；同分按来源顺序稳定排序（Netease → QqMusic → Migu），保证结果可复现。

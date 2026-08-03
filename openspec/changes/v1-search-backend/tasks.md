@@ -3,7 +3,7 @@
 
 ## 1. Rust：契约类型（model.rs）
 
-- [x] 1.1 声明新增 Cargo 依赖（proposal Impact）：`reqwest`（共享 Client + timeout）、`tokio`（join_all / time::timeout）、`aes` + `cbc` + `rsa` + `rand`（网易云加密；base64 / serde_json 已在 Cargo.toml）
+- [x] 1.1 声明新增 Cargo 依赖（proposal Impact）：`reqwest`（共享 Client + timeout，features `json` + `form`）、`tokio`（JoinSet 并发 / time::timeout）、`async-trait`（`MusicSource` async trait）、`aes` + `cbc` + `rsa` + `rand`（网易云加密；base64 / serde_json 已在 Cargo.toml）
 - [x] 1.2 `model.rs` 新增 `MusicSourceId`（Netease/QqMusic/Migu）+ `SongCandidate` + `SearchResult`，字段与 design.md §10.3 契约逐字对齐（`source_stats: Vec<(MusicSourceId, usize)>` 元组序列化为 `[source, count]`）
 - [x] 1.3 `QqMusic` 显式 `#[serde(rename = "qqmusic")]`（snake_case 会得 `qq_music`，同 `SidecarLrc` 教训）+ 契约形状单测（序列化/反序列化）
 
