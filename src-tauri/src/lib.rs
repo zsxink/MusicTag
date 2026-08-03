@@ -5,7 +5,8 @@
 // - `open_song` / `save_song`（v1-song-read / v1-song-save）
 // - `pick_cover_file` / `read_cover_path`（v1-cover-embed）
 // - `rename_song`（v1-rename-sync，音频 + `.lrc` 改名）
-// 后续子变更（v1-search 起）在此逐个追加 `tauri::generate_handler![...]`。
+// - `search_song` / `fetch_lyric` / `download_cover`（v1-search-backend，三源并发搜索）
+// 后续子变更在此逐个追加 `tauri::generate_handler![...]`。
 //
 // 模块声明必须 `pub`：`src-tauri/tests/` 集成测试经 `app_lib::` 访问
 // commands/service（design.md §10 分层规范）。
@@ -25,6 +26,9 @@ pub fn run() {
             commands::song::rename_song,
             commands::cover::pick_cover_file,
             commands::cover::read_cover_path,
+            commands::search::search_song,
+            commands::search::fetch_lyric,
+            commands::search::download_cover,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
