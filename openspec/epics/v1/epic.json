@@ -9,7 +9,7 @@
     { "name": "v1-folder-list", "issue": 7, "domain": "both", "dependsOn": ["v1-skeleton-tauri"], "status": "done", "implementationCommit": "9dd6ad7", "slice": "FR-1.1–5 / FR-2 / §10.3" },
     { "name": "v1-song-read", "issue": 8, "domain": "both", "dependsOn": ["v1-folder-list"], "status": "done", "implementationCommit": "84c3a12", "slice": "FR-3 / FR-2a / FR-5.1/F-5.7" },
     { "name": "v1-song-save", "issue": 9, "domain": "both", "dependsOn": ["v1-song-read"], "status": "done", "implementationCommit": "2b7818a", "slice": "FR-5 / FR-3.2 / §5.1/.2 / §10.3" },
-    { "name": "v1-refactor-layering", "issue": 30, "domain": "both", "dependsOn": ["v1-song-save"], "status": "todo", "implementationCommit": null, "slice": "纯重构 · 分层 + 生产/测试隔离" },
+    { "name": "v1-refactor-layering", "issue": 30, "domain": "both", "dependsOn": ["v1-song-save"], "status": "done", "implementationCommit": "98cb7cd", "slice": "纯重构 · 分层 + 生产/测试隔离" },
     { "name": "v1-cover-embed", "issue": 10, "domain": "both", "dependsOn": ["v1-refactor-layering"], "status": "todo", "implementationCommit": null, "slice": "FR-3.5 / FR-5.2 / §5.3 / NFR" },
     { "name": "v1-lyrics-lrc", "issue": 11, "domain": "both", "dependsOn": ["v1-refactor-layering"], "status": "todo", "implementationCommit": null, "slice": "FR-4 / §5.4 / §6.5" },
     { "name": "v1-rename-sync", "issue": 12, "domain": "both", "dependsOn": ["v1-lyrics-lrc", "v1-song-save"], "status": "todo", "implementationCommit": null, "slice": "FR-4.6/6a/7 · FR-5.5/6 · §7" },
@@ -17,7 +17,7 @@
     { "name": "v1-search-backend", "issue": 14, "domain": "backend", "dependsOn": ["v1-song-read", "v1-refactor-layering"], "status": "todo", "implementationCommit": null, "slice": "FR-8.5/6/8a · §7" },
     { "name": "v1-search-ui", "issue": 15, "domain": "frontend", "dependsOn": ["v1-search-backend", "v1-lyrics-lrc", "v1-refactor-layering"], "status": "todo", "implementationCommit": null, "slice": "FR-8 / §9 / §6.3-6.6" }
   ],
-  "cursor": 4,
+  "cursor": 5,
   "error": null,
   "sourceRevision": "5b758b48f056941fec5838094f1f754efd12db88"
 }
