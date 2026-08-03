@@ -320,6 +320,22 @@ describe('songStore — v1-lyrics-lrc exportLrc opt-in（design.md D7）', () =>
     expect(saveFn).toHaveBeenCalledWith(songStore.current, true)
   })
 
+  it('dirty=false 时 save(true) 也可执行（独立导出门禁：勾选 + 歌词非空即触发，CR 修复）', async () => {
+    // 核心场景：已含内嵌歌词、表单未编辑（dirty=false），勾选导出 .lrc 可直接保存
+    songStore.current!.lyrics = '[00:00.00] 已内嵌歌词'
+    songStore.original!.lyrics = '[00:00.00] 已内嵌歌词'
+    songStore.exportLrc = true
+    expect(songStore.dirty).toBe(false) // D7：复选框不脏表单
+    expect(songStore.exportLrc).toBe(true)
+
+    const saveFn = vi.fn(async () => undefined)
+    await save(true, saveFn)
+
+    expect(saveFn).toHaveBeenCalledWith(songStore.current, true)
+    expect(songStore.saveState).toBe('saved')
+    expect(songStore.dirty).toBe(false)
+  })
+
   it('保存成功后保持勾选（D7：连续保存多首可保持导出意愿，仅切歌/换目录重置）', async () => {
     songStore.exportLrc = true
     await save(true, vi.fn(async () => undefined))

@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
-// mock invoke，让组件点击保存走的默认 save（invokeCommand('save_song')) 在单测中成功
+// mock invoke，让组件点击保存走的默认 save（invokeCommand('save_song')) 在单测中成功。
+// 经 vi.hoisted 暴露 mock 实例，供断言「EditorBar 保存按钮把 store.exportLrc 传给 save_song」。
+const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(async () => undefined),
+  invoke: mockInvoke,
 }))
 
 import type { Song } from '../api/types'
@@ -214,6 +216,103 @@ describe('EditorBar — v1-song-save 保存状态渲染与按钮禁用（design.
     expect(songStore.current).toEqual(original)
     expect(songStore.dirty).toBe(false)
     expect(songStore.saveState).toBe('idle')
+  })
+})
+
+describe('EditorBar — v1-lyrics-lrc exportLrc 接线（design.md D7：保存按钮传 songStore.exportLrc）', () => {
+  beforeEach(() => {
+    openSong(makeSong({ lyrics: '[00:00.00] 原词' }))
+    songStore.current!.lyrics = '[00:00.00] 新词' // 制造 dirty
+    mockInvoke.mockReset()
+    mockInvoke.mockResolvedValue(undefined)
+  })
+
+  const clickSave = async () => {
+    const w = mount(EditorBar)
+    await w.find('button.btn-primary').trigger('click')
+    await new Promise((r) => setTimeout(r, 0))
+  }
+  const lastSaveSongArgs = (): Record<string, unknown> | undefined => {
+    const call = mockInvoke.mock.calls.find((c) => c[0] === 'save_song')
+    return call ? (call[1] as Record<string, unknown>) : undefined
+  }
+
+  it('勾选「同时保存为 .lrc」后点保存 → save_song 收到 exportLrc=true', async () => {
+    songStore.exportLrc = true
+    await clickSave()
+    expect(songStore.saveState).toBe('saved')
+    expect(lastSaveSongArgs()?.exportLrc).toBe(true)
+  })
+
+  it('未勾选点保存 → save_song 收到 exportLrc=false（opt-in，默认不导出）', async () => {
+    songStore.exportLrc = false
+    await clickSave()
+    expect(songStore.saveState).toBe('saved')
+    expect(lastSaveSongArgs()?.exportLrc).toBe(false)
+  })
+})
+
+describe('EditorBar — exportLrc 独立导出门禁（CR 修复：D7 非脏但「勾选 + 歌词非空」放行保存）', () => {
+  beforeEach(() => {
+    // 核心场景：一首已含内嵌歌词、表单未编辑的歌（dirty=false），勾选「同时保存为 .lrc」后应能直接保存导出
+    openSong(makeSong({ lyrics: '[00:00.00] 已内嵌歌词', lyrics_source: 'embedded' }))
+    songStore.exportLrc = false
+    mockInvoke.mockReset()
+    mockInvoke.mockResolvedValue(undefined)
+  })
+
+  const saveBtn = (w: ReturnType<typeof mount>) => w.find('button.btn-primary')
+  const lastSaveSongArgs = (): Record<string, unknown> | undefined => {
+    const call = mockInvoke.mock.calls.find((c) => c[0] === 'save_song')
+    return call ? (call[1] as Record<string, unknown>) : undefined
+  }
+
+  it('勾选 + 歌词非空（表单未编辑）→ 保存按钮可点（spec「勾选同步写」经 UI 可达）', () => {
+    expect(songStore.dirty).toBe(false)
+    songStore.exportLrc = true
+    expect(songStore.dirty).toBe(false) // D7：复选框本身不是编辑内容，不脏表单
+    const w = mount(EditorBar)
+    expect(saveBtn(w).attributes('disabled')).toBeUndefined()
+  })
+
+  it('勾选但歌词为空 → 保存按钮仍禁用（空歌词不写 .lrc，无独立触发必要）', () => {
+    openSong(makeSong({ lyrics: '' }))
+    songStore.exportLrc = true
+    const w = mount(EditorBar)
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+  })
+
+  it('未勾选且无字段编辑 → 保存按钮仍禁用（原 dirty 门禁保持）', () => {
+    const w = mount(EditorBar)
+    expect(saveBtn(w).attributes('disabled')).toBeDefined()
+  })
+
+  it('勾选 + 歌词非空 → 顶栏展示「待导出 .lrc」而非「已就绪」，且不是 dirty 琥珀', () => {
+    songStore.exportLrc = true
+    const w = mount(EditorBar)
+    expect(w.text()).toContain('待导出 .lrc')
+    expect(w.find('.save-state.dirty').exists()).toBe(false)
+  })
+
+  it('勾选 + 歌词非空、表单未编辑 → 点保存即独立导出：save_song 收到 exportLrc=true、saveState=saved', async () => {
+    songStore.exportLrc = true
+    const w = mount(EditorBar)
+    await saveBtn(w).trigger('click')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(songStore.saveState).toBe('saved')
+    expect(songStore.dirty).toBe(false)
+    expect(lastSaveSongArgs()?.exportLrc).toBe(true)
+  })
+
+  it('导出保存成功后 → 展示「✓ 已保存」（exportLrc 保持勾选但已落盘）', async () => {
+    songStore.exportLrc = true
+    const w = mount(EditorBar)
+    await saveBtn(w).trigger('click')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(songStore.saveState).toBe('saved')
+    const w2 = mount(EditorBar)
+    expect(w2.text()).toContain('✓ 已保存')
+    expect(w2.text()).not.toContain('待导出 .lrc')
   })
 })
 

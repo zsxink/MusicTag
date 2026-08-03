@@ -7,6 +7,12 @@ import { save, songStore, undo } from '../store/song'
 
 // 保存中：为 true 时保存/撤销按钮均禁用（design.md D6 防连点并发写同一文件）
 const saving = () => songStore.saveState === 'saving'
+
+// 「导出 .lrc」待保存态：勾选「同时保存为 .lrc」且歌词非空（spec「勾选同步写」可达条件）。
+// exportLrc 有意不进 DIRTY_FIELDS（D7：复选框不是编辑内容、不脏表单），但本变更的核心场景是
+// 「把已有内嵌歌词导出为 .lrc」——表单未编辑（dirty=false）也要能独立触发保存，
+// 否则保存按钮被 dirty 门禁锁死、复选框无法独立生效（CR v1-lyrics-lrc 修复）。
+const exportPending = () => songStore.exportLrc && !!songStore.current?.lyrics
 </script>
 
 <template>
@@ -16,13 +22,14 @@ const saving = () => songStore.saveState === 'saving'
       <span v-if="songStore.current?.artist" class="now-artist">{{ songStore.current.artist }}</span>
     </div>
 
-    <!-- 保存状态（readonly > saving > save_failed > dirty > saved > 已就绪，design.md D7 优先级）
+    <!-- 保存状态（readonly > saving > save_failed > dirty > saved > 待导出 .lrc > 已就绪）
          dirty 高于 saved：保存后用户再编辑 → 有未保存修改绝不假报已保存（FR-5.4a） -->
     <span v-if="songStore.readonly" class="save-state readonly" role="alert">✕ 标签损坏，只读</span>
     <span v-else-if="songStore.saveState === 'saving'" class="save-state saving">保存中…</span>
     <span v-else-if="songStore.saveState === 'save_failed'" class="save-state failed" role="alert">✕ 保存失败：{{ songStore.saveError }}</span>
     <span v-else-if="songStore.dirty" class="save-state dirty">有未保存的修改</span>
     <span v-else-if="songStore.saveState === 'saved'" class="save-state saved">✓ 已保存</span>
+    <span v-else-if="exportPending()" class="save-state pending-export">待导出 .lrc</span>
     <span v-else class="save-state">已就绪</span>
 
     <!-- 撤销 / 保存（design.md D9 接语义） -->
@@ -36,7 +43,7 @@ const saving = () => songStore.saveState === 'saving'
       <button
         class="btn btn-primary"
         type="button"
-        :disabled="!songStore.dirty || saving() || songStore.readonly"
+        :disabled="(!songStore.dirty && !exportPending()) || saving() || songStore.readonly"
         @click="save(songStore.exportLrc)"
       >保存</button>
     </div>
@@ -96,6 +103,10 @@ const saving = () => songStore.saveState === 'saving'
 }
 
 .save-state.dirty {
+  color: var(--accent);
+}
+
+.save-state.pending-export {
   color: var(--accent);
 }
 
