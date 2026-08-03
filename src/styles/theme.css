@@ -1,7 +1,8 @@
 /* ============================================================
    MusicTag 设计语言 token 地基（docs/design/design.md §2 色彩系统）
-   深色为默认（:root 缺省，防启动闪白）；浅色跟随系统偏好。
-   手动主题切换 + 持久记忆（FR-7.3/7.4）由后续 v1-ux-settings 实现。
+   深色为默认（:root 缺省，防启动闪白）；浅色跟随系统偏好（media）；
+   手动主题覆盖（html[data-theme] 块置于 media 之后，D5：手动优先于系统）。
+   主题持久记忆（FR-7.3/7.4）由 store/theme.ts 的 localStorage + data-theme 实现。
    ============================================================ */
 
 :root {
@@ -19,6 +20,7 @@
   --success:     #3FA36B;   /* ✓ 已保存 */
   --hover:       rgba(255, 255, 255, 0.05);
   --active:      rgba(232, 163, 61, 0.14);  /* 选中行底 */
+  --shadow:      0 18px 48px rgba(0, 0, 0, 0.45);  /* 仅弹窗使用 */
 
   /* 字体与形状 */
   --mono:        "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
@@ -41,7 +43,42 @@
     --danger-ink:  #FFFFFF;
     --hover:       rgba(0, 0, 0, 0.045);
     --active:      rgba(180, 118, 29, 0.10);
+    --shadow:      0 18px 48px rgba(0, 0, 0, 0.12);
   }
+}
+
+/* 手动主题覆盖（v1-ux-settings D5）：置于 media 之后，手动选择优先于系统。
+   manualChoice===null 时前端移除 data-theme 属性，回落到上方 media 跟随系统。 */
+html[data-theme="light"] {
+  --bg:          #F4F4F1;
+  --panel:       #FFFFFF;
+  --panel-2:     #F1F0EC;
+  --border:      #DAD9D2;
+  --text:        #1E2429;
+  --text-dim:    #5F6A73;
+  --accent:      #B4761D;
+  --accent-ink:  #FFFFFF;
+  --danger:      #B3452E;
+  --danger-ink:  #FFFFFF;
+  --hover:       rgba(0, 0, 0, 0.045);
+  --active:      rgba(180, 118, 29, 0.10);
+  --shadow:      0 18px 48px rgba(0, 0, 0, 0.12);
+}
+
+html[data-theme="dark"] {
+  --bg:          #12161A;
+  --panel:       #1A2026;
+  --panel-2:     #212830;
+  --border:      #262D34;
+  --text:        #E8E9E4;
+  --text-dim:    #8A939C;
+  --accent:      #E8A33D;
+  --accent-ink:  #241A05;
+  --danger:      #C0553E;
+  --danger-ink:  #FFFFFF;
+  --hover:       rgba(255, 255, 255, 0.05);
+  --active:      rgba(232, 163, 61, 0.14);
+  --shadow:      0 18px 48px rgba(0, 0, 0, 0.45);
 }
 
 /* ---------- 基础 ---------- */
@@ -76,3 +113,22 @@ button {
 #app {
   height: 100%;
 }
+
+/* 无障碍：键盘焦点琥珀描边（design.md §6.1/§7「焦点琥珀描边」；颜色 + 描边双重表达）。
+   输入框类用 border 琥珀（组件内 :focus），此处覆盖按钮/其它可聚焦元素。 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 无障碍：尊重 prefers-reduced-motion，减弱过渡与动画（design.md §4/§7）。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+

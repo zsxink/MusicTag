@@ -1,6 +1,8 @@
 <script setup lang="ts">
-// 全局顶栏（v1-folder-list）：品牌 + 当前目录绝对路径（mono）+ 主题按钮占位。
-// 主题按钮仅占位不实现切换逻辑（v1-ux-settings 负责）。
+// 全局顶栏（v1-folder-list）：品牌 + 当前目录绝对路径（mono）+ 主题按钮。
+// v1-ux-settings：主题按钮接 theme store——图标 = 目标主题（D8：effective 深色显示 ☀️，
+// 浅色显示 🌙），点击 setTheme 在深浅之间切换（写/删 localStorage 持久记忆）。
+import { setTheme, themeStore } from '../store/theme'
 import { songStore } from '../store/song'
 </script>
 
@@ -17,7 +19,14 @@ import { songStore } from '../store/song'
       <template v-if="songStore.folderPath">路径: {{ songStore.folderPath }}</template>
       <template v-else>路径: —</template>
     </div>
-    <button class="theme-btn" type="button" title="切换主题" aria-label="切换主题">☀️</button>
+    <!-- 主题按钮：图标 = 目标主题（深色 → ☀️ 去浅色；浅色 → 🌙 去深色） -->
+    <button
+      class="theme-btn"
+      type="button"
+      :title="themeStore.effective === 'dark' ? '切换到浅色' : '切换到深色'"
+      :aria-label="themeStore.effective === 'dark' ? '切换到浅色' : '切换到深色'"
+      @click="setTheme(themeStore.effective === 'dark' ? 'light' : 'dark')"
+    >{{ themeStore.effective === 'dark' ? '☀️' : '🌙' }}</button>
   </header>
 </template>
 
@@ -70,9 +79,15 @@ import { songStore } from '../store/song'
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text);
+  transition: background 0.12s, border-color 0.12s;
 }
 
 .theme-btn:hover {
   background: var(--hover);
+  border-color: var(--accent);
+}
+
+.theme-btn:active {
+  transform: translateY(1px);
 }
 </style>

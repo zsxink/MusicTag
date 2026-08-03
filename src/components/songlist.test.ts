@@ -4,11 +4,34 @@
 // `filteredSongs.value` 的 `.value` 取到 undefined → `.length` 抛 TypeError，
 // 整个 SongList 渲染崩溃，表现为「打开文件夹后列表不显示」。
 // 回归：v-else-if 分支求值 + v-for 渲染都必须用解包后的数组（去掉 `.value`）。
-import { beforeEach, describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 
+// mock invoke：openFolder 经 api/songs.ts 的 pickFolder/listSongs 走 mock IPC（接线测试才发）。
+const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: mockInvoke,
+}))
+
+import type { Song } from '../api/types'
 import { songStore } from '../store/song'
 import SongList from './SongList.vue'
+
+const makeSong = (path: string): Song => ({
+  path,
+  title: '歌名',
+  artist: '作者',
+  album: '',
+  album_artist: '',
+  track: '1',
+  track_total: '',
+  year: '',
+  genre: '',
+  lyrics: '',
+  lyrics_source: 'none',
+  cover: null,
+  cover_mime: null,
+})
 
 describe('SongList — 打开文件夹后的列表渲染（regression #27）', () => {
   beforeEach(() => {
@@ -40,5 +63,79 @@ describe('SongList — 打开文件夹后的列表渲染（regression #27）', (
     const w = mount(SongList)
     expect(w.find('[data-testid="empty-state"]').exists()).toBe(true)
     expect(w.text()).toContain('无匹配结果')
+  })
+})
+
+describe('SongList — openFolder 走 dirty 拦截门（v1-ux-settings 2.3 补充接线测试）', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset()
+    songStore.folderPath = null
+    songStore.songs = []
+    songStore.searchQuery = ''
+    songStore.selectedPath = null
+    songStore.current = null
+    songStore.original = null
+    songStore.readonly = false
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+    songStore.pendingAction = null
+  })
+
+  it('干净态点「打开文件夹」→ 直接换目录并替换列表，不弹窗（spec 无修改直接换）', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'pick_folder') return '/new/dir'
+      if (cmd === 'list_songs') return [{ path: '/new/dir/a.flac', title: 'A', artist: 'AA' }]
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+
+    const w = mount(SongList)
+    await w.get('button.open-btn').trigger('click')
+    await flushPromises()
+
+    expect(songStore.pendingAction).toBeNull() // 不弹窗
+    expect(songStore.folderPath).toBe('/new/dir') // 直接换目录
+    expect(songStore.songs).toEqual([{ path: '/new/dir/a.flac', title: 'A', artist: 'AA' }])
+  })
+
+  it('dirty 态点「打开文件夹」→ 进入 pending folder（复用同一弹窗），不立即换目录、编辑保留', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'pick_folder') return '/new/dir'
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+    songStore.folderPath = '/a'
+    songStore.selectedPath = '/a/one.flac'
+    songStore.current = { ...makeSong('/a/one.flac') }
+    songStore.original = { ...makeSong('/a/one.flac') }
+    songStore.current!.title = '改过'
+
+    const w = mount(SongList)
+    await w.get('button.open-btn').trigger('click')
+    await flushPromises()
+
+    expect(songStore.pendingAction).toMatchObject({ kind: 'folder', dir: '/new/dir' })
+    expect(songStore.folderPath).toBe('/a') // 未换目录
+    expect(songStore.current?.title).toBe('改过') // 编辑保留
+    expect(mockInvoke).toHaveBeenCalledWith('pick_folder', undefined) // 只触发选择器
+    expect(mockInvoke).not.toHaveBeenCalledWith('list_songs') // 未触发列表加载
+  })
+
+  it('dirty 态但用户取消原生选择器（pick_folder 返回 null）→ 无视，不弹窗不改状态', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'pick_folder') return null
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+    songStore.folderPath = '/a'
+    songStore.selectedPath = '/a/one.flac'
+    songStore.current = { ...makeSong('/a/one.flac') }
+    songStore.original = { ...makeSong('/a/one.flac') }
+    songStore.current!.title = '改过'
+
+    const w = mount(SongList)
+    await w.get('button.open-btn').trigger('click')
+    await flushPromises()
+
+    expect(songStore.pendingAction).toBeNull() // 用户已明确取消，不弹窗
+    expect(songStore.folderPath).toBe('/a')
+    expect(songStore.current?.title).toBe('改过')
   })
 })

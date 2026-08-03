@@ -1,7 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CoverInput, Song, SongSummary } from '../api/types'
-import { activateFolder, clearCover, open, save, selectSong, setCover, setPendingRename, songStore, undo } from './song'
+import {
+  activateFolder,
+  cancelPending,
+  clearCover,
+  open,
+  requestFolder,
+  requestSwitch,
+  resolvePending,
+  save,
+  selectSong,
+  setCover,
+  setPendingRename,
+  songStore,
+  undo,
+} from './song'
 
 const s = (path: string, title = '', artist = ''): SongSummary => ({ path, title, artist })
 
@@ -663,5 +677,268 @@ describe('songStore — v1-rename-sync 改名-保存联动（design.md D5/D6：�
     await save(false, vi.fn(async () => undefined), vi.fn(async () => undefined))
     expect(songStore.renamePending).toBe(false)
     expect(songStore.pendingRename).toBeNull()
+  })
+})
+
+describe('songStore — v1-ux-settings 切歌/换目录三选一状态机（design.md D1–D3）', () => {
+  beforeEach(() => {
+    songStore.selectedPath = '/a/song.flac'
+    songStore.current = { ...makeSong() }
+    songStore.original = { ...makeSong() }
+    songStore.readonly = false
+    songStore.lyricsSource = 'none'
+    songStore.exportLrc = false
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+    songStore.pendingRename = null
+    songStore.renameRejected = false
+    songStore.pendingAction = null
+    songStore.folderPath = null
+  })
+
+  describe('requestSwitch — dirty 拦截门（spec: 无修改直接切 / 有修改弹窗）', () => {
+    it('干净态 → 直接切歌，pendingAction 保持 null（spec「无修改直接切」）', async () => {
+      const loadSong = vi.fn(async (p: string) => makeSong({ path: p, title: 'Two' }))
+      await requestSwitch('/a/two.flac', loadSong)
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.selectedPath).toBe('/a/two.flac')
+      expect(songStore.current?.title).toBe('Two')
+      expect(loadSong).toHaveBeenCalledWith('/a/two.flac')
+    })
+
+    it('dirty 态 → 进入 pending（弹窗三选一），不立即切歌、编辑保留', () => {
+      songStore.current!.title = '改过'
+      expect(songStore.dirty).toBe(true)
+
+      requestSwitch('/a/two.flac', vi.fn(async () => makeSong({ path: '/a/two.flac' })))
+
+      expect(songStore.pendingAction).toMatchObject({ kind: 'switch', path: '/a/two.flac' })
+      expect(songStore.selectedPath).toBe('/a/song.flac') // 未切换
+      expect(songStore.current?.title).toBe('改过') // 编辑保留
+    })
+
+    it('点击已选中行（path === selectedPath）为 no-op，不弹窗不重读', () => {
+      songStore.current!.title = '改过'
+      expect(songStore.dirty).toBe(true)
+      requestSwitch('/a/song.flac', vi.fn(async () => makeSong()))
+      expect(songStore.pendingAction).toBeNull() // 不弹窗（同 mockup onRowClick）
+      expect(songStore.current?.title).toBe('改过') // 不重读、不丢编辑
+    })
+
+    it('无 loader（纯选中）干净态 → 只设 selectedPath（仿 selectSong 语义）', async () => {
+      await requestSwitch('/a/two.flac')
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.selectedPath).toBe('/a/two.flac')
+    })
+
+    it('pending 期间再次 requestSwitch（点另一行）→ 忽略，不覆盖原 pending（D1 单一状态机）', () => {
+      songStore.current!.title = '改过'
+      expect(songStore.dirty).toBe(true)
+      requestSwitch('/a/two.flac', vi.fn(async () => makeSong({ path: '/a/two.flac' })))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'switch', path: '/a/two.flac' })
+
+      // 弹窗未决时再点另一行 → 保持原 pending 意图（弹窗文案与行为一致）
+      requestSwitch('/a/three.flac', vi.fn(async () => makeSong({ path: '/a/three.flac' })))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'switch', path: '/a/two.flac' })
+      expect(songStore.selectedPath).toBe('/a/song.flac') // 未切歌
+    })
+  })
+
+  describe('requestFolder — 换目录复用同一弹窗（spec: 换目录未保存确认复用）', () => {
+    it('干净态 → 直接换目录，pendingAction 保持 null', async () => {
+      songStore.folderPath = '/a'
+      const loadSongs = vi.fn(async () => [s('/new/x.flac', 'X', 'XX')])
+      await requestFolder('/new/dir', loadSongs)
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.folderPath).toBe('/new/dir')
+      expect(loadSongs).toHaveBeenCalledWith('/new/dir')
+    })
+
+    it('dirty 态 → 进入 pending folder，不立即换目录', () => {
+      songStore.folderPath = '/a'
+      songStore.current!.title = '改过'
+      requestFolder('/new/dir', vi.fn(async () => []))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'folder', dir: '/new/dir' })
+      expect(songStore.folderPath).toBe('/a') // 未换目录
+      expect(songStore.current?.title).toBe('改过')
+    })
+
+    it('取消选择（dir=null/空）→ 无视，即使 dirty 也不弹窗（用户已明确取消）', () => {
+      songStore.current!.title = '改过'
+      expect(songStore.dirty).toBe(true)
+      const loadSongs = vi.fn(async () => [])
+      requestFolder(null, loadSongs)
+      requestFolder('', loadSongs)
+      expect(songStore.pendingAction).toBeNull()
+      expect(loadSongs).not.toHaveBeenCalled()
+      expect(songStore.folderPath).toBeNull()
+    })
+
+    it('pending switch 期间 ⌘O（requestFolder）→ 忽略，不改道弹窗意图（D1 单一状态机）', () => {
+      songStore.current!.title = '改过'
+      requestSwitch('/a/two.flac', vi.fn(async () => makeSong({ path: '/a/two.flac' })))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'switch', path: '/a/two.flac' })
+
+      // 弹窗未决时按 ⌘O 并选中一个文件夹 → 不覆盖，仍保持「切歌」三选一语境
+      requestFolder('/new/dir', vi.fn(async () => [s('/new/x.flac', 'X', 'XX')]))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'switch', path: '/a/two.flac' })
+      expect(songStore.folderPath).toBeNull() // 未换目录
+    })
+
+    it('pending folder 期间 requestSwitch（点行）→ 忽略，不改道换目录意图（D1 单一状态机）', () => {
+      songStore.current!.title = '改过'
+      songStore.folderPath = '/a'
+      requestFolder('/new/dir', vi.fn(async () => []))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'folder', dir: '/new/dir' })
+
+      requestSwitch('/a/two.flac', vi.fn(async () => makeSong({ path: '/a/two.flac' })))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'folder', dir: '/new/dir' })
+      expect(songStore.selectedPath).toBe('/a/song.flac') // 未切歌
+    })
+  })
+
+  describe('resolvePending — 三选一收尾（design.md D1–D3）', () => {
+    it('"save" 成功：先完整保存（saveFn 注入）→ 再执行切歌、清 pending、dirty 归零', async () => {
+      songStore.current!.title = '改过'
+      const savedSong = songStore.current // 保存提交的对象 = 切换前的 current 引用
+      const loadSong = vi.fn(async (p: string) => makeSong({ path: p, title: 'Two' }))
+      requestSwitch('/a/two.flac', loadSong)
+      const saveFn = vi.fn(async () => undefined)
+
+      await resolvePending('save', saveFn)
+
+      expect(saveFn).toHaveBeenCalledWith(savedSong, false) // 完整复用 save 通道
+      // 保存成功 → 执行切歌（open 重置 saveState=idle，即已切到新歌）
+      expect(songStore.saveState).toBe('idle')
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.selectedPath).toBe('/a/two.flac')
+      expect(songStore.current?.title).toBe('Two')
+      expect(songStore.dirty).toBe(false)
+    })
+
+    it('"save" 失败：keep pending 不切换、save_failed、dirty 保持 true（D3 绝不切走丢内容）', async () => {
+      songStore.current!.title = '改过'
+      const loadSong = vi.fn(async () => makeSong({ path: '/a/two.flac' }))
+      requestSwitch('/a/two.flac', loadSong)
+      const saveFn = vi.fn(async () => { throw new Error('磁盘写入失败') })
+
+      await resolvePending('save', saveFn)
+
+      expect(songStore.saveState).toBe('save_failed')
+      expect(songStore.saveError).toBe('Error: 磁盘写入失败')
+      expect(songStore.pendingAction).not.toBeNull() // 弹窗保持打开
+      expect(songStore.selectedPath).toBe('/a/song.flac') // 未切换
+      expect(songStore.dirty).toBe(true)
+
+      // 用户重试成功 → 执行切歌
+      await resolvePending('save', vi.fn(async () => undefined))
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.selectedPath).toBe('/a/two.flac')
+    })
+
+    it('"discard"：不保存直接切歌（丢弃编辑）、清 pending', async () => {
+      songStore.current!.title = '改过'
+      const loadSong = vi.fn(async (p: string) => makeSong({ path: p, title: 'Two' }))
+      requestSwitch('/a/two.flac', loadSong)
+
+      await resolvePending('discard')
+
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.selectedPath).toBe('/a/two.flac')
+      expect(songStore.current?.title).toBe('Two') // 编辑已丢弃
+      expect(songStore.dirty).toBe(false)
+    })
+
+    it('换目录 "save" 成功：保存当前编辑到原路径，再替换列表（spec 场景）', async () => {
+      songStore.current!.title = '改过'
+      songStore.folderPath = '/a'
+      const loadSongs = vi.fn(async () => [s('/new/x.flac', 'X', 'XX')])
+      requestFolder('/new/dir', loadSongs)
+      const saveFn = vi.fn(async () => undefined)
+
+      await resolvePending('save', saveFn)
+
+      expect(saveFn).toHaveBeenCalled() // 保存写当前编辑歌原路径
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.folderPath).toBe('/new/dir') // 再替换列表
+      expect(songStore.songs).toEqual([s('/new/x.flac', 'X', 'XX')])
+      expect(loadSongs).toHaveBeenCalledWith('/new/dir')
+    })
+
+    it('换目录 "discard"：不保存直接换目录（丢弃编辑）', async () => {
+      songStore.current!.title = '改过'
+      songStore.folderPath = '/a'
+      requestFolder('/new/dir', vi.fn(async () => []))
+
+      await resolvePending('discard')
+
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.folderPath).toBe('/new/dir')
+    })
+
+    it('保存中（saving）再调 "save" → 忽略，不重复写盘（防连点）', async () => {
+      songStore.current!.title = '改过'
+      requestSwitch('/a/two.flac', vi.fn(async () => makeSong({ path: '/a/two.flac' })))
+      songStore.saveState = 'saving'
+      const saveFn = vi.fn(async () => undefined)
+
+      await resolvePending('save', saveFn)
+
+      expect(saveFn).not.toHaveBeenCalled()
+      expect(songStore.pendingAction).not.toBeNull()
+    })
+
+    it('pendingAction=null 时 resolvePending 为 no-op', async () => {
+      const saveFn = vi.fn(async () => undefined)
+      await resolvePending('save', saveFn)
+      await resolvePending('discard')
+      expect(saveFn).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('cancelPending — 取消留在当前（spec「取消留在当前」）', () => {
+    it('清 pending、不切换、编辑保留', () => {
+      songStore.current!.title = '改过'
+      requestSwitch('/a/two.flac', vi.fn(async () => makeSong({ path: '/a/two.flac' })))
+      expect(songStore.pendingAction).not.toBeNull()
+
+      cancelPending()
+
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.selectedPath).toBe('/a/song.flac')
+      expect(songStore.current?.title).toBe('改过')
+      expect(songStore.dirty).toBe(true)
+    })
+
+    it('换目录取消 → 不换目录、保持当前状态（spec 场景）', () => {
+      songStore.current!.title = '改过'
+      songStore.folderPath = '/a'
+      requestFolder('/new/dir', vi.fn(async () => []))
+      cancelPending()
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.folderPath).toBe('/a')
+      expect(songStore.songs).toEqual([])
+    })
+  })
+
+  describe('边界：坏标签只读 / 无选中 → dirty 恒 false → 不弹窗（spec「无修改直接切」自然满足）', () => {
+    it('readonly（current/original=null）→ requestSwitch 直接执行不弹窗', async () => {
+      songStore.current = null
+      songStore.original = null
+      songStore.readonly = true
+      const loadSong = vi.fn(async (p: string) => makeSong({ path: p }))
+      await requestSwitch('/a/two.flac', loadSong)
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.selectedPath).toBe('/a/two.flac')
+    })
+
+    it('无选中（current=null 非只读）→ 直接执行不弹窗', async () => {
+      songStore.current = null
+      songStore.original = null
+      songStore.readonly = false
+      await requestSwitch('/a/two.flac')
+      expect(songStore.pendingAction).toBeNull()
+      expect(songStore.selectedPath).toBe('/a/two.flac')
+    })
   })
 })

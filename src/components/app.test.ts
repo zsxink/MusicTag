@@ -1,0 +1,175 @@
+// App 壳集成测试（v1-ux-settings 2.4：SwitchDialog 由 store.pendingAction 驱动，App 级挂载）。
+// spec FR-6.3「模态，覆盖全窗口」：pendingAction 非 null → 渲染弹窗；cancel 后消失。
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+
+// mock invoke：App 树内组件（SongList/CoverPanel/EditorBar 等）不发 IPC，保持无副作用挂载。
+const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: mockInvoke,
+}))
+
+import App from '../App.vue'
+import type { Song } from '../api/types'
+import { songStore } from '../store/song'
+
+const makeSong = (over: Partial<Song> = {}): Song => ({
+  path: '/a/song.flac',
+  title: '歌名',
+  artist: '作者',
+  album: '',
+  album_artist: '',
+  track: '1',
+  track_total: '',
+  year: '',
+  genre: '',
+  lyrics: '',
+  lyrics_source: 'none',
+  cover: null,
+  cover_mime: null,
+  ...over,
+})
+
+describe('App — SwitchDialog 挂载（spec: 未保存切歌/换目录 → 全窗口模态弹窗）', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset()
+    mockInvoke.mockResolvedValue(undefined)
+    songStore.folderPath = null
+    songStore.songs = []
+    songStore.searchQuery = ''
+    songStore.selectedPath = null
+    songStore.current = null
+    songStore.original = null
+    songStore.readonly = false
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+    songStore.pendingAction = null
+  })
+
+  it('pendingAction=null → 不渲染弹窗', () => {
+    const w = mount(App)
+    expect(w.find('[data-testid="switch-dialog"]').exists()).toBe(false)
+  })
+
+  it('dirty 切歌（pendingAction 非 null）→ 渲染 SwitchDialog 模态', () => {
+    songStore.current = { ...makeSong() }
+    songStore.original = { ...makeSong() }
+    songStore.current!.title = '改过'
+    songStore.selectedPath = '/a/song.flac'
+    songStore.pendingAction = {
+      kind: 'switch',
+      path: '/a/next.flac',
+      loadSong: async () => makeSong({ path: '/a/next.flac' }),
+    }
+
+    const w = mount(App)
+    const dialog = w.get('[role="dialog"]')
+    expect(dialog.attributes('aria-modal')).toBe('true')
+    expect(w.text()).toContain('保存对')
+  })
+
+  it('cancelPending 后 → 弹窗消失（v-if 由 pendingAction 驱动）', async () => {
+    songStore.current = { ...makeSong() }
+    songStore.original = { ...makeSong() }
+    songStore.current!.title = '改过'
+    songStore.selectedPath = '/a/song.flac'
+    songStore.pendingAction = { kind: 'switch', path: '/a/next.flac', loadSong: async () => makeSong() }
+
+    const w = mount(App)
+    expect(w.find('[data-testid="switch-dialog"]').exists()).toBe(true)
+
+    // 限定弹窗内的「取消」（整树存在 EditorBar 的 ghost 撤销按钮，避免误命中）
+    const dialog = w.get('[data-testid="switch-dialog"]')
+    await dialog.get('button.btn-ghost').trigger('click')
+    expect(songStore.pendingAction).toBeNull()
+    expect(w.find('[data-testid="switch-dialog"]').exists()).toBe(false)
+  })
+})
+
+describe('App — 端到端冒烟：列表→编辑→脏切歌弹窗→保存→切歌（v1-ux-settings 核心链路）', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset()
+    songStore.folderPath = '/a'
+    songStore.songs = [
+      { path: '/a/one.flac', title: 'One', artist: 'A' },
+      { path: '/a/two.flac', title: 'Two', artist: 'B' },
+    ]
+    songStore.searchQuery = ''
+    songStore.selectedPath = '/a/one.flac'
+    songStore.current = { ...makeSong('/a/one.flac') }
+    songStore.original = { ...makeSong('/a/one.flac') }
+    songStore.readonly = false
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+    songStore.pendingAction = null
+  })
+
+  it('dirty 编辑态点其它行 → 弹窗出现 → 点「保存」→ 保存后关闭弹窗并切到目标歌', async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === 'open_song') {
+        return makeSong({ path: (args as { path: string }).path, title: '第二首' })
+      }
+      if (cmd === 'save_song') return undefined
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+
+    songStore.current!.title = '改过' // 制造 dirty
+    const w = mount(App)
+
+    // 点击第二首 → dirty 拦截门 → 弹窗出现（未切歌）
+    await w.findAll('.song-row')[1].trigger('click')
+    expect(w.find('[data-testid="switch-dialog"]').exists()).toBe(true)
+    expect(w.text()).toContain('保存对')
+    expect(songStore.selectedPath).toBe('/a/one.flac') // 未切歌、编辑保留
+
+    // 点「保存」→ save_song 写盘成功 → 关闭弹窗、切到第二首
+    const dialog = w.get('[data-testid="switch-dialog"]')
+    await dialog.get('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(songStore.pendingAction).toBeNull()
+    expect(w.find('[data-testid="switch-dialog"]').exists()).toBe(false)
+    expect(songStore.selectedPath).toBe('/a/two.flac')
+    expect(songStore.current?.title).toBe('第二首')
+    expect(songStore.dirty).toBe(false)
+  })
+
+  it('dirty 编辑态点其它行 → 点「不保存」→ 丢弃编辑直接切歌、弹窗关闭', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'open_song') return makeSong({ path: '/a/two.flac', title: '第二首' })
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+
+    songStore.current!.title = '改过'
+    const w = mount(App)
+    await w.findAll('.song-row')[1].trigger('click')
+    expect(w.find('[data-testid="switch-dialog"]').exists()).toBe(true)
+
+    const dialog = w.get('[data-testid="switch-dialog"]')
+    await dialog.get('button.btn-danger').trigger('click')
+    await flushPromises()
+
+    expect(songStore.pendingAction).toBeNull()
+    expect(w.find('[data-testid="switch-dialog"]').exists()).toBe(false)
+    expect(songStore.selectedPath).toBe('/a/two.flac')
+    expect(songStore.current?.title).toBe('第二首') // 已切歌，编辑丢弃
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_song') // 未写盘
+  })
+
+  it('干净态点其它行 → 不弹窗直接切（spec「无修改直接切」端到端）', async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === 'open_song') {
+        return makeSong({ path: (args as { path: string }).path, title: '第二首' })
+      }
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+
+    const w = mount(App)
+    await w.findAll('.song-row')[1].trigger('click')
+    await flushPromises()
+
+    expect(w.find('[data-testid="switch-dialog"]').exists()).toBe(false) // 不弹窗
+    expect(songStore.selectedPath).toBe('/a/two.flac') // 直接切
+    expect(songStore.current?.title).toBe('第二首')
+  })
+})

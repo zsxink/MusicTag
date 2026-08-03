@@ -29,6 +29,12 @@ const DIRTY_FIELDS = [
  *  展示态由 readonly/dirty/saveState 三者合成，saveState 只存动作态避免双写失步。 */
 type SaveState = 'idle' | 'saving' | 'saved' | 'save_failed'
 
+/** 切歌/换目录未保存确认的待办动作（v1-ux-settings D1：两个入口共享同一三选一状态机）。
+ *  pendingAction 非 null → App 渲染 <SwitchDialog/>；loader 闭包存 reactive 合法（仿 saveFn 注入先例）。 */
+export type PendingAction =
+  | { kind: 'switch'; path: string; loadSong?: (path: string) => Promise<Song> }
+  | { kind: 'folder'; dir: string; loadSongs: (dir: string) => Promise<SongSummary[]> }
+
 /** 文件夹列表 + SongEditor 编辑状态。 */
 interface SongEditor {
   /** 当前打开的文件夹绝对路径（null = 未打开）。 */
@@ -62,6 +68,8 @@ interface SongEditor {
   renamePending: boolean
   /** 改名被拒标记（撞名）：供文件名行内提示「目标已存在」，换名后重存即完成改名（D6）。 */
   renameRejected: boolean
+  /** 未保存时切歌/换目录的待确认动作（null = 无；非 null → App 渲染 SwitchDialog 三选一）。 */
+  pendingAction: PendingAction | null
 }
 
 /**
@@ -108,6 +116,90 @@ export async function activateFolder(
   raw.songs = await loadSongs(dir)
 }
 
+/**
+ * 切歌拦截门（v1-ux-settings D1）：有未保存修改时弹三选一（保存/不保存/取消），
+ * 无 dirty 直接执行 selectSong（行为不变，spec「无修改直接切」）。
+ * 点击已选中行（path === selectedPath）为 no-op（与 mockup onRowClick 同语义，防重读丢编辑）。
+ */
+export function requestSwitch(
+  path: string,
+  loadSong?: (path: string) => Promise<Song>,
+): Promise<void> {
+  // D1 单一 pending 状态机：弹窗已打开（pendingAction 非 null）→ 忽略新请求，
+  // 不覆盖原 pending 意图（否则 ⌘O/点行会静默改道三选一的语境）。
+  if (raw.pendingAction !== null) return Promise.resolve()
+  if (path === raw.selectedPath) return Promise.resolve()
+  if (raw.dirty) {
+    raw.pendingAction = { kind: 'switch', path, loadSong }
+    return Promise.resolve()
+  }
+  return selectSong(path, loadSong)
+}
+
+/**
+ * 换目录拦截门（v1-ux-settings D1）：有未保存修改时复用同一三选一弹窗
+ * （spec「换目录未保存确认复用」：取消则不换目录；保存写当前编辑歌原路径）。
+ * 无 dirty 直接执行 activateFolder（行为不变）。dir 为 null/空（用户取消原生选择器）时无视
+ * （即使 dirty 也不弹窗——用户已明确取消，保持当前状态）。
+ */
+export function requestFolder(
+  dir: string | null,
+  loadSongs: (dir: string) => Promise<SongSummary[]>,
+): Promise<void> {
+  // D1 单一 pending 状态机：弹窗已打开 → 忽略新请求（弹窗打开期间 ⌘O 不得覆盖原 pending）。
+  if (raw.pendingAction !== null) return Promise.resolve()
+  if (dir === null || dir === '') return Promise.resolve()
+  if (raw.dirty) {
+    raw.pendingAction = { kind: 'folder', dir, loadSongs }
+    return Promise.resolve()
+  }
+  return activateFolder(dir, loadSongs)
+}
+
+/**
+ * 弹窗三选一收尾（v1-ux-settings D1–D3）：
+ * - 'save'：完整复用 store.save（saveState 四态 + exportLrc + rename 联动，与顶栏保存按钮语义一致）。
+ *   成功（saveState='saved'）→ 执行 pending 动作（切歌/换目录）→ 清 pending；
+ *   失败（saveState='save_failed'）→ **弹窗保持打开、不切换**、顶栏「✕ 保存失败」、
+ *   dirty 保持 true（D3：保存先写再切，失败时绝不切走丢内容）。
+ * - 'discard'：不保存，直接执行 pending 动作（切换即弃置编辑）→ 清 pending。
+ * 保存中（saveState='saving'）忽略再次调用（防连点并发写同一文件，弹窗「保存」按钮已禁用双保险）。
+ * 竞态守卫（CR）：await save 之后、执行 pending 动作之前校验 pendingAction 身份 ——
+ *   保存进行中用户取消（cancelPending）或 discard 改道 → pending 已清 → 保存结果仅落盘、
+ *   不再切换（spec「取消留在当前」）；保存进行中 discard → 忽略，防意图丢弃仍写盘。
+ * saveFn/renameFn 可注入（仿 save() 先例），测试不依赖 Tauri。
+ */
+export async function resolvePending(
+  choice: 'save' | 'discard',
+  saveFn?: (song: Song, exportLrc: boolean) => Promise<void>,
+  renameFn?: (path: string, newName: string) => Promise<void>,
+): Promise<void> {
+  const action = raw.pendingAction
+  if (action === null) return
+
+  if (choice === 'save') {
+    if (raw.saveState === 'saving') return // 防连点并发写同一文件
+    await save(raw.exportLrc, saveFn, renameFn)
+    if (raw.pendingAction !== action) return // 保存中已取消 → 只保留保存结果、不切换（CR）
+    if (raw.saveState !== 'saved') return // 保存失败 → 弹窗保持打开、不切换（D3）
+  } else {
+    if (raw.saveState === 'saving') return // 保存中改道 discard → 忽略，防意图丢弃仍写盘（CR）
+  }
+
+  // 保存成功 / 丢弃 → 执行 pending 动作 → 清 pending
+  raw.pendingAction = null
+  if (action.kind === 'switch') {
+    await selectSong(action.path, action.loadSong)
+  } else {
+    await activateFolder(action.dir, action.loadSongs)
+  }
+}
+
+/** 取消：清 pending、留在当前（spec「取消留在当前」/「换目录取消不换目录」）。 */
+export function cancelPending(): void {
+  raw.pendingAction = null
+}
+
 const raw = reactive<SongEditor>({
   folderPath: null,
   songs: [],
@@ -134,6 +226,7 @@ const raw = reactive<SongEditor>({
   saveError: '',
   pendingRename: null,
   renameRejected: false,
+  pendingAction: null,
 })
 
 /**
