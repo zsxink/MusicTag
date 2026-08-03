@@ -47,8 +47,7 @@ pub fn export_lrc(audio_path: &Path, lyrics: &str) -> Result<(), String> {
         use std::io::Write;
         temp.write_all(lyrics.as_bytes())
             .map_err(|e| format!("写入临时文件失败: {e}"))?;
-        temp.flush()
-            .map_err(|e| format!("flush 失败: {e}"))?;
+        temp.flush().map_err(|e| format!("flush 失败: {e}"))?;
         temp.as_file()
             .sync_all()
             .map_err(|e| format!("sync 失败: {e}"))?;
