@@ -730,6 +730,18 @@ describe('songStore — v1-ux-settings 切歌/换目录三选一状态机（desi
       expect(songStore.pendingAction).toBeNull()
       expect(songStore.selectedPath).toBe('/a/two.flac')
     })
+
+    it('pending 期间再次 requestSwitch（点另一行）→ 忽略，不覆盖原 pending（D1 单一状态机）', () => {
+      songStore.current!.title = '改过'
+      expect(songStore.dirty).toBe(true)
+      requestSwitch('/a/two.flac', vi.fn(async () => makeSong({ path: '/a/two.flac' })))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'switch', path: '/a/two.flac' })
+
+      // 弹窗未决时再点另一行 → 保持原 pending 意图（弹窗文案与行为一致）
+      requestSwitch('/a/three.flac', vi.fn(async () => makeSong({ path: '/a/three.flac' })))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'switch', path: '/a/two.flac' })
+      expect(songStore.selectedPath).toBe('/a/song.flac') // 未切歌
+    })
   })
 
   describe('requestFolder — 换目录复用同一弹窗（spec: 换目录未保存确认复用）', () => {
@@ -760,6 +772,28 @@ describe('songStore — v1-ux-settings 切歌/换目录三选一状态机（desi
       expect(songStore.pendingAction).toBeNull()
       expect(loadSongs).not.toHaveBeenCalled()
       expect(songStore.folderPath).toBeNull()
+    })
+
+    it('pending switch 期间 ⌘O（requestFolder）→ 忽略，不改道弹窗意图（D1 单一状态机）', () => {
+      songStore.current!.title = '改过'
+      requestSwitch('/a/two.flac', vi.fn(async () => makeSong({ path: '/a/two.flac' })))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'switch', path: '/a/two.flac' })
+
+      // 弹窗未决时按 ⌘O 并选中一个文件夹 → 不覆盖，仍保持「切歌」三选一语境
+      requestFolder('/new/dir', vi.fn(async () => [s('/new/x.flac', 'X', 'XX')]))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'switch', path: '/a/two.flac' })
+      expect(songStore.folderPath).toBeNull() // 未换目录
+    })
+
+    it('pending folder 期间 requestSwitch（点行）→ 忽略，不改道换目录意图（D1 单一状态机）', () => {
+      songStore.current!.title = '改过'
+      songStore.folderPath = '/a'
+      requestFolder('/new/dir', vi.fn(async () => []))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'folder', dir: '/new/dir' })
+
+      requestSwitch('/a/two.flac', vi.fn(async () => makeSong({ path: '/a/two.flac' })))
+      expect(songStore.pendingAction).toMatchObject({ kind: 'folder', dir: '/new/dir' })
+      expect(songStore.selectedPath).toBe('/a/song.flac') // 未切歌
     })
   })
 

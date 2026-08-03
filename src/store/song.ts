@@ -125,6 +125,9 @@ export function requestSwitch(
   path: string,
   loadSong?: (path: string) => Promise<Song>,
 ): Promise<void> {
+  // D1 单一 pending 状态机：弹窗已打开（pendingAction 非 null）→ 忽略新请求，
+  // 不覆盖原 pending 意图（否则 ⌘O/点行会静默改道三选一的语境）。
+  if (raw.pendingAction !== null) return Promise.resolve()
   if (path === raw.selectedPath) return Promise.resolve()
   if (raw.dirty) {
     raw.pendingAction = { kind: 'switch', path, loadSong }
@@ -143,6 +146,8 @@ export function requestFolder(
   dir: string | null,
   loadSongs: (dir: string) => Promise<SongSummary[]>,
 ): Promise<void> {
+  // D1 单一 pending 状态机：弹窗已打开 → 忽略新请求（弹窗打开期间 ⌘O 不得覆盖原 pending）。
+  if (raw.pendingAction !== null) return Promise.resolve()
   if (dir === null || dir === '') return Promise.resolve()
   if (raw.dirty) {
     raw.pendingAction = { kind: 'folder', dir, loadSongs }
@@ -159,6 +164,9 @@ export function requestFolder(
  *   dirty 保持 true（D3：保存先写再切，失败时绝不切走丢内容）。
  * - 'discard'：不保存，直接执行 pending 动作（切换即弃置编辑）→ 清 pending。
  * 保存中（saveState='saving'）忽略再次调用（防连点并发写同一文件，弹窗「保存」按钮已禁用双保险）。
+ * 竞态守卫（CR）：await save 之后、执行 pending 动作之前校验 pendingAction 身份 ——
+ *   保存进行中用户取消（cancelPending）或 discard 改道 → pending 已清 → 保存结果仅落盘、
+ *   不再切换（spec「取消留在当前」）；保存进行中 discard → 忽略，防意图丢弃仍写盘。
  * saveFn/renameFn 可注入（仿 save() 先例），测试不依赖 Tauri。
  */
 export async function resolvePending(
@@ -172,7 +180,10 @@ export async function resolvePending(
   if (choice === 'save') {
     if (raw.saveState === 'saving') return // 防连点并发写同一文件
     await save(raw.exportLrc, saveFn, renameFn)
+    if (raw.pendingAction !== action) return // 保存中已取消 → 只保留保存结果、不切换（CR）
     if (raw.saveState !== 'saved') return // 保存失败 → 弹窗保持打开、不切换（D3）
+  } else {
+    if (raw.saveState === 'saving') return // 保存中改道 discard → 忽略，防意图丢弃仍写盘（CR）
   }
 
   // 保存成功 / 丢弃 → 执行 pending 动作 → 清 pending

@@ -10,7 +10,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 import type { Song } from '../api/types'
-import { songStore } from '../store/song'
+import { cancelPending, resolvePending, songStore } from '../store/song'
 import SwitchDialog from './SwitchDialog.vue'
 
 beforeEach(() => {
@@ -140,6 +140,40 @@ describe('SwitchDialog — Esc 取消 + 保存中禁用「保存」', () => {
     expect(primary.attributes('disabled')).toBeDefined()
     expect(w.get('button.btn-danger').attributes('disabled')).toBeUndefined()
     expect(w.get('button.btn-ghost').attributes('disabled')).toBeUndefined()
+  })
+})
+
+describe('SwitchDialog — 保存中竞态（CR：保存中取消/Esc → 不切换；保存中不保存 → 忽略）', () => {
+  beforeEach(setupDirtySwitch)
+
+  it('保存进行中取消（cancelPending）→ save 成功后不再切换（spec「取消留在当前」）', async () => {
+    // 竞态真实路径：resolvePending('save') 注入受控 saveFn，在 save await 挂起期间触发取消。
+    // 用 Deferred 手动控制 saveFn 的 resolve 时机，模拟「写入进行中用户取消」。
+    let resolveSave!: (v: void) => void
+    const saveFn = () => new Promise<void>((r) => (resolveSave = r))
+
+    const p = resolvePending('save', saveFn) // 进入 save，await saveFn 挂起
+    // 写入进行中用户取消：cancelPending 清空 pendingAction（弹窗关闭）
+    cancelPending()
+    expect(songStore.pendingAction).toBeNull()
+
+    // save 成功落盘：此时 resolvePending 续跑，应发现 pendingAction 已清空 → 不再切换
+    resolveSave()
+    await p
+
+    expect(songStore.pendingAction).toBeNull() // 保持已取消
+    expect(songStore.selectedPath).toBe('/a/告白气球.mp3') // 未切歌
+    expect(songStore.current?.title).toBe('改过') // 编辑保留
+  })
+
+  it('保存进行中 discard → 忽略（saving 改道无效），不切歌不丢编辑', async () => {
+    // 保存中（saveState='saving'）改道 discard：resolvePending('discard') 应被 saving 守卫拦截
+    songStore.saveState = 'saving'
+    await resolvePending('discard')
+
+    expect(songStore.pendingAction).not.toBeNull() // 弹窗保持打开
+    expect(songStore.selectedPath).toBe('/a/告白气球.mp3') // 未切歌
+    expect(songStore.current?.title).toBe('改过') // 编辑保留
   })
 })
 
