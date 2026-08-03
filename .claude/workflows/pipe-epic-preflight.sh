@@ -14,14 +14,14 @@ const [file, change] = process.argv.slice(1);
 const state = JSON.parse(fs.readFileSync(file, "utf8"));
 const item = state.items?.[state.cursor];
 if (!state.prdConfirmed || !item || item.name !== change || item.status === "done" || !state.sourceRevision) process.exit(1);
-console.log(state.sourceRevision);
+process.stdout.write(state.sourceRevision);
 ' "$state_file" "$change_name")
 source_path=$(node -e '
 const fs = require("fs");
 const [file] = process.argv.slice(1);
 const state = JSON.parse(fs.readFileSync(file, "utf8"));
 const item = state.items?.[state.cursor];
-console.log(item?.source || state.source || "");
+process.stdout.write(item?.source || state.source || "");
 ' "$state_file")
 git cat-file -e "${source_revision}^{commit}"
 if [ -n "$source_path" ] && [ -f "$source_path" ]; then
@@ -33,7 +33,7 @@ issue_num=$(node -e '
 const fs = require("fs");
 const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 const item = state.items?.[state.cursor];
-console.log(item?.issue || "");
+process.stdout.write(String(item?.issue || ""));
 ' "$state_file")
 if [ -z "$issue_num" ]; then
   echo "✗ [preflight] 子变更 '$change_name'（epic.json cursor）未关联 Issue 号：请在 epic.json items 该 item 补 \`issue\` 字段" >&2
