@@ -501,12 +501,18 @@ export async function pickLyricCandidate(
     raw.lyricFetchEmpty = false
     return
   }
-  // C2：取词 None → 换另一家源重试同一首歌（不降级到低分候选）
+  // C2：取词 None → 换另一家源重试同一首歌（不降级到低分候选）。
+  // 剩余源无顺序依赖，`searchSource` 并行发起（最坏 6s 而非串行 12s）；命中仍按固定序。
   try {
-    for (const source of C2_SOURCE_ORDER) {
-      if (source === cand.source) continue // 跳过原源
-      const list = await searchSource(source, cand.title, cand.artist)
-      if (raw.lyricSearchSeq !== mySeq) return
+    const remaining = C2_SOURCE_ORDER.filter((source) => source !== cand.source) // 跳过原源
+    const lists = await Promise.all(
+      remaining.map(async (source) => ({
+        source,
+        list: await searchSource(source, cand.title, cand.artist),
+      })),
+    )
+    if (raw.lyricSearchSeq !== mySeq) return
+    for (const { source, list } of lists) {
       const c = findSameSong(list, cand) // 身份校验：找不到同曲候选 → 跳过该源
       if (c === undefined) continue
       const text2 = await fetchLyric(source, c.id)

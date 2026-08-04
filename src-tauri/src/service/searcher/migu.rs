@@ -53,10 +53,17 @@ impl MusicSource for Migu {
             Ok(r) => r,
             Err(e) => return Err(format!("咪咕搜索请求失败: {e}")),
         };
+        if !resp.status().is_success() {
+            return Err(format!("咪咕搜索失败: HTTP {}", resp.status().as_u16()));
+        }
         let json: serde_json::Value = match resp.json().await {
             Ok(v) => v,
             Err(e) => return Err(format!("咪咕搜索响应解析失败: {e}")),
         };
+        // 业务错误响应（无 `musics` 数组但带 `code` 字段）→ 计为源失败，不误算「成功空」。
+        if is_error_response(&json) {
+            return Err(format!("咪咕搜索被拒: code={}", json["code"]));
+        }
         Ok(parse_search_response(&json))
     }
 
@@ -72,6 +79,13 @@ impl MusicSource for Migu {
         let json: serde_json::Value = resp.json().await.ok()?;
         parse_lyric_response(&json)
     }
+}
+
+/// 业务错误响应判定（CR v1-search-fixes）：无 `musics` 数组但带 `code` 字段 → 真。
+///
+/// 成功/正常空结果都返回 `musics` 数组（可为空）；错误响应是 `{"code":"...","msg":...}`。
+fn is_error_response(json: &serde_json::Value) -> bool {
+    json["musics"].as_array().is_none() && json.get("code").is_some()
 }
 
 /// 解析 scr_search_tag 响应 `musics[]` → 候选。
@@ -165,6 +179,15 @@ mod tests {
     fn parses_search_response_missing_musics_returns_empty() {
         assert!(parse_search_response(&serde_json::json!({})).is_empty());
         assert!(parse_search_response(&serde_json::json!({"code": "00001"})).is_empty());
+    }
+
+    #[test]
+    fn is_error_response_detects_business_rejection() {
+        // CR v1-search-fixes：无 musics 数组但带 code（业务被拒）→ 源失败，不误算「成功空」
+        assert!(is_error_response(&serde_json::json!({"code": "00001", "msg": "被拒"})), "业务错误应判失败");
+        assert!(!is_error_response(&serde_json::json!({"musics": []})), "正常空结果 → 成功");
+        assert!(!is_error_response(&serde_json::json!({"musics": [{"songName": "晴天"}]})), "正常结果 → 成功");
+        assert!(!is_error_response(&serde_json::json!({})), "malformed 无 code → 按成功空");
     }
 
     #[test]

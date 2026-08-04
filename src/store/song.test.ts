@@ -1213,13 +1213,13 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
     })
 
     it('过期结果丢弃（D2.6）：切歌后旧搜索 resolve → 不覆盖新状态', async () => {
-      // 慢搜索 A：开始后立即切歌（resetSearchState 自增 searchSeq）→ A resolve 时 mySeq != searchSeq
+      // 慢搜索 A：开始后立即切歌（resetSearchState 自增 lyricSearchSeq/coverSearchSeq）→ A resolve 时 mySeq != 对应序号
       let resolveA!: (r: SearchResult) => void
       const searchA = vi.fn(() => new Promise<SearchResult>((res) => { resolveA = res }))
       const pA = autoSearchOnSelect(searchA)
       expect(songStore.lyricSearchState).toBe('searching')
 
-      // 切歌 → 状态重置（searchSeq++ 作废在途搜索）
+      // 切歌 → 状态重置（两类序号 ++ 作废在途搜索）
       songStore.selectedPath = '/a/next.flac'
       songStore.current = { ...makeSong({ path: '/a/next.flac', title: 'Next' }) }
       songStore.original = { ...makeSong({ path: '/a/next.flac', title: 'Next' }) }
@@ -1418,7 +1418,7 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       const pLyric = manualSearch('lyrics', searchLyric)
       expect(songStore.lyricSearchState).toBe('searching')
 
-      // 封面手动搜索发起并立即完成——旧实现共用全局 searchSeq 会作废歌词在途结果
+      // 封面手动搜索发起并立即完成——旧实现共用全局序号会作废歌词在途结果
       const searchCover = vi.fn(async () => result([makeCand({ cover_url: 'https://x/1.jpg' })]))
       await manualSearch('cover', searchCover)
       expect(songStore.coverSearchState).toBe('done')
@@ -1586,7 +1586,7 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       expect(songStore.coverCandidates).toEqual([keep])
     })
 
-    it('已切歌（searchSeq 变化）→ 下载结果丢弃不应用、不移除', async () => {
+    it('已切歌（coverSearchSeq 变化）→ 下载结果丢弃不应用、不移除', async () => {
       songStore.coverCandidates = [makeCand({ cover_url: 'https://x/1.jpg' })]
       let resolveDownload!: (b: number[]) => void
       const downloadCover = vi.fn(() => new Promise<number[]>((res) => { resolveDownload = res }))

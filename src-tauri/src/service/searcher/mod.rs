@@ -156,7 +156,18 @@ pub async fn search_source(
         MusicSourceId::QqMusic => Box::new(qqmusic::QqMusic),
         MusicSourceId::Migu => Box::new(migu::Migu),
     };
-    match tokio::time::timeout(SEARCH_TIMEOUT, s.search(client, title, artist)).await {
+    search_source_with(client, s, title, artist, SEARCH_TIMEOUT).await
+}
+
+/// 单源搜索实现（可注入源与超时，供单测复用 FakeSource）。失败/超时 → 空列表。
+async fn search_source_with(
+    client: &reqwest::Client,
+    source: Box<dyn MusicSource>,
+    title: &str,
+    artist: &str,
+    timeout: Duration,
+) -> Vec<SongCandidate> {
+    match tokio::time::timeout(timeout, source.search(client, title, artist)).await {
         Ok(Ok(list)) => list.into_iter().take(TOP_N).collect(),
         _ => Vec::new(),
     }
@@ -733,6 +744,37 @@ mod tests {
         )
         .await;
         assert!(!result.all_failed, "至少一源成功（qq）→ 非离线");
+    }
+
+    #[tokio::test]
+    async fn search_source_returns_raw_candidates_and_empty_on_fail() {
+        // CR v1-search-fixes：单源 search_source 返回**原始候选**（不做聚合去重折叠），
+        // TOP_N 截断；失败 / 超时 → 空列表（C2 跳过该源）。
+        let client = reqwest::Client::new();
+        // 15 个归一化同曲候选（聚合去重会折叠成 1 条）——search_source 必须保留全部（截前 10）
+        let many: Vec<SongCandidate> = (1..=15)
+            .map(|i| cand(MusicSourceId::QqMusic, &i.to_string(), "晴天", "周杰伦"))
+            .collect();
+        let ok: Box<dyn MusicSource> = Box::new(FakeSource {
+            id: MusicSourceId::QqMusic,
+            behavior: FakeBehavior::Return(many),
+        });
+        let got = search_source_with(&client, ok, "晴天", "周杰伦", Duration::from_millis(50)).await;
+        assert_eq!(got.len(), TOP_N, "单源原始候选不被聚合去重折叠，仅 TOP_N 截断");
+        assert!(got.iter().all(|c| c.source == MusicSourceId::QqMusic));
+
+        // 失败 → 空
+        let fail: Box<dyn MusicSource> = Box::new(FakeSource {
+            id: MusicSourceId::Migu,
+            behavior: FakeBehavior::Fail,
+        });
+        assert!(search_source_with(&client, fail, "x", "y", Duration::from_millis(50)).await.is_empty());
+        // 超时 → 空
+        let hang: Box<dyn MusicSource> = Box::new(FakeSource {
+            id: MusicSourceId::Netease,
+            behavior: FakeBehavior::Hang,
+        });
+        assert!(search_source_with(&client, hang, "x", "y", Duration::from_millis(50)).await.is_empty());
     }
 
     // ---- download_cover：5s 超时 + 12MB 限流 ----
