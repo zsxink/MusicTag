@@ -184,7 +184,11 @@ while (rounds < 3) {
   crResult = await agent(
     `你是 CR（只读，不改代码）。审查变更「${CHANGE}」当前分支相对 main 的改动（git diff main...HEAD），` +
       `对照 ${CHANGE_DIR}/specs/、design.md、docs/V1-PRD.md、docs/design/design.md。` +
-      `所有 blocker/major 必须给出 file，并按真实文件归属标注。`,
+      `所有 blocker/major 必须给全 file + issue + specReference + suggestion 四项，pass=true 仅当无 blocker 且无 major。` +
+      `除规格一致性/遗漏/缺陷外，追加复盘专项三检（按变更涉及面取舍，不适用标「不适用」）：` +
+      `①跨模块状态语义：聚合/去重/折叠是否破坏单源换源、身份校验防同名不同歌（FR-8.8a）；` +
+      `②竞态与串扰：共享计数器/请求序号/全局状态是否跨 kind/面板互相污染、在途结果被无关操作作废或卡死；` +
+      `③网络与离线判定：网络失败（超时/HTTP 状态/业务错误码）与正常空结果是否区分、离线仅由全源网络失败触发。`,
     { agentType: 'cr-agent', schema: CR_SCHEMA, phase: 'CR', label: `cr-round-${rounds}` }
   )
   if (!crResult) return { status: 'failed', stage: 'cr', error: `CR 第${rounds}轮未返回` }
