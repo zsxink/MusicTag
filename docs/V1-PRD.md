@@ -143,7 +143,7 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 **逐首**补全�
 | 2 | **判定时机**：自动搜索**只在选中歌曲那一刻判定一次**，按当时的缺失状态决定搜哪些项；此后的删除/修改不再自动触发 |
 | 3 | **只补缺失项**：**已有歌词（内嵌或 `.lrc`）则不搜歌词**；**已有封面则不搜封面**；两者都有则不搜索 |
 | 4 | **删除不再触发**：删除当前歌词/封面后，**不**自动重新搜索 |
-| 4a | **离线降级（失败首响）**：本会话中第一次自动搜索全部源失败 → 标记会话离线，后续选中**不再自动搜**、候选区不出现（省去每次 6s 等待），界面提示「离线：仅手动填写」，只留手动搜索按钮 |
+| 4a | **离线降级（失败首响）**：本会话中第一次自动搜索**三源全部网络失败**（断网/超时，`all_failed=true`）→ 标记会话离线，后续选中**不再自动搜**、候选区不出现（省去每次 6s 等待），界面提示「离线：仅手动填写」，只留手动搜索按钮。**三源正常但无匹配结果（冷门歌）不触发离线**，仅显示空态 |
 | 5 | **搜索源**：网易云 + QQ 音乐 + 咪咕 **三家并发** |
 | 6 | **聚合**：多源结果合并、**按歌曲相似度去重排序**，统一展示 |
 | 7 | **结果不自动写盘**：一律以候选列表展示，用户**手动点选**后才填入 |
@@ -263,6 +263,7 @@ struct SongCandidate {
 struct SearchResult {
     songs: Vec<SongCandidate>,     // 按打分排序去重后的候选
     source_stats: Vec<(MusicSourceId, usize)>, // 各家返回条数，便于展示/兜底
+    all_failed: bool,              // 三源全部网络失败（断网/超时）→ true；至少一源成功（含正常空结果）→ false
 }
 
 enum SearchError {
@@ -299,13 +300,13 @@ enum SearchError {
 | 咪咕 | `migu/remoting/scr_search_tag` | 纯 HTTP，无加密 |
 
 > **多源搜索架构（对标 music-tag-web 的 `MusicResource` 工厂 + `smart_tag`）**：
-> - **模块**：`search/{mod,netease,qqmusic,migu}.rs` + `commands.rs`。统一 Trait `MusicSource`：`search(title, artist) -> Vec<SongCandidate>` + `fetch_lyric(song_id) -> Option<String>`。
-> - **流程**：选中歌曲 → `search_song(title, artist)` → `tokio::join_all` 三家并发（每家 6s 超时，失败降级为空列表并记入 `source_stats`）→ 打分去重 → 前 N 条候选返回。
+> - **模块**：`search/{mod,netease,qqmusic,migu}.rs` + `commands.rs`。统一 Trait `MusicSource`：`search(title, artist) -> Result<Vec<SongCandidate>, String>` + `fetch_lyric(song_id) -> Option<String>`。
+> - **流程**：选中歌曲 → `search_song(title, artist)` → 三家并发（每家 6s 超时，失败降级为空列表并记入 `source_stats`）→ 打分去重 → 前 N 条候选返回。`SearchResult.all_failed` 区分「三源全网络失败」（标记会话离线）与「正常空结果」（冷门歌不标离线）。
 > - **惰性拉取**：候选列表秒出——封面 URL 随搜索结果带出，点选封面才 `download_cover`（单独 5s 超时 + 响应限流）；歌词文本点选候选行才 `fetch_lyric`。
-> - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1`；归一化 = trim + 全角半角（V1 不做简繁转换）；按归一化 `(title, artist)` 去重保留最高分。
+> - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1`；归一化 = trim + 全角半角 + 小写折叠（V1 不做简繁转换）；按归一化 `(title, artist)` 去重保留最高分。
 > - **Tauri command 全量**（前端一律 `invoke` 调用；TS 类型与 `design/design.md` §10.3 对齐）：
->   - 文件：`list_songs(dir) -> Vec<Song>`、`open_song(path) -> Song`、`save_song(song) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`
->   - 搜索：`search_song(title, artist) -> SearchResult`、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Vec<u8>`、`embed_cover(bytes, mime) -> ()`
+>   - 文件：`list_songs(dir) -> Vec<SongSummary>`、`open_song(path) -> Result<Song, String>`、`save_song(song, exportLrc) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`
+>   - 搜索：`search_song(title, artist) -> SearchResult`、`search_source(source, title, artist) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过聚合去重）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）
 >   - 前端只管展示，文件 I/O 与网络请求全走 Rust command。
 > - **「无第三方依赖」说明**：指**无 JS 引擎**（不用 PyExecJS 类跑加密）；Rust 侧加密算法自实现，仅引入 `aes`/`cbc`/`rsa`/`rand` 等 crate。
 
