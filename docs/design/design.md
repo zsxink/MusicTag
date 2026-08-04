@@ -312,6 +312,12 @@ interface SongSummary {
   artist: string;
 }
 
+// 封面选择/拖拽输入（pick_cover_file / read_cover_path 返回，与 Rust CoverInput 对齐）
+interface CoverInput {
+  data_url: string;  // base64 data URL（data:<mime>;base64,...，压缩后小图，直接进 Song.cover）
+  mime: string;      // image/jpeg | image/png | image/webp（供 cover_mime 展示）
+}
+
 interface SongCandidate {
   source: 'netease' | 'qqmusic' | 'migu';   // MusicSourceId 字面量
   id: string;
@@ -337,12 +343,15 @@ interface SearchResult {
 
 | command | 参数 → 返回 | 用途 |
 |---|---|---|
+| `pick_folder()` | `() → Option<String>` | 打开原生文件夹选择器（rfd）；取消返回 `None`，否则返回目录绝对路径 |
 | `list_songs(dir)` | `String → Vec<SongSummary>` | 打开文件夹，深度遍历；**只读列表项**（`path`/`title`/`artist`，歌名/作者空时前端回退显示文件名） |
 | `open_song(path)` | `String → Result<Song, String>` | 读取一首的**完整**标签 + 封面 base64，放进编辑区（按需读取；坏标签 → `Err`，表单只读） |
 | `save_song(song, exportLrc)` | `Song, bool → Result<(), String>` | 写回原文件（cover 为 base64，Rust 侧解码）；`exportLrc` 勾选时同步写同目录同名 `.lrc`（空歌词忽略） |
 | `rename_song(path, new_name)` | `String, String → Result<(), String>` | 音频 + `.lrc` 改名 |
+| `pick_cover_file()` | `() → Option<CoverInput>` | 原生封面文件选择器（jpg/png/webp）；取消返回 `None`，选中 → 压缩后 data URL + mime |
+| `read_cover_path(path)` | `String → Result<CoverInput, String>` | 拖拽封面路径 → 读文件 + 压缩 + data URL；读失败/非图片 → `Err(中文原因)` |
 | `search_song(title, artist)` | `String, String → SearchResult` | 三家并发搜索 + 打分去重（含 `all_failed`：三源全失败才 true，冷门歌空结果 false） |
-| `search_source(source, title, artist)` | `MusicSourceId, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（v1-search-fixes，C2 换源用）：绕过跨源聚合去重——聚合会把同曲多源候选折叠成一条导致换源失效；失败/超时 → 空列表，前端跳过该源 |
+| `search_source(source, title, artist)` | `MusicSourceId, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（C2 换源用，绕过跨源聚合去重）：聚合会把同曲多源候选折叠成一条导致换源失效，换源时逐源各自拿原始候选；失败/超时 → 空列表，前端跳过该源 |
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |
 | `download_cover(url)` | `String → Result<Vec<u8>, String>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`；失败 → `Err` 前端静默忽略该张） |
 
@@ -350,7 +359,7 @@ interface SearchResult {
 
 **惰性拉取**：`search_song` 一次返回候选（封面 URL + 歌词 id），点选封面才 `download_cover`、点选歌词行才 `fetch_lyric`。
 
-### 10.4 测试放置约定与未来子变更落位
+### 10.4 测试放置约定与子变更落位
 
 **测试放置约定（Rust / 前端统一）**：
 
@@ -359,15 +368,17 @@ interface SearchResult {
 - **前端测试**：co-located `*.test.ts` 与被测文件同目录（`src/api/*.test.ts`、`src/store/*.test.ts`、`src/lib/*.test.ts`、`src/components/*.test.ts`）；`@tauri-apps/api/core` 的 mock 只依赖 `api/client.ts` 的 import 源。
 - **结构守卫测试**：`src/styles/design-layering.test.ts`（扫描本文件 §10 断言分层/测试放置/落位说明齐全）+ `src/components/layering.test.ts`（扫描 components/ 断言零 invoke 直呼）——分层规范改代码时须同步本文件，否则守卫失败。
 
-**未来子变更落位说明（service/api 落位，读 design.md §10 的 Architect 按此规划）**：
+**子变更落位记录（service/api 落位，v1-cover-embed → v1-search-ui 均已实现并归档；本表为历史落位记录，供后续 Architect 参照分层惯例）**：
 
-| 后续子变更（epic 项） | Rust 落位 | 前端落位 |
+| 子变更（epic 项，已归档） | Rust 落位 | 前端落位 |
 |---|---|---|
 | v1-cover-embed（封面嵌入） | `service/cover.rs` 扩展（data URL 编解码已在此） | `api/songs.ts` 既有封装 + 组件 |
 | v1-lyrics-lrc（歌词 LRC 读写） | 新增 `service/lyrics.rs` | `api/songs.ts` |
 | v1-rename-sync（文件名改名 + `.lrc` 同步） | 新增 `service/rename.rs`（`.lrc` 路径复用 `service::lyrics::sidecar_lrc_path`） | `api/songs.ts`（`rename_song` 封装） |
 | v1-search-backend（三家并发搜索 + 网易云加密） | 新增 `service/searcher/`（子模块） | — |
 | v1-search-ui（歌词/封面候选 UI） | — | 新增 `api/search.ts`（`search_song` / `fetch_lyric` / `download_cover` 封装） |
+
+> 以上 5 个子变更均已实现并归档（`openspec/changes/archive/` 齐全），本表保留为架构落位参照，不再有「未来/后续」含义。
 
 - 新 command 一律：Rust `commands/` 加薄壳 → `service/` 落业务 → `lib.rs` `generate_handler!` 注册；前端 `api/` 加封装 → store 注入 → 组件消费。
 - `searcher` 的加密（aes/cbc/rsa）与三家 HTTP 聚合是纯逻辑，无 Tauri 依赖，放 service 层（单元测试内联）。
