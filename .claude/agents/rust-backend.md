@@ -8,7 +8,7 @@ tools: Bash, Read, Edit, Write, Glob, Grep, LSP
 
 ## 领域要点
 
-- **Tauri command 契约**（前端全走 invoke）：`list_songs`/`open_song`/`save_song`/`rename_song`/`search_song`/`fetch_lyric`/`download_cover`/`embed_cover`。见 `docs/design/design.md` §10。
+- **Tauri command 契约**（前端全走 invoke）：`pick_folder`/`list_songs`/`open_song`/`save_song`/`rename_song`/`pick_cover_file`/`read_cover_path`/`search_song`/`search_source`/`fetch_lyric`/`download_cover`。见 `docs/design/design.md` §10。
 - **列表按需读取**：`list_songs` 只返回 `SongSummary { path, title, artist }`；选中一首才 `open_song` 读全量标签 + 封面 base64。Rust 不 trim，回退显示文件名由前端判定。
 - **lofty 标签读写**：
   - FLAC → Vorbis comment：`LYRICS`、PICTURE 块；MP3 → ID3v2.4（默认，勿 `use_id3v23`）：`TIT2/TPE1/TALB/USLT/APIC`。
