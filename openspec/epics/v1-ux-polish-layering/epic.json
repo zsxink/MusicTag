@@ -49,6 +49,15 @@
       "status": "todo",
       "implementationCommit": null,
       "slice": "设计文档 §三；Plan A Task 5+6+7"
+    },
+    {
+      "name": "ux-polish-final-review",
+      "issue": 92,
+      "domain": "infra",
+      "dependsOn": ["readme-product-copy", "ui-editor-layout", "candidate-collapse", "rust-tests-separation", "dir-memory"],
+      "status": "todo",
+      "implementationCommit": null,
+      "slice": "总复核门禁：全部子项合并后对最终仓库状态做只读独立复核"
     }
   ],
   "cursor": 0,

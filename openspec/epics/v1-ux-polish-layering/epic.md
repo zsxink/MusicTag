@@ -19,11 +19,13 @@
 | 3 | candidate-collapse | #89 | frontend | ui-editor-layout | 设计 §二 2.3；Plan A T3 |
 | 4 | rust-tests-separation | #90 | backend | — | 设计 §四；Plan B T0-7 |
 | 5 | dir-memory | #91 | both | rust-tests-separation | 设计 §三；Plan A T5+6+7 |
+| 6 | ux-polish-final-review | #92 | infra(GATE) | 全部 5 项 | 总复核门禁 |
 
 ## 依赖说明
 
 - **唯一硬约束**：`dir-memory` 依赖 `rust-tests-separation`——两者收尾都改 `design.md §10.4` 同一行；测试分离先行让「零内嵌测试」全库为真、`config.rs` 落地时规格与代码一致，避免双改同行冲突。
 - 前端组（1/2/3）无依赖，聚齐先行；`candidate-collapse` dependsOn `ui-editor-layout` 仅共享文件卫生（都改 LyricPanel.vue）。
+- **#6 为 GATE（门禁性质，非功能子变更）**：dependsOn 全部 5 项，全部合并回 main 后对最终仓库状态做一次**只读独立复核**（规格一致性、功能验收、工程门禁、无回归），通过才关闭 Epic Issue #86；不通过 → 挂起上报、阻断 #86 关闭、不回滚已合并项（沿 infra-review-gate 先例 #56）。
 
 ## 确认记录
 
