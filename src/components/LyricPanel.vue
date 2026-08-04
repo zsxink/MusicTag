@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 歌词区（design.md §5 lyrics + v1-search-ui D8）：
 // - head 行（来源 badge + 「同时保存为 .lrc」opt-in）+ 等宽 textarea。
-// - 来源 badge：`lyricSourcePlatform` 非 null（点选候选平台）优先 → 「来源: 网易云/QQ音乐/咪咕」，
+// - 来源 badge：`lyricSourcePlatform` 非 null（点选候选平台）优先 → 「来源: 网易云/QQ音乐/酷狗/LRCLIB/iTunes」，
 //   否则沿用 `lyricsSource` 映射（内嵌标签 / 侧载 .lrc / 无）。
 // - 「搜索歌词」手动按钮（design §6.2，head 与 textarea 之间）：readonly（坏标签只读）/ 无歌禁用；
 //   点击 → store.manualSearch('lyrics')（无视离线 / 缺失判定，随时可发起）。

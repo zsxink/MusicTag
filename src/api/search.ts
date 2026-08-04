@@ -6,7 +6,7 @@
 import { invokeCommand } from './client'
 import type { MusicSourceId, SearchResult, SongCandidate } from './types'
 
-/** 三源并发搜索（标题 + 作者 → 打分去重候选；空 title 由后端守卫过滤 → 空态）。 */
+/** 五源并发搜索（标题 + 作者 → 打分去重候选；空 title 由后端守卫过滤 → 空态）。 */
 export function searchSongs(title: string, artist: string): Promise<SearchResult> {
   return invokeCommand<SearchResult>('search_song', { title, artist })
 }

@@ -1,16 +1,20 @@
-// MusicTag — 三源（网易云 / QQ / 咪咕）并发搜索 + 打分去重聚合 + 惰性拉取（design.md §10.4 / D1–D8）。
+// MusicTag — 五源（网易云 / QQ / 酷狗 / LRCLIB / iTunes）并发搜索 + 打分去重聚合 + 惰性拉取
+// （design.md §10.4 / D1–D8，search-sources-renewal：三源 → 五源）。
 //
 // 纯业务层无 Tauri 依赖（service 分层不变量 §10.0）：函数接受 `&reqwest::Client` 参数，
 // 可脱离 Tauri 直接单测；命令薄壳在 `commands/search.rs` 只做参数接收 + 委托。
 //
 // 数据流（design.md）：
-// - `search_song(title, artist)`：`tokio::join_all`（JoinSet）三源并发 + 单源 6s 超时 →
+// - `search_song(title, artist)`：`tokio::join_all`（JoinSet）五源并发 + 单源 6s 超时 →
 //   失败降级空列表 + `source_stats`（该源记 0）→ `aggregate` 打分去重排序 → 前 10 条；
-// - `fetch_lyric(source, id)`：点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源）；
+// - `fetch_lyric(source, id)`：点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源；
+//   iTunes 恒 None，不参与 C2 取词链）；
 // - `download_cover(url)`：点选封面下载（5s 超时 + 12MB 响应体限流）。
 
 pub mod crypto;
-pub mod migu;
+pub mod itunes;
+pub mod kugou;
+pub mod lrclib;
 pub mod netease;
 pub mod qqmusic;
 
@@ -47,7 +51,7 @@ pub trait MusicSource: Send + Sync {
 
 /// 共享 HTTP Client（惰性构建一次，design.md D2）：默认浏览器 UA + 6s 总超时。
 ///
-/// 各源在请求级覆盖 UA/Referer（网易云随机 / QQ / 咪咕）。三源并发复用连接池。
+/// 各源在请求级覆盖 UA/Referer（网易云随机 / QQ / 酷狗 / LRCLIB 描述性 UA）。五源并发复用连接池。
 pub fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
@@ -62,12 +66,14 @@ pub fn client() -> &'static reqwest::Client {
     })
 }
 
-/// `search_song(title, artist)`：三源并发搜索 + 打分去重（spec：单源 6s 超时，失败降级空列表）。
+/// `search_song(title, artist)`：五源并发搜索 + 打分去重（spec：单源 6s 超时，失败降级空列表）。
 pub async fn search_song(client: &reqwest::Client, title: &str, artist: &str) -> SearchResult {
     let sources: Vec<Box<dyn MusicSource>> = vec![
-        Box::new(netease::Netease),
-        Box::new(qqmusic::QqMusic),
-        Box::new(migu::Migu),
+        Box::new(netease::Netease::default()),
+        Box::new(qqmusic::QqMusic::default()),
+        Box::new(kugou::Kugou::default()),
+        Box::new(lrclib::Lrclib::default()),
+        Box::new(itunes::Itunes::default()),
     ];
     search_song_with_sources(client, title, artist, sources, SEARCH_TIMEOUT).await
 }
@@ -76,7 +82,7 @@ pub async fn search_song(client: &reqwest::Client, title: &str, artist: &str) ->
 ///
 /// `JoinSet` 并行执行各源搜索，`tokio::time::timeout` 包单源超时；超时/失败 → 该源
 /// `source_stats` 记 0（D8）+ 计为失败，其余源结果不受影响。
-/// `all_failed` = 三源全部失败（无任何源成功）；至少一源成功（含正常空结果）→ false。
+/// `all_failed` = 五源全部失败（无任何源成功）；至少一源成功（含正常空结果）→ false。
 async fn search_song_with_sources(
     client: &reqwest::Client,
     title: &str,
@@ -87,7 +93,9 @@ async fn search_song_with_sources(
     let order = [
         MusicSourceId::Netease,
         MusicSourceId::QqMusic,
-        MusicSourceId::Migu,
+        MusicSourceId::Kugou,
+        MusicSourceId::Lrclib,
+        MusicSourceId::Itunes,
     ];
     let mut set = tokio::task::JoinSet::new();
     for source in sources {
@@ -113,7 +121,7 @@ async fn search_song_with_sources(
         }
     }
 
-    // source_stats：固定来源顺序（Netease → QqMusic → Migu），记成功返回的候选条数（D8）。
+    // source_stats：固定来源顺序（Netease → QqMusic → Kugou → Lrclib → Itunes），记成功返回的候选条数（D8）。
     let source_stats: Vec<(MusicSourceId, usize)> = order
         .iter()
         .map(|id| {
@@ -124,7 +132,7 @@ async fn search_song_with_sources(
         })
         .collect();
 
-    // all_failed：三源全部失败（None）→ true；至少一源成功 → false（冷门歌空结果不判离线）。
+    // all_failed：五源全部失败（None）→ true；至少一源成功 → false（冷门歌空结果不判离线）。
     let all_failed = raw.values().all(|o| o.is_none());
 
     let all: Vec<SongCandidate> = raw
@@ -152,9 +160,11 @@ pub async fn search_source(
     artist: &str,
 ) -> Vec<SongCandidate> {
     let s: Box<dyn MusicSource> = match source {
-        MusicSourceId::Netease => Box::new(netease::Netease),
-        MusicSourceId::QqMusic => Box::new(qqmusic::QqMusic),
-        MusicSourceId::Migu => Box::new(migu::Migu),
+        MusicSourceId::Netease => Box::new(netease::Netease::default()),
+        MusicSourceId::QqMusic => Box::new(qqmusic::QqMusic::default()),
+        MusicSourceId::Kugou => Box::new(kugou::Kugou::default()),
+        MusicSourceId::Lrclib => Box::new(lrclib::Lrclib::default()),
+        MusicSourceId::Itunes => Box::new(itunes::Itunes::default()),
     };
     search_source_with(client, s, title, artist, SEARCH_TIMEOUT).await
 }
@@ -180,9 +190,11 @@ pub async fn fetch_lyric(
     id: &str,
 ) -> Option<String> {
     let s: Box<dyn MusicSource> = match source {
-        MusicSourceId::Netease => Box::new(netease::Netease),
-        MusicSourceId::QqMusic => Box::new(qqmusic::QqMusic),
-        MusicSourceId::Migu => Box::new(migu::Migu),
+        MusicSourceId::Netease => Box::new(netease::Netease::default()),
+        MusicSourceId::QqMusic => Box::new(qqmusic::QqMusic::default()),
+        MusicSourceId::Kugou => Box::new(kugou::Kugou::default()),
+        MusicSourceId::Lrclib => Box::new(lrclib::Lrclib::default()),
+        MusicSourceId::Itunes => Box::new(itunes::Itunes::default()),
     };
     s.fetch_lyric(client, id).await
 }
@@ -288,7 +300,7 @@ fn artist_match(q: &str, a: &str) -> f32 {
 }
 
 /// 打分聚合（design.md D3）：过滤 title 零关联 → 打分（title + artist，上限 0.9）→
-/// 归一化 `(title, artist)` 去重保留最高分（同分按 Netease→QqMusic→Migu 来源序）→
+/// 归一化 `(title, artist)` 去重保留最高分（同分按 Netease→QqMusic→Kugou→Lrclib→Itunes 来源序）→
 /// score 降序（同分来源序 + 归一化 title/artist 稳定）→ 前 10 条。
 pub fn aggregate(
     query_title: &str,
@@ -342,16 +354,19 @@ pub fn aggregate(
     songs.into_iter().map(|(_, c)| c).collect()
 }
 
-/// 来源顺序排名（Netease < QqMusic < Migu，用于同分稳定序）。
+/// 来源顺序排名（Netease < QqMusic < Kugou < Lrclib < Itunes，search-sources-renewal D8：
+/// 中文源前置、公共源垫底，同分去重/排序天然偏好中文平台）。
 fn source_rank(source: MusicSourceId) -> usize {
     match source {
         MusicSourceId::Netease => 0,
         MusicSourceId::QqMusic => 1,
-        MusicSourceId::Migu => 2,
+        MusicSourceId::Kugou => 2,
+        MusicSourceId::Lrclib => 3,
+        MusicSourceId::Itunes => 4,
     }
 }
 
-/// JSON 值转字符串（string / int / uint 兜底；咪咕 `copyrightId` 可能是数字）。
+/// JSON 值转字符串（string / int / uint 兜底；酷狗 `FileHash`/取词候选 `id` 可能是数字）。
 pub(crate) fn json_string(v: &serde_json::Value) -> Option<String> {
     v.as_str()
         .map(String::from)
@@ -359,10 +374,35 @@ pub(crate) fn json_string(v: &serde_json::Value) -> Option<String> {
         .or_else(|| v.as_u64().map(|n| n.to_string()))
 }
 
+/// 测试共享工具：启动极简 HTTP 服务器（一次请求后关闭），返回 mock URL。
+///
+/// 各源「HTTP 非 2xx → Err 分支」回归测试（Tester 缺失项）与 `download_cover` 限流单测共用：
+/// 对每个连接读请求头后写回 `response` 字节，处理一个请求后关闭。
+#[cfg(test)]
+pub(crate) mod test_util {
+    use std::io::{Read, Write};
+
+    pub fn mock_http_once(response: Vec<u8>) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
+        let addr = listener.local_addr().expect("取本地端口");
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { continue };
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf);
+                let _ = s.write_all(&response);
+                let _ = s.flush();
+                break;
+            }
+        });
+        format!("http://{addr}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
+    use crate::service::searcher::test_util::mock_http_once;
 
     fn cand(source: MusicSourceId, id: &str, title: &str, artist: &str) -> SongCandidate {
         SongCandidate {
@@ -465,12 +505,12 @@ mod tests {
 
     #[test]
     fn aggregate_dedup_keeps_earliest_source_on_tie() {
-        // 同一归一化 (title, artist) 三家都返回 → 同分保留来源序更早（Netease）
+        // 同一归一化 (title, artist) 多源都返回 → 同分保留来源序更早（Netease < QqMusic < Kugou）
         let songs = aggregate(
             "晴天",
             "周杰伦",
             vec![
-                cand(MusicSourceId::Migu, "m", "晴天", "周杰伦"),
+                cand(MusicSourceId::Kugou, "k", "晴天", "周杰伦"),
                 cand(MusicSourceId::Netease, "n", "晴天", "周杰伦"),
                 cand(MusicSourceId::QqMusic, "q", "晴天", "周杰伦"),
             ],
@@ -478,6 +518,34 @@ mod tests {
         assert_eq!(songs.len(), 1);
         assert_eq!(songs[0].id, "n");
         assert_eq!(songs[0].source, MusicSourceId::Netease);
+    }
+
+    #[test]
+    fn aggregate_tie_keeps_full_five_source_rank_order() {
+        // search-sources-renewal D8：同分平手按五源固定序 Netease(0)→QqMusic(1)→Kugou(2)→
+        // Lrclib(3)→Itunes(4) 仲裁——中文源前置、公共源垫底。五家全给同曲同分 → 只留 Netease；
+        // 且 Lrclib 同分必胜 Itunes（公共源内部也按注册序稳定）。
+        let five = vec![
+            cand(MusicSourceId::Netease, "n", "晴天", "周杰伦"),
+            cand(MusicSourceId::QqMusic, "q", "晴天", "周杰伦"),
+            cand(MusicSourceId::Kugou, "k", "晴天", "周杰伦"),
+            cand(MusicSourceId::Lrclib, "l", "晴天", "周杰伦"),
+            cand(MusicSourceId::Itunes, "i", "晴天", "周杰伦"),
+        ];
+        let songs = aggregate("晴天", "周杰伦", five);
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].source, MusicSourceId::Netease);
+        assert_eq!(songs[0].id, "n");
+
+        // 仅 Lrclib 与 Itunes 同分 → 保留 Lrclib（rank 3 < 4）
+        let pub_only = vec![
+            cand(MusicSourceId::Lrclib, "l", "晴天", "周杰伦"),
+            cand(MusicSourceId::Itunes, "i", "晴天", "周杰伦"),
+        ];
+        let songs = aggregate("晴天", "周杰伦", pub_only);
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].source, MusicSourceId::Lrclib);
+        assert_eq!(songs[0].id, "l");
     }
 
     #[test]
@@ -551,7 +619,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn search_aggregates_three_sources_and_stats() {
+    async fn search_aggregates_five_sources_and_stats() {
         let client = reqwest::Client::new();
         let sources: Vec<Box<dyn MusicSource>> = vec![
             Box::new(FakeSource {
@@ -571,10 +639,28 @@ mod tests {
                 ]),
             }),
             Box::new(FakeSource {
-                id: MusicSourceId::Migu,
+                id: MusicSourceId::Kugou,
                 behavior: FakeBehavior::Return(vec![cand(
-                    MusicSourceId::Migu,
+                    MusicSourceId::Kugou,
                     "4",
+                    "晴天",
+                    "周杰伦",
+                )]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Lrclib,
+                behavior: FakeBehavior::Return(vec![cand(
+                    MusicSourceId::Lrclib,
+                    "5",
+                    "晴天",
+                    "周杰伦",
+                )]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Itunes,
+                behavior: FakeBehavior::Return(vec![cand(
+                    MusicSourceId::Itunes,
+                    "6",
                     "晴天",
                     "周杰伦",
                 )]),
@@ -583,21 +669,26 @@ mod tests {
         let result =
             search_song_with_sources(&client, "晴天", "周杰伦", sources, Duration::from_secs(1))
                 .await;
-        // source_stats：各家成功返回的候选条数（固定来源序）
+        // source_stats：各家成功返回的候选条数（固定五源来源序，search-sources-renewal D8）
         assert_eq!(
             result.source_stats,
             vec![
                 (MusicSourceId::Netease, 1),
                 (MusicSourceId::QqMusic, 2),
-                (MusicSourceId::Migu, 1),
+                (MusicSourceId::Kugou, 1),
+                (MusicSourceId::Lrclib, 1),
+                (MusicSourceId::Itunes, 1),
             ]
         );
-        // 去重：「晴天/周杰伦」三家各一条 → 只留来源序最早的 Netease；「晴天娃娃」另算
+        // 去重：「晴天/周杰伦」五家各一条 → 只留来源序最早的 Netease；「晴天娃娃」另算
         assert_eq!(result.songs.len(), 2);
         assert_eq!(result.songs[0].id, "1");
         assert_eq!(result.songs[1].id, "3");
-        assert!(!result.songs.iter().any(|s| s.source == MusicSourceId::Migu));
-        assert!(!result.all_failed, "三源均成功 → 非离线");
+        assert!(!result
+            .songs
+            .iter()
+            .any(|s| s.source == MusicSourceId::Kugou));
+        assert!(!result.all_failed, "五源均成功 → 非离线");
     }
 
     #[tokio::test]
@@ -620,7 +711,7 @@ mod tests {
                 )]),
             }),
             Box::new(FakeSource {
-                id: MusicSourceId::Migu,
+                id: MusicSourceId::Kugou,
                 behavior: FakeBehavior::Hang,
             }),
         ];
@@ -637,7 +728,9 @@ mod tests {
             vec![
                 (MusicSourceId::Netease, 0),
                 (MusicSourceId::QqMusic, 1),
-                (MusicSourceId::Migu, 0),
+                (MusicSourceId::Kugou, 0),
+                (MusicSourceId::Lrclib, 0),
+                (MusicSourceId::Itunes, 0),
             ]
         );
         assert_eq!(result.songs.len(), 1, "其余源结果不受影响");
@@ -658,7 +751,15 @@ mod tests {
                 behavior: FakeBehavior::Fail,
             }),
             Box::new(FakeSource {
-                id: MusicSourceId::Migu,
+                id: MusicSourceId::Kugou,
+                behavior: FakeBehavior::Hang,
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Lrclib,
+                behavior: FakeBehavior::Fail,
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Itunes,
                 behavior: FakeBehavior::Hang,
             }),
         ];
@@ -675,12 +776,12 @@ mod tests {
             result.source_stats.iter().map(|(_, n)| *n).sum::<usize>(),
             0
         );
-        assert!(result.all_failed, "三源全失败 → 离线信号");
+        assert!(result.all_failed, "五源全失败 → 离线信号");
     }
 
     #[tokio::test]
     async fn search_all_succeed_empty_not_offline() {
-        // v1-search-fixes（C2/离线误判）：三源**成功但空**（冷门歌无匹配）→ all_failed=false，
+        // v1-search-fixes（C2/离线误判）：五源**成功但空**（冷门歌无匹配）→ all_failed=false，
         // 不触发会话离线（FR-8.4a「全部源失败」指网络失败，非正常空结果）。
         let client = reqwest::Client::new();
         let sources: Vec<Box<dyn MusicSource>> = vec![
@@ -693,7 +794,15 @@ mod tests {
                 behavior: FakeBehavior::Return(vec![]),
             }),
             Box::new(FakeSource {
-                id: MusicSourceId::Migu,
+                id: MusicSourceId::Kugou,
+                behavior: FakeBehavior::Return(vec![]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Lrclib,
+                behavior: FakeBehavior::Return(vec![]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Itunes,
                 behavior: FakeBehavior::Return(vec![]),
             }),
         ];
@@ -711,7 +820,9 @@ mod tests {
             vec![
                 (MusicSourceId::Netease, 0),
                 (MusicSourceId::QqMusic, 0),
-                (MusicSourceId::Migu, 0),
+                (MusicSourceId::Kugou, 0),
+                (MusicSourceId::Lrclib, 0),
+                (MusicSourceId::Itunes, 0),
             ]
         );
         assert!(!result.all_failed, "正常空结果不得标记离线");
@@ -731,7 +842,15 @@ mod tests {
                 behavior: FakeBehavior::Return(vec![]),
             }),
             Box::new(FakeSource {
-                id: MusicSourceId::Migu,
+                id: MusicSourceId::Kugou,
+                behavior: FakeBehavior::Fail,
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Lrclib,
+                behavior: FakeBehavior::Return(vec![]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Itunes,
                 behavior: FakeBehavior::Fail,
             }),
         ];
@@ -743,7 +862,7 @@ mod tests {
             Duration::from_millis(50),
         )
         .await;
-        assert!(!result.all_failed, "至少一源成功（qq）→ 非离线");
+        assert!(!result.all_failed, "至少一源成功（qq/lrclib）→ 非离线");
     }
 
     #[tokio::test]
@@ -759,42 +878,38 @@ mod tests {
             id: MusicSourceId::QqMusic,
             behavior: FakeBehavior::Return(many),
         });
-        let got = search_source_with(&client, ok, "晴天", "周杰伦", Duration::from_millis(50)).await;
-        assert_eq!(got.len(), TOP_N, "单源原始候选不被聚合去重折叠，仅 TOP_N 截断");
+        let got =
+            search_source_with(&client, ok, "晴天", "周杰伦", Duration::from_millis(50)).await;
+        assert_eq!(
+            got.len(),
+            TOP_N,
+            "单源原始候选不被聚合去重折叠，仅 TOP_N 截断"
+        );
         assert!(got.iter().all(|c| c.source == MusicSourceId::QqMusic));
 
         // 失败 → 空
         let fail: Box<dyn MusicSource> = Box::new(FakeSource {
-            id: MusicSourceId::Migu,
+            id: MusicSourceId::Kugou,
             behavior: FakeBehavior::Fail,
         });
-        assert!(search_source_with(&client, fail, "x", "y", Duration::from_millis(50)).await.is_empty());
+        assert!(
+            search_source_with(&client, fail, "x", "y", Duration::from_millis(50))
+                .await
+                .is_empty()
+        );
         // 超时 → 空
         let hang: Box<dyn MusicSource> = Box::new(FakeSource {
             id: MusicSourceId::Netease,
             behavior: FakeBehavior::Hang,
         });
-        assert!(search_source_with(&client, hang, "x", "y", Duration::from_millis(50)).await.is_empty());
+        assert!(
+            search_source_with(&client, hang, "x", "y", Duration::from_millis(50))
+                .await
+                .is_empty()
+        );
     }
 
     // ---- download_cover：5s 超时 + 12MB 限流 ----
-
-    /// 启动极简 HTTP 服务器：对每个连接读请求头后写回 `response` 字节，处理一个请求后关闭。
-    fn mock_http_once(response: Vec<u8>) -> String {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
-        let addr = listener.local_addr().expect("取本地端口");
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut s) = stream else { continue };
-                let mut buf = [0u8; 4096];
-                let _ = s.read(&mut buf);
-                let _ = s.write_all(&response);
-                let _ = s.flush();
-                break;
-            }
-        });
-        format!("http://{addr}")
-    }
 
     #[tokio::test]
     async fn download_cover_success_returns_bytes() {

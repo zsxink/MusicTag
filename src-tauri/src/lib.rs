@@ -5,7 +5,7 @@
 // - `open_song` / `save_song`（v1-song-read / v1-song-save）
 // - `pick_cover_file` / `read_cover_path`（v1-cover-embed）
 // - `rename_song`（v1-rename-sync，音频 + `.lrc` 改名）
-// - `search_song` / `fetch_lyric` / `download_cover`（v1-search-backend，三源并发搜索）
+// - `search_song` / `fetch_lyric` / `download_cover`（v1-search-backend，五源并发搜索）
 // - `search_source`（v1-search-fixes，单源搜索：C2 换源绕过聚合去重）
 // 后续子变更在此逐个追加 `tauri::generate_handler![...]`。
 //

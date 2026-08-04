@@ -25,7 +25,9 @@ const searchResult: SearchResult = {
   source_stats: [
     ['netease', 1],
     ['qqmusic', 0],
-    ['migu', 0],
+    ['kugou', 0],
+    ['lrclib', 0],
+    ['itunes', 0],
   ],
 }
 
@@ -34,14 +36,23 @@ describe('api/search.ts — 类型化 command 封装（命令名/参数逐字对
     mockInvoke.mockReset()
   })
 
-  it('searchSongs：透传 search_song + { title, artist }，返回 SearchResult（三源聚合）', async () => {
+  it('searchSongs：透传 search_song + { title, artist }，返回 SearchResult（五源聚合）', async () => {
     mockInvoke.mockResolvedValue(searchResult)
     await expect(searchSongs('歌名', '作者')).resolves.toEqual(searchResult)
     expect(mockInvoke).toHaveBeenCalledWith('search_song', { title: '歌名', artist: '作者' })
   })
 
   it('searchSongs：空 title/artist 同样透传（后端 D3 空 title 守卫在 Rust 侧过滤）', async () => {
-    mockInvoke.mockResolvedValue({ songs: [], source_stats: [['netease', 0], ['qqmusic', 0], ['migu', 0]] })
+    mockInvoke.mockResolvedValue({
+      songs: [],
+      source_stats: [
+        ['netease', 0],
+        ['qqmusic', 0],
+        ['kugou', 0],
+        ['lrclib', 0],
+        ['itunes', 0],
+      ],
+    })
     await searchSongs('', '')
     expect(mockInvoke).toHaveBeenCalledWith('search_song', { title: '', artist: '' })
   })

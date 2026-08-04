@@ -279,7 +279,8 @@ function showCoverCandidates(container) {
     const thumbs = [
       { src: "https://p1.music.126.net/WlQ8yqZmNLyWlBvVQdNoyw==/109951162900000000.jpg", label: "网易云" },
       { src: "https://y.qq.com/music/photo_new/T002R300x300M000004Q7FwZ2P8fO.jpg", label: "QQ音乐" },
-      { src: "https://m.music.migu.cn/migu/audio/cover.jpg", label: "咪咕" },
+      { src: "https://imgessl.kugou.com/stdmusic/20230706/20230706173729144953.jpg", label: "酷狗" },
+      { src: "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/00/00/00/00000000.jpg", label: "iTunes" },
     ];
     for (const t of thumbs) {
       const cell = document.createElement("div");

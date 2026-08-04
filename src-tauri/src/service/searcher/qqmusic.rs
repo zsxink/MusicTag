@@ -1,10 +1,10 @@
-// MusicTag — QQ 音乐客户端（musicu.fcg 搜索 + fcg_query_lyric_new 取词，design.md D2 / D5）。
+// MusicTag — QQ 音乐客户端（client_search_cp GET 搜索 + fcg_query_lyric_new 取词，search-sources-renewal D2）。
 //
-// 接口逐字对照 music-tag-web 的 QmusicClient / qm.py（纯 HTTP 无加密）：
-// - 搜索：POST `u.y.qq.com/cgi-bin/musicu.fcg`，JSON body `comm` + `music.search.SearchCgiService.DoSearchForQQMusicDesktop`
-//   → 解析 `data.<key>.data.body.song.list[]`；
-// - 取词：GET `c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=<mid>`，响应 `lyric` 字段 **base64** → utf-8。
-// UA 覆盖为 `QQ音乐/73222 CFNetwork/1406.0.3 Darwin/22.4.0` + Referer（design.md D2）。
+// 2026-08 起 musicu.fcg 搜索被内层 code:2001 空响应，换公开 GET `client_search_cp`（零加密零签名）：
+// - 搜索：GET `c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=10&w=<title>&format=json`
+//   → 解析 `data.song.list[]`；顶层 `code` 字段沿用 `is_error_response`（`code!=0` → 源失败）；
+// - 取词：GET `c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=<mid>`，响应 `lyric` 字段 **base64** → utf-8
+//   （实测正常，保持不动；UA 用 ASCII 兜底——非 ASCII UA 被部分中间层拒绝）。
 // 单源失败一律降级为空列表 / None。
 
 use crate::model::{MusicSourceId, SongCandidate};
@@ -12,17 +12,25 @@ use crate::service::searcher::MusicSource;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
-pub struct QqMusic;
+pub struct QqMusic {
+    /// client_search_cp 搜索接口（Tester：HTTP 状态分支 mock 注入点）。
+    search_url: String,
+    /// fcg_query_lyric_new 取词接口 base。
+    lyric_url_base: String,
+}
 
-/// QQ 音乐 UA（design.md D2 覆盖值）与 Referer。
-const QQ_UA: &str = "QQ音乐/73222 CFNetwork/1406.0.3 Darwin/22.4.0";
+impl Default for QqMusic {
+    fn default() -> Self {
+        Self {
+            search_url: "https://c.y.qq.com/soso/fcgi-bin/client_search_cp".to_string(),
+            lyric_url_base: "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg".to_string(),
+        }
+    }
+}
+
+/// QQ 音乐 UA（design.md D2 覆盖值；ASCII 兜底——非 ASCII UA 可能被中间层拒绝）与 Referer。
+const QQ_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const QQ_REFERER: &str = "https://y.qq.com/portal/profile.html";
-
-/// musicu.fcg 请求/响应内的模块 key（design.md：`comm` + DoSearchForQQMusicDesktop）。
-const MODULE_KEY: &str = "music.search.SearchCgiService.DoSearchForQQMusicDesktop";
-
-const SEARCH_URL: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
-const LYRIC_URL_BASE: &str = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg";
 
 #[async_trait]
 impl MusicSource for QqMusic {
@@ -36,21 +44,17 @@ impl MusicSource for QqMusic {
         title: &str,
         _artist: &str,
     ) -> Result<Vec<SongCandidate>, String> {
-        // 参数对齐参照库：`comm.ct=19` + 无 `grp`（实测 ct=24/grp=1 返回空列表但 estimate_sum>0，
-        // 属参数结构不对；ct=19 正常返回结果）。
-        let body = serde_json::json!({
-            "comm": {"ct": 19, "cv": 0},
-            MODULE_KEY: {
-                "method": "DoSearchForQQMusicDesktop",
-                "module": "music.search.SearchCgiService",
-                "param": {"num_per_page": 10, "page_num": 1, "query": title, "search_type": 0},
-            },
-        });
+        // client_search_cp：公开 GET，`w` 关键词、`p/n` 分页、`format=json`（零加密零签名）。
+        // 用 Url::parse_with_params 保证中文 keyword 正确 URL 编码。
+        let url = reqwest::Url::parse_with_params(
+            &self.search_url,
+            &[("p", "1"), ("n", "10"), ("w", title), ("format", "json")],
+        )
+        .expect("构造 QQ 搜索 URL 失败");
         let resp = match client
-            .post(SEARCH_URL)
+            .get(url)
             .header("User-Agent", QQ_UA)
             .header("Referer", QQ_REFERER)
-            .json(&body)
             .send()
             .await
         {
@@ -74,7 +78,8 @@ impl MusicSource for QqMusic {
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String> {
         // fcg_query_lyric_new：`songmid=<mid>`（候选 id 即 mid），`lyric` 字段 base64。
         let url = format!(
-            "{LYRIC_URL_BASE}?g_tk=5381&format=json&platform=yqq&needNewCode=0&inCharset=utf8&outCharset=utf-8&notice=0&loginUin=0&hostUin=0&songmid={id}"
+            "{}?g_tk=5381&format=json&platform=yqq&needNewCode=0&inCharset=utf8&outCharset=utf-8&notice=0&loginUin=0&hostUin=0&songmid={id}",
+            self.lyric_url_base
         );
         let resp = client
             .get(&url)
@@ -96,24 +101,26 @@ fn is_error_response(json: &serde_json::Value) -> bool {
     json["code"].as_i64().is_some_and(|c| c != 0)
 }
 
-/// 解析 musicu.fcg 搜索响应 `data.<key>.data.body.song.list[]` → 候选。
+/// 解析 client_search_cp 搜索响应 `data.song.list[]` → 候选。
 ///
-/// 映射（design.md 任务 3.1）：`mid` → id（取歌词用 songmid）；`title`；
-/// `singer[].name` → artist（逗号连接）；`album.title` → album（空 → `未分类专辑`）；
-/// `album.mid` → 封面模板 `T002R300x300M000{album_mid}.jpg`。
+/// 映射（search-sources-renewal D2）：`songmid` → id（取歌词用 songmid）；`songname` → title；
+/// `singer[].name` → artist（逗号连接）；`albumname` → album（空 → `未分类专辑`）；
+/// `albummid` → 封面模板 `T002R300x300M000{albummid}.jpg`（空 → None）。
 fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
-    let list = match json["data"][MODULE_KEY]["data"]["body"]["song"]["list"].as_array() {
+    let list = match json["data"]["song"]["list"].as_array() {
         Some(a) => a,
         None => return Vec::new(),
     };
     list.iter()
         .map(|s| SongCandidate {
             source: MusicSourceId::QqMusic,
-            id: s["mid"]
-                .as_str()
-                .map(String::from)
-                .unwrap_or_else(|| s["id"].as_i64().map(|v| v.to_string()).unwrap_or_default()),
-            title: s["title"].as_str().unwrap_or_default().to_string(),
+            id: s["songmid"].as_str().map(String::from).unwrap_or_else(|| {
+                s["songid"]
+                    .as_i64()
+                    .map(|v| v.to_string())
+                    .unwrap_or_default()
+            }),
+            title: s["songname"].as_str().unwrap_or_default().to_string(),
             artist: s["singer"]
                 .as_array()
                 .map(|ss| {
@@ -124,7 +131,7 @@ fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
                 })
                 .unwrap_or_default(),
             album: {
-                let album = s["album"]["title"].as_str().unwrap_or_default();
+                let album = s["albumname"].as_str().unwrap_or_default();
                 if album.is_empty() {
                     "未分类专辑"
                 } else {
@@ -132,8 +139,9 @@ fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
                 }
             }
             .to_string(),
-            cover_url: s["album"]["mid"]
+            cover_url: s["albummid"]
                 .as_str()
+                .filter(|mid| !mid.is_empty())
                 .map(|mid| format!("https://y.qq.com/music/photo_new/T002R300x300M000{mid}.jpg")),
         })
         .collect()
@@ -157,27 +165,23 @@ fn parse_lyric_response(json: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service::searcher::test_util::mock_http_once;
 
     #[test]
     fn parses_search_response_full_fields() {
+        // client_search_cp 响应：`data.song.list[]`，顶层 `code:0`
         let json = serde_json::json!({
             "code": 0,
             "data": {
-                MODULE_KEY: {
-                    "code": 0,
-                    "data": {
-                        "body": {
-                            "song": {
-                                "list": [{
-                                    "id": 265113483,
-                                    "mid": "004D3pK90wGyM2",
-                                    "title": "晴天",
-                                    "singer": [{"name": "周杰伦"}],
-                                    "album": {"title": "叶惠美", "mid": "003OUlho2HcRHC"}
-                                }]
-                            }
-                        }
-                    }
+                "song": {
+                    "list": [{
+                        "songid": 97773,
+                        "songmid": "0039MnYb0qxYhV",
+                        "songname": "晴天",
+                        "singer": [{"name": "周杰伦"}],
+                        "albumname": "叶惠美",
+                        "albummid": "000MkMni19ClKG"
+                    }]
                 }
             }
         });
@@ -186,26 +190,26 @@ mod tests {
         let s = &songs[0];
         assert_eq!(s.source, MusicSourceId::QqMusic);
         assert_eq!(
-            s.id, "004D3pK90wGyM2",
-            "候选 id 应为 mid（取歌词用 songmid）"
+            s.id, "0039MnYb0qxYhV",
+            "候选 id 应为 songmid（取歌词用 songmid）"
         );
         assert_eq!(s.title, "晴天");
         assert_eq!(s.artist, "周杰伦");
         assert_eq!(s.album, "叶惠美");
         assert_eq!(
             s.cover_url.as_deref(),
-            Some("https://y.qq.com/music/photo_new/T002R300x300M000003OUlho2HcRHC.jpg")
+            Some("https://y.qq.com/music/photo_new/T002R300x300M000000MkMni19ClKG.jpg")
         );
     }
 
     #[test]
     fn parses_search_response_multiple_singers_comma_joined() {
         let json = serde_json::json!({
-            "data": { MODULE_KEY: {"data": {"body": {"song": {"list": [{
-                "mid": "m1", "title": "t",
+            "data": {"song": {"list": [{
+                "songmid": "m1", "songname": "t",
                 "singer": [{"name": "A"}, {"name": "B"}],
-                "album": {"title": "al", "mid": ""}
-            }]}}}}}
+                "albumname": "al", "albummid": ""
+            }]}}
         });
         let songs = parse_search_response(&json);
         assert_eq!(songs[0].artist, "A, B");
@@ -215,17 +219,23 @@ mod tests {
     fn is_error_response_detects_business_rejection() {
         // CR v1-search-fixes：HTTP 200 但 code≠0（限流/风控）→ 源失败，不误算「成功空」
         assert!(is_error_response(&serde_json::json!({"code": -1})));
-        assert!(!is_error_response(&serde_json::json!({"code": 0, "data": {}})), "code 0 成功");
-        assert!(!is_error_response(&serde_json::json!({"data": {}})), "malformed 无 code → 按成功空");
+        assert!(
+            !is_error_response(&serde_json::json!({"code": 0, "data": {}})),
+            "code 0 成功"
+        );
+        assert!(
+            !is_error_response(&serde_json::json!({"data": {}})),
+            "malformed 无 code → 按成功空"
+        );
     }
 
     #[test]
     fn parses_search_response_empty_album_falls_back_to_uncategorized() {
-        // album.title 空 → `未分类专辑`；album.mid 空 → cover_url None
+        // albumname 空 → `未分类专辑`；albummid 空 → cover_url None
         let json = serde_json::json!({
-            "data": { MODULE_KEY: {"data": {"body": {"song": {"list": [{
-                "mid": "m1", "title": "t", "singer": [], "album": {}
-            }]}}}}}
+            "data": {"song": {"list": [{
+                "songmid": "m1", "songname": "t", "singer": [], "album": {}
+            }]}}
         });
         let songs = parse_search_response(&json);
         assert_eq!(songs[0].album, "未分类专辑");
@@ -234,14 +244,14 @@ mod tests {
     }
 
     #[test]
-    fn parses_search_response_falls_back_to_numeric_id_when_mid_missing() {
+    fn parses_search_response_falls_back_to_numeric_id_when_songmid_missing() {
         let json = serde_json::json!({
-            "data": { MODULE_KEY: {"data": {"body": {"song": {"list": [{
-                "id": 265113483, "title": "t", "singer": [], "album": {}
-            }]}}}}}
+            "data": {"song": {"list": [{
+                "songid": 97773, "songname": "t", "singer": [], "albumname": "al"
+            }]}}
         });
         let songs = parse_search_response(&json);
-        assert_eq!(songs[0].id, "265113483");
+        assert_eq!(songs[0].id, "97773");
     }
 
     #[test]
@@ -270,5 +280,20 @@ mod tests {
             parse_lyric_response(&serde_json::json!({"lyric": "@@@not-base64@@@"})),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn http_error_status_returns_err() {
+        // Tester 回归：各源 HTTP 非 2xx → Err 分支（源失败降级），mock server 404。
+        // 构造源指向 mock URL（search_url），search 返回 Err 且消息含 404。
+        let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec();
+        let url = mock_http_once(response);
+        let qq = QqMusic {
+            search_url: url,
+            lyric_url_base: String::new(),
+        };
+        let client = reqwest::Client::new();
+        let err = qq.search(&client, "晴天", "周杰伦").await.unwrap_err();
+        assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
     }
 }

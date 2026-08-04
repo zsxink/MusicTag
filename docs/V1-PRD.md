@@ -143,8 +143,8 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 **逐首**补全�
 | 2 | **判定时机**：自动搜索**只在选中歌曲那一刻判定一次**，按当时的缺失状态决定搜哪些项；此后的删除/修改不再自动触发 |
 | 3 | **只补缺失项**：**已有歌词（内嵌或 `.lrc`）则不搜歌词**；**已有封面则不搜封面**；两者都有则不搜索 |
 | 4 | **删除不再触发**：删除当前歌词/封面后，**不**自动重新搜索 |
-| 4a | **离线降级（失败首响）**：本会话中第一次自动搜索**三源全部网络失败**（断网/超时，`all_failed=true`）→ 标记会话离线，后续选中**不再自动搜**、候选区不出现（省去每次 6s 等待），界面提示「离线：仅手动填写」，只留手动搜索按钮。**三源正常但无匹配结果（冷门歌）不触发离线**，仅显示空态 |
-| 5 | **搜索源**：网易云 + QQ 音乐 + 咪咕 **三家并发** |
+| 4a | **离线降级（失败首响）**：本会话中第一次自动搜索**五源全部网络失败**（断网/超时，`all_failed=true`）→ 标记会话离线，后续选中**不再自动搜**、候选区不出现（省去每次 6s 等待），界面提示「离线：仅手动填写」，只留手动搜索按钮。**五源正常但无匹配结果（冷门歌）不触发离线**，仅显示空态 |
+| 5 | **搜索源**：网易云 + QQ 音乐 + 酷狗 + LRCLIB + iTunes **五家并发** |
 | 6 | **聚合**：多源结果合并、**按歌曲相似度去重排序**，统一展示 |
 | 7 | **结果不自动写盘**：一律以候选列表展示，用户**手动点选**后才填入 |
 | 8 | **歌词候选**：点选一条 → 歌词填入歌词区（仍可继续编辑），badge 显示来源平台 |
@@ -248,11 +248,11 @@ struct Song {
 
 enum LyricsSource { Embedded, SidecarLrc, None }
 
-enum MusicSourceId { Netease, QqMusic, Migu }
+enum MusicSourceId { Netease, QqMusic, Kugou, Lrclib, Itunes }
 
 // 多源搜索结果（候选）
 struct SongCandidate {
-    source: MusicSourceId,    // netease | qqmusic | migu
+    source: MusicSourceId,    // netease | qqmusic | kugou | lrclib | itunes
     id: String,               // 平台内歌曲 id
     title: String,
     artist: String,
@@ -263,7 +263,7 @@ struct SongCandidate {
 struct SearchResult {
     songs: Vec<SongCandidate>,     // 按打分排序去重后的候选
     source_stats: Vec<(MusicSourceId, usize)>, // 各家返回条数，便于展示/兜底
-    all_failed: bool,              // 三源全部网络失败（断网/超时）→ true；至少一源成功（含正常空结果）→ false
+    all_failed: bool,              // 五源全部网络失败（断网/超时）→ true；至少一源成功（含正常空结果）→ false
 }
 
 enum SearchError {
@@ -292,16 +292,18 @@ enum SearchError {
 | 文件改名 | `std::fs` | 音频 + 关联 `.lrc` 一并 rename |
 | 主题记忆 | localStorage 或 `tauri-plugin-store` | 持久化手动主题选择 |
 | HTTP | `reqwest`（共享 Client，伪装 UA） | 多源搜索请求 + 封面下载 |
-| 并发 | `tokio`（`join_all`） | 三家源并发搜索 |
+| 并发 | `tokio`（`join_all`） | 五源并发搜索 |
 | JSON 解析 | `serde_json` | 解析各家接口返回 |
 | 加密 | `aes` + `cbc` + `rsa` + `rand` | 网易云 weapi / linuxapi 手写加密 |
-| 网易云 | weapi 搜索 + linuxapi 取歌词 | 见下方多源搜索架构 |
-| QQ 音乐 | `musicu.fcg` JSON 协议 | 纯 HTTP，无加密 |
-| 咪咕 | `migu/remoting/scr_search_tag` | 纯 HTTP，无加密 |
+| 网易云 | linuxapi 转发搜索 + 取歌词 | 见下方多源搜索架构（2026 起 weapi 搜索被风控） |
+| QQ 音乐 | `client_search_cp` GET | 纯 HTTP，无加密 |
+| 酷狗 | `complexsearch.kugou.com` MD5 签名搜索 + `lyrics.kugou.com` LRC | 纯 MD5，无 JS 引擎 |
+| LRCLIB | `lrclib.net/api/search` / `/api/get` | 零鉴权，歌词兜底 |
+| iTunes | `itunes.apple.com/search`（country=CN） | 零鉴权，封面兜底 |
 
 > **多源搜索架构（对标 music-tag-web 的 `MusicResource` 工厂 + `smart_tag`）**：
-> - **模块**：`commands/` 目录薄壳（`folder.rs`/`song.rs`/`cover.rs`/`search.rs`）+ `service/searcher/` 子模块（`mod.rs`/`netease.rs`/`qqmusic.rs`/`migu.rs`/`crypto.rs`）。统一 Trait `MusicSource`：`search(title, artist) -> Result<Vec<SongCandidate>, String>` + `fetch_lyric(song_id) -> Option<String>`。
-> - **流程**：选中歌曲 → `search_song(title, artist)` → 三家并发（每家 6s 超时，失败降级为空列表并记入 `source_stats`）→ 打分去重 → 前 N 条候选返回。`SearchResult.all_failed` 区分「三源全网络失败」（标记会话离线）与「正常空结果」（冷门歌不标离线）。
+> - **模块**：`commands/` 目录薄壳（`folder.rs`/`song.rs`/`cover.rs`/`search.rs`）+ `service/searcher/` 子模块（`mod.rs`/`netease.rs`/`qqmusic.rs`/`kugou.rs`/`lrclib.rs`/`itunes.rs`/`crypto.rs`）。统一 Trait `MusicSource`：`search(title, artist) -> Result<Vec<SongCandidate>, String>` + `fetch_lyric(song_id) -> Option<String>`。
+> - **流程**：选中歌曲 → `search_song(title, artist)` → 五源并发（每家 6s 超时，失败降级为空列表并记入 `source_stats`）→ 打分去重 → 前 N 条候选返回。`SearchResult.all_failed` 区分「五源全网络失败」（标记会话离线）与「正常空结果」（冷门歌不标离线）。
 > - **惰性拉取**：候选列表秒出——封面 URL 随搜索结果带出，点选封面才 `download_cover`（单独 5s 超时 + 响应限流）；歌词文本点选候选行才 `fetch_lyric`。
 > - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1`；归一化 = trim + 全角半角 + 小写折叠（V1 不做简繁转换）；按归一化 `(title, artist)` 去重保留最高分。
 > - **Tauri command 全量**（前端一律 `invoke` 调用；TS 类型与 `design/design.md` §10.3 对齐）：
@@ -326,7 +328,7 @@ enum SearchError {
 7. 切歌未保存 → 三按钮弹窗各自行为正确
 8. 双主题渲染正确，手动切换 + 重启记忆生效
 9. 空文件夹 / 无匹配搜索 → 空状态提示
-10. 选中歌曲时，仅对缺失的歌词/封面自动并发搜 3 家 → 聚合去重排序、候选展示；点选歌词/封面正确填入（不自动覆盖）；已有歌词/封面的歌曲不触发搜索，删除后也不自动重新触发，手动搜索按钮可随时发起
+10. 选中歌曲时，仅对缺失的歌词/封面自动并发搜 5 家 → 聚合去重排序、候选展示；点选歌词/封面正确填入（不自动覆盖）；已有歌词/封面的歌曲不触发搜索，删除后也不自动重新触发，手动搜索按钮可随时发起
 11. 无结果 / 断网 → 明确空态 + 仍可手动填写
 12. 搜索结果点选的歌词/封面随「保存」写回正确；**封面下载失败 / 图片损坏 / 压缩失败 → 静默忽略该张候选**（不报错、不标红，网格中其他候选不受影响）
 13. **按需读取**：打开约 300–500 首的文件夹，**列表（歌名/作者）秒级显示**；选中一首后详情 + 封面**即时**加载进编辑区（`open_song`）
@@ -342,7 +344,7 @@ enum SearchError {
 | M3 | 保存写回：字段映射、直接写原文件 |
 | M4 | 歌词 / `.lrc` 关联 / 封面嵌入 / 文件名改名同步 |
 | M5 | 双主题、切歌确认、打磨与验收 |
-| M6 | 多源搜索：网易云 + QQ + 咪咕客户端、并发聚合打分、歌词/封面候选点选 |
+| M6 | 多源搜索：网易云 + QQ + 酷狗 + LRCLIB + iTunes 五源、并发聚合打分、歌词/封面候选点选 |
 | M7 | 搜索联动 UI（歌词/封面候选区、搜索态、空态）、端到端验收 |
 
 ---
@@ -464,7 +466,7 @@ enum SearchError {
 - 最小目标字号 11.5px，正文 13px
 
 ## 9. 搜索候选区（V1 新增形态）
-- **歌词候选**：歌词区顶部 badge 旁出现「搜索中…」/ 候选条列表；每条候选显示平台来源标签（网易云/QQ/咪咕）+ 歌名/作者，点击填入。
+- **歌词候选**：歌词区顶部 badge 旁出现「搜索中…」/ 候选条列表；每条候选显示平台来源标签（网易云/QQ/酷狗/LRCLIB/iTunes）+ 歌名/作者，点击填入。
 - **封面候选**：封面区下方弹出缩略图列表（3×N 网格）；点击某张填入封面区预览，保存时嵌入。
 - **手动触发**：歌词区 badge 旁、封面区底部各一个「搜索歌词 / 搜索封面」按钮，随时可手动发起；删除内容后重新搜索用手动按钮。
 - **无结果 / 断网**：候选区显示空态（如「未找到匹配的歌词，可手动粘贴」），保留手动填写。

@@ -16,7 +16,9 @@ const { mockSearchSongs, mockDownloadCover, mockBytesToCoverInput } = vi.hoisted
     source_stats: [
       ['netease', 0],
       ['qqmusic', 0],
-      ['migu', 0],
+      ['kugou', 0],
+      ['lrclib', 0],
+      ['itunes', 0],
     ],
   })),
   mockDownloadCover: vi.fn(async () => []),
@@ -389,7 +391,9 @@ describe('CoverPanel — 封面候选区（v1-search-ui D8：status/网格/空�
       source_stats: [
         ['netease', 0],
         ['qqmusic', 0],
-        ['migu', 0],
+        ['kugou', 0],
+        ['lrclib', 0],
+        ['itunes', 0],
       ],
     })
     openSong()
@@ -431,7 +435,7 @@ describe('CoverPanel — 封面候选区（v1-search-ui D8：status/网格/空�
     songStore.coverCandidates = [
       cand({ source: 'netease', id: 'n1' }),
       cand({ source: 'qqmusic', id: 'q1', cover_url: 'https://q/1.jpg' }),
-      cand({ source: 'migu', id: 'm1', cover_url: 'https://m/1.jpg' }),
+      cand({ source: 'itunes', id: 'i1', cover_url: 'https://i/1.jpg' }),
     ]
     const w = mount(CoverPanel)
     const cells = w.findAll('.cand-cell')

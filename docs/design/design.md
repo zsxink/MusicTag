@@ -162,7 +162,7 @@
 
 - **3 列网格**，间距 6px；每格 **1:1 方形**，6px 圆角，1px 描边，`object-fit: cover` 缩略图。
 - hover 描边变琥珀；点击填入封面区预览。
-- 来源角标（`.src-tag`）：缩略图**左下角**，9px 白字、`rgba(0,0,0,0.6)` 底、3px 圆角（如 网易云 / QQ音乐 / 咪咕）。
+- 来源角标（`.src-tag`）：缩略图**左下角**，9px 白字、`rgba(0,0,0,0.6)` 底、3px 圆角（如 网易云 / QQ音乐 / 酷狗 / LRCLIB / iTunes）。
 - 网格下方一行 dim 提示（如「点选一张填入预览」）。
 
 ### 6.5 歌词候选（`.cand-row`）
@@ -197,7 +197,7 @@
 
 ## 9. 搜索候选区与触发模型（与 FR-8 对应）
 
-- **自动触发（仅一次）**：选中歌曲那一刻，按「歌名 + 作者」对**缺失项**（无歌词 / 无封面）自动并发搜 3 家（网易云 + QQ + 咪咕）；已有内容、或删除内容后**均不再自动触发**。
+- **自动触发（仅一次）**：选中歌曲那一刻，按「歌名 + 作者」对**缺失项**（无歌词 / 无封面）自动并发搜 5 家（网易云 + QQ + 酷狗 + LRCLIB + iTunes）；已有内容、或删除内容后**均不再自动触发**。
 - **手动触发**：歌词区/封面区各有「搜索歌词 / 搜索封面」虚线按钮，随时可主动发起——删除内容后要重新搜就用它。
 - **结果形态**：一律候选展示（封面缩略图网格 / 歌词候选条），用户**手动点选才填入**，不自动写盘、不自动覆盖。
 - **无结果 / 断网**：候选区显示明确空态 + 保留手动填写入口。
@@ -292,7 +292,7 @@ TS 类型与 Rust struct 对齐（类型映射见下）：
 ```ts
 // 与 Rust Song struct 对齐
 // Rust enum 映射：LyricsSource Embedded/SidecarLrc/None ↔ 'embedded'|'sidecar'|'none'
-//                MusicSourceId Netease/QqMusic/Migu ↔ 'netease'|'qqmusic'|'migu'
+//                MusicSourceId Netease/QqMusic/Kugou/Lrclib/Itunes ↔ 'netease'|'qqmusic'|'kugou'|'lrclib'|'itunes'
 interface Song {
   path: string;
   title: string; artist: string; album: string;
@@ -319,7 +319,7 @@ interface CoverInput {
 }
 
 interface SongCandidate {
-  source: 'netease' | 'qqmusic' | 'migu';   // MusicSourceId 字面量
+  source: 'netease' | 'qqmusic' | 'kugou' | 'lrclib' | 'itunes';   // MusicSourceId 字面量
   id: string;
   title: string; artist: string; album: string;
   cover_url: string | null;
@@ -328,7 +328,7 @@ interface SongCandidate {
 interface SearchResult {
   songs: SongCandidate[];
   source_stats: Array<[MusicSourceId, number]>;  // 各家返回条数（失败/超时记 0）
-  all_failed: boolean;  // 三源全部失败（网络错误/超时）→ true；至少一源成功（含正常空结果）→ false
+  all_failed: boolean;  // 五源全部失败（网络错误/超时）→ true；至少一源成功（含正常空结果）→ false
 }
 ```
 
@@ -336,7 +336,7 @@ interface SearchResult {
 
 | TS | Rust | 说明 |
 |---|---|---|
-| `source`/`MusicSourceId` | `'netease' \| 'qqmusic' \| 'migu'` | `enum MusicSourceId { Netease, QqMusic, Migu }` → camelCase 字面量 |
+| `source`/`MusicSourceId` | `'netease' \| 'qqmusic' \| 'kugou' \| 'lrclib' \| 'itunes'` | `enum MusicSourceId { Netease, QqMusic, Kugou, Lrclib, Itunes }` → camelCase 字面量 |
 | `lyrics_source` | `'embedded' \| 'sidecar' \| 'none'` | `enum LyricsSource { Embedded, SidecarLrc, None }` → 字面量 |
 | `cover` | `string \| null` | Rust `Option<Vec<u8>>` → **base64 data URL**（IPC 边界序列化） |
 | `cover_mime` | `string \| null` | `Option<String>` |
@@ -350,7 +350,7 @@ interface SearchResult {
 | `rename_song(path, new_name)` | `String, String → Result<(), String>` | 音频 + `.lrc` 改名 |
 | `pick_cover_file()` | `() → Option<CoverInput>` | 原生封面文件选择器（jpg/png/webp）；取消返回 `None`，选中 → 压缩后 data URL + mime |
 | `read_cover_path(path)` | `String → Result<CoverInput, String>` | 拖拽封面路径 → 读文件 + 压缩 + data URL；读失败/非图片 → `Err(中文原因)` |
-| `search_song(title, artist)` | `String, String → SearchResult` | 三家并发搜索 + 打分去重（含 `all_failed`：三源全失败才 true，冷门歌空结果 false） |
+| `search_song(title, artist)` | `String, String → SearchResult` | 五源并发搜索 + 打分去重（含 `all_failed`：五源全失败才 true，冷门歌空结果 false） |
 | `search_source(source, title, artist)` | `MusicSourceId, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（C2 换源用，绕过跨源聚合去重）：聚合会把同曲多源候选折叠成一条导致换源失效，换源时逐源各自拿原始候选；失败/超时 → 空列表，前端跳过该源 |
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |
 | `download_cover(url)` | `String → Result<Vec<u8>, String>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`；失败 → `Err` 前端静默忽略该张） |
@@ -381,5 +381,5 @@ interface SearchResult {
 > 以上 5 个子变更均已实现并归档（`openspec/changes/archive/` 齐全），本表保留为架构落位参照，不再有「未来/后续」含义。
 
 - 新 command 一律：Rust `commands/` 加薄壳 → `service/` 落业务 → `lib.rs` `generate_handler!` 注册；前端 `api/` 加封装 → store 注入 → 组件消费。
-- `searcher` 的加密（aes/cbc/rsa）与三家 HTTP 聚合是纯逻辑，无 Tauri 依赖，放 service 层（单元测试内联）。
+- `searcher` 的加密（aes/cbc/rsa）与五家 HTTP 聚合是纯逻辑，无 Tauri 依赖，放 service 层（单元测试内联）。
 - `api/search.ts` 只做 IPC 透传（同 `songs.ts` 模式），候选生命周期（选中即搜、切歌即弃）逻辑在 store，不在 api 层。
