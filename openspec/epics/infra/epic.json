@@ -1,0 +1,20 @@
+{
+  "name": "infra",
+  "status": "ready",
+  "prdConfirmed": true,
+  "source": "https://github.com/zsxink/MusicTag/issues/48",
+  "epicIssue": 48,
+  "items": [
+    { "name": "infra-repo-docs", "issue": 49, "domain": "docs", "dependsOn": [], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 1 · README 初始化" },
+    { "name": "infra-claude-md-root", "issue": 50, "domain": "docs", "dependsOn": [], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 2 · 根级 CLAUDE.md" },
+    { "name": "infra-codegraph", "issue": 51, "domain": "infra", "dependsOn": [], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 3 · codegraph 索引" },
+    { "name": "spec-review", "issue": 52, "domain": "docs", "dependsOn": [], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 4 · spec 四源复核" },
+    { "name": "workflow-optimize", "issue": 53, "domain": "infra", "dependsOn": ["spec-review"], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 5 · 工作流优化" },
+    { "name": "infra-icons", "issue": 54, "domain": "frontend", "dependsOn": [], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 6 · 图标三端适配 + 回归修复" },
+    { "name": "ci-release", "issue": 55, "domain": "infra", "dependsOn": ["infra-icons"], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 7 · 三端发布 CI" },
+    { "name": "infra-review-gate", "issue": 56, "domain": "infra", "dependsOn": ["infra-repo-docs", "infra-claude-md-root", "infra-codegraph", "spec-review", "workflow-optimize", "infra-icons", "ci-release"], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 8 · GATE 独立复核门禁" }
+  ],
+  "cursor": 0,
+  "error": null,
+  "sourceRevision": "3eecb2cf150d6e4e8564c3a5defb4e1008f44dd4"
+}
