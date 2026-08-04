@@ -22,7 +22,7 @@ context: |
   定稿规格（最终权威，改动先同步再动代码）：docs/V1-PRD.md、docs/design/design.md、记忆 music-tag-v1-spec.md。
   交互参考：docs/design/mockup.html（含浅/深色 mockup 截图 shot-*.png）。
 
-  Tauri command 契约（前端全走 invoke）：list_songs/open_song/save_song/rename_song/search_song/fetch_lyric/download_cover/embed_cover。
+  Tauri command 契约（前端全走 invoke，与 src-tauri/src/lib.rs 实际注册一致）：pick_folder/list_songs/open_song/save_song/rename_song/pick_cover_file/read_cover_path/search_song/search_source/fetch_lyric/download_cover。封面一律并入 save_song 写盘，无独立 embed_cover command。
   列表按需读取：list_songs 只返回 SongSummary { path, title, artist }；选中一首才 open_song 读全量标签 + 封面 base64。封面跨 IPC 用 base64 data URL。
 
   沟通语言：中文。UI 文案用中文。
