@@ -20,6 +20,19 @@ Epic「项目基建初始化」（总 Issue #48）共 8 个子变更：7 个功�
 - 不触发修复循环：不因复核不通过而自动重试、循环打回（D4）。
 - 不修改仓库任何文件：本变更的可写动作面仅「关闭 Epic Issue #48」（复核通过时），其余均为只读核验（D5）。
 
+## 规格 → 设计追溯（每个 requirement 的设计支撑）
+
+| spec requirement | 设计支撑 |
+|---|---|
+| 仅当 7 个依赖子变更全部合并后才触发复核 | D1（前置门禁：`git log main` 确认 7 项合并提交）+ D5 派发前校验 |
+| 复核为只读、独立、不受实施过程影响 | D1（只信 main HEAD 终态）+ D4（只读终审，不修不循环）+ D5（只读 subagent 执行）+ E1（证据清单格式） |
+| 规格一致性（docs 与 openspec 一致） | D2.1（四源交叉核对，以 `lib.rs` 实际注册清单为 command 真值）+ E1 证据 |
+| 工作流可运行 | D2.2（`node --check` / `bash -n` 静态自检 + 引用一致性核对）+ E1 证据 |
+| icons/CI 产物与 config 吻合 | D2.3（`bundle.icon` 引用逐文件存在 + `release.yml` 静态校验 + 与 `ci.yml` 职责比对）+ E1 证据 |
+| 根级与 .claude 的 CLAUDE.md 无矛盾 | D2.4（逐条比照两份 CLAUDE.md 的规则章节 + 与定稿 specs 对齐）+ E1 证据 |
+| 复核通过则通过 Epic 并关闭 #48 | D3（唯一出口：4 维全过 → 汇总「通过」→ 关闭 #48） |
+| 复核不通过则挂起上报、阻断关闭 #48 | D3（唯一出口：任一不通过 → 挂起上报、阻断 #48、不回滚） |
+
 ## 变更域判定
 
 **infra (gate)**，纯只读门禁，无代码、无跨前后端依赖。
@@ -35,15 +48,22 @@ Epic「项目基建初始化」（总 Issue #48）共 8 个子变更：7 个功�
 - 复核对象是**7 项全部合并回 main 后的最终仓库状态**（以 main HEAD 为准），不是某单个 diff 或某次 PR。
 - 判定标准：`git log main` 确认 7 个子变更的合并提交均已在 main；在 main 上执行全部只读核验。
 - 任何中间过程（某子变更实施期的临时状态、未合并分支）不作为复核依据——复核**只信 main 的最终状态**。
+- 可对照 `openspec/epics/infra/epic.json` 中 7 项的 `implementationCommit`（当前 `595a2ba / d75d287 / bfb6bdf / f2426a5 / fe5a8a0 / 99fa622 / 262c3e7`）逐条 `git cat-file -e <sha>` 确认提交对象存在且位于 main 的可达历史——这是比「只看 merge commit 存在」更严的终态锚定。
 
 ### D2 复核维度清单（4 维，全部通过才算过）
 
-对最终仓库状态逐维度只读核验，每一维度产出「通过 / 不通过 + 证据」：
+对最终仓库状态逐维度只读核验，每一维度产出「通过 / 不通过 + 证据」（证据格式见 E1）：
 
-1. **规格一致性（docs 与 openspec）**：核对 `docs/V1-PRD.md`、`docs/design/design.md`、`openspec/`、记忆 `music-tag-v1-spec.md` 四源——V1 关键约束（一次一首 / 选中即搜 / 结果不自动写盘 / 保存=表单全量覆盖 / 直接写盘 / MP3 统一写 ID3v2.4 / 坏标签只读 / 保存失败保留可重试 / 离线降级）表述一致，无矛盾；`openspec/` 归档与主规格无未同步的已拍板决策。此维度是对 spec-review 产出在**最终状态**上的复核（spec-review 自己只改了自身 diff，本维度确认合并后四源仍一致）。
+1. **规格一致性（docs 与 openspec）**：核对 `docs/V1-PRD.md`、`docs/design/design.md`、`openspec/`、记忆 `music-tag-v1-spec.md`（`~/.claude/projects/-Users-xian-Project-music-MusicTag/memory/music-tag-v1-spec.md`）四源——V1 关键约束（一次一首 / 选中即搜 / 结果不自动写盘 / 保存=表单全量覆盖 / 直接写盘 / MP3 统一写 ID3v2.4 / 坏标签只读 / 保存失败保留可重试 / 离线降级）表述一致，无矛盾；`openspec/` 归档与主规格无未同步的已拍板决策。此维度是对 spec-review 产出在**最终状态**上的复核（spec-review 自己只改了自身 diff，本维度确认合并后四源仍一致）。
+   - 复核锚点：`src-tauri/src/lib.rs` 的 `generate_handler![...]` 实际注册清单（当前 11 个 command：`pick_folder / list_songs / open_song / save_song / rename_song / pick_cover_file / read_cover_path / search_song / search_source / fetch_lyric / download_cover`）是 command 契约的**真值基准**——docs 与 openspec 中任何 command 描述（含 `embed_cover` 之类废弃残留）都要与它对齐。spec-review 已修 6 处不一致，本维度确认合并后无回退、无新残留。
 2. **工作流可运行**：核对 `.claude/workflows/` 脚本、`openspec/config.yaml`、各 skill/agent 定义相互自洽；pipe / CR / verify 门禁链路入口与步骤完整可执行，无引用断点。此维度是对 workflow-optimize 产出在**最终状态**上的复核。
+   - 静态自检（只读，不执行流程）：`.claude/workflows/*.js` 逐个 `node --check`（music-tag-run.js 按 workflow 引擎的 async 函数包裹方式查语法）、`.claude/workflows/*.sh` 逐个 `bash -n`；同时核对 workflow prompt 引用的 skill/agent 名（如 `pipe` skill 的 `SKILL.md`、`cr-agent` 等）在 `.claude/skills/` 中均存在、无失效引用（见 `openspec/config.yaml` rules.workflow 的「流程脚本变更必须附带静态自检通过证据」）。
+   - 门禁链路完整性：pipe（`.claude/workflows/music-tag-run.js` 的 phases：前置校验→架构设计→开发→测试→CR→验证→集成）、CR（`/cr` / cr-agent）、verify（`/verify` / verify-agent）三者的入口命令与步骤在 CLAUDE.md / workflow meta 中均有定义、相互可到达。
 3. **icons/CI 产物与 config 吻合**：核对 `tauri.conf.json` 的 `bundle.icon` 数组与 `src-tauri/icons/` 实际文件——每个引用都存在；校验 `.github/workflows/release.yml` YAML 语法正确、与 `.github/workflows/ci.yml` 职责互补不冲突。此维度是对 infra-icons / ci-release 产出在**最终状态**上的复核。
+   - 图标：`bundle.icon` 当前引用 5 个文件（`icons/32x32.png / icons/128x128.png / icons/128x128@2x.png / icons/icon.icns / icons/icon.ico`），逐文件 `test -f src-tauri/<引用>` 断言存在；注意 `bundle.icon` 引用相对 `src-tauri/` 解析。
+   - release.yml：YAML 语法可读（`gh workflow view` 或至少结构解析）；确认 release.yml 的触发条件（`on.push.tags: v*`）与 ci.yml（PR/push 校验门禁）职责互补：ci.yml 管「PR 与 push 的质量门禁」、release.yml 管「打 tag 后三端发布」，两文件 jobs 名无冲突、permissions 声明无冲突（release.yml 顶层 `contents: read`，publish job 内显式 `contents: write`，与 tauri-action 发布需求吻合）。
 4. **CLAUDE.md 无矛盾**：逐条比照根级 `CLAUDE.md` 与 `.claude/CLAUDE.md`，两处规则（V1 关键约束 / 技术栈 / 常用命令 / 工作流流程）无相互矛盾，且均与定稿 specs 对齐。此维度是对 infra-claude-md-root 产出在**最终状态**上的复核。
+   - 比照条目：V1 关键约束 9 条（一次一首 / 选中即搜 / 结果不自动写盘 / 保存=表单全量覆盖 / 直接写盘 / MP3 统一写 ID3v2.4 / 坏标签只读 / 保存失败保留可重试 / 离线降级）、技术栈（Tauri 2 + Rust / Vue 3 + Vite + TS / lofty / image / walkdir / rfd / reqwest / aes+cbc+rsa）、常用命令（npm run tauri dev / cargo test 等）、工作流（/pipe /cr /verify /opsx:* 入口）。两处对同一规则的**取值**必须一致（不允许一处说「无批量」另一处说「可批量」这类矛盾），表述详略不同不算矛盾。
 
 > 4 维与 7 项产出的对应：维度 1←spec-review、维度 2←workflow-optimize、维度 3←infra-icons+ci-release、维度 4←infra-claude-md-root；README（infra-repo-docs）与 codegraph（infra-codegraph）通过维度 1/2 的文档一致性覆盖。门禁逻辑是「**终态交叉复核**」，不是重跑各项子变更自己的 diff 审查。
 
@@ -68,16 +88,31 @@ Epic「项目基建初始化」（总 Issue #48）共 8 个子变更：7 个功�
 ### D5 复核执行方式：只读 subagent
 
 - 复核由**只读 subagent** 执行（如 `cr-agent` 一类只读角色，具备 Bash/Read/Glob/Grep，无 Edit/Write 的必要），配 D2 维度清单执行 4 维核验。
-- 产出：每维度通过/不通过 + 证据清单，汇总结论「通过 / 挂起」。
+- 产出：每维度通过/不通过 + 证据清单（E1），汇总结论「通过 / 挂起」。
 - 由 Leader（或执行本变更的 pipe 流程）校验「7 项均已合并回 main」作为前置门禁（D1），再派发只读复核；复核结论直接映射 D3 判定动作。
 - 单 subagent 即可完成，无并行写、无状态冲突（纯只读）。
+
+### E1 复核证据清单格式（产出即证据，无中间产物落盘）
+
+每一维度固定产出四段结构（在只读复核报告中，不写仓库内文件）：
+
+```
+维度 N「<名称>」
+- 判定：通过 / 不通过
+- 核验对象：<实际路径/命令，如 src-tauri/tauri.conf.json、.github/workflows/release.yml>
+- 证据：<逐条断言，只读命令输出摘录，如 `test -f src-tauri/icons/32x32.png` → 存在；`node --check` 无报错>
+- 例外：<该维度未覆盖/不判定的范围，如「不重跑三端真机打包」>
+```
+
+证据只取只读输出摘录（命令结果、文件内容 diff 要点），不附带大段源码/全文。报告由 subagent 在会话内直接产出，落盘与否由执行方决定——本变更自身不向仓库写任何文件。
 
 ## Risks / Trade-offs
 
 - **门禁被误当返工流水线**：若复核不通过时自动触发修复，gate 就退化成普通 CR 的循环，违背「终审不回滚」定位。**控制**：D4/D5 明确只读 + 不触发修复循环；不通过只挂起上报，修复走新变更。
 - **「通过」语义过轻**：只复核 4 维交叉一致性，不重跑各子变更的单 diff 验证（那些已由各自 pipe 的 Verify 门禁保障）。**接受**：本 gate 的职责是终态交叉，不是重复验证；两者互补。
-- **依赖判定失效**：若 7 项未全部合并就启动，复核对象不完整。**控制**：D1 前置门禁——`git log main` 确认 7 项合并提交均在 main 后才派发复核。
+- **依赖判定失效**：若 7 项未全部合并就启动，复核对象不完整。**控制**：D1 前置门禁——`git log main` 确认 7 项合并提交均在 main（且 `epic.json` 的 `implementationCommit` 可达）后才派发复核。
 - **只读复核的盲区**：无法证明「仓库可用」（如三端真机打包）。**接受**：可用性验证属 ci-release 等子变更自身范围，本 gate 只核验产物与 config 的吻合（文件齐全、语法正确、职责互补）。
+- **只读静态自检的局限**：`node --check` / `bash -n` / YAML 解析只证明**语法与引用**可解析，不证明流程端到端可跑通（那需要真实执行，超出只读范围）。**接受**：与上一风险同理，端到端可运行性由各子变更自身的验证环节保障。
 - **零代码变更的规格约束**：本变更无实现代码，spec 的 WHEN/THEN 均落在「复核执行」这一动作上，天然可测（每维度的场景即核验步骤）。
 
 ## 任务拆分建议
@@ -86,8 +121,8 @@ Epic「项目基建初始化」（总 Issue #48）共 8 个子变更：7 个功�
 
 1. **前置确认（D1）**：`git log main` 确认 7 个依赖子变更（#49–#55）均已合并回 main；任一未合并则等待、不启动。
 2. **维度复核（D2，只读 subagent）**：按 4 维清单逐维度核验最终仓库状态：
-   - 2.1 规格一致性：四源关键约束与主规格交叉核对。
-   - 2.2 工作流可运行：workflows/config/skill-agent 自洽 + 门禁链路无断点。
+   - 2.1 规格一致性：四源关键约束与主规格交叉核对（以 `lib.rs` 实际注册清单为 command 真值）。
+   - 2.2 工作流可运行：workflows/config/skill-agent 自洽 + `node --check` / `bash -n` 静态自检 + 门禁链路无断点。
    - 2.3 icons/CI 与 config 吻合：`bundle.icon` 引用文件齐全 + `release.yml` 语法正确、与 `ci.yml` 不冲突。
    - 2.4 CLAUDE.md 无矛盾：根级与 `.claude/` 逐条比照。
 3. **汇总判定（D3）**：4 维全部通过 → 汇总「通过」；任一不通过 → 挂起上报（列维度 + 证据，不回滚）。
