@@ -27,7 +27,7 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 | Rust-Dev | `rust-backend` | src-tauri/ 下 Rust 实现（TDD） |
 | Vue-Dev | `vue-frontend` | src/ 下前端实现（TDD） |
 | CR | `cr-agent` | **只读**审查，对照 specs/design 找问题，不改代码 |
-| Verify/CI | `verify-agent` | cargo check/test + npm run build + openspec validate，只验证不修复 |
+| Verify/CI | `verify-agent` | cargo check/test + npm run test + npm run build + openspec validate，只验证不修复 |
 | Tester | `tester` | 覆盖审计、补测试、冒烟 |
 
 协作模型：**角色独立、Leader 推进**。CR 只读，有问题打回 Leader → Leader 重新派给架构/开发 → 修复再复审；**CR 三轮未通过 → 挂起**。
@@ -80,10 +80,12 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 3. **测试**：Tester 对照 scenarios 补齐测试、跑冒烟；任一 scenario 缺失即失败。Tester 的写入发生在 CR 前。
 4. **CR（只读，最多三轮）**：
    - CR 代理**只读**审查 `git diff main...HEAD`，对照 specs/design
+   - 审查维度含**复盘专项三检**（针对 #46/#47 缺陷族）：跨模块状态语义（聚合去重不破坏单源换源/防同名不同歌）、竞态与串扰（跨 kind/面板不互相作废）、网络与离线判定（区分超时/错误码与正常空结果）；不适用标「不适用」
+   - 阻断/major 每项必须含 file + issue + specReference + suggestion 四要素；`pass=true` 仅当无阻断且无 major
    - 无阻断无主要问题 → 通过，进验证
    - 有问题 → **打回 Leader** → Leader 重派对应开发角色修复 → 再复审
    - **三轮未通过 → 挂起**，上报用户决策
-5. **最终验证**：Verify 代理在所有 Tester/CR 写入后跑 `cargo check` + `cargo test` + `npm run build` + `openspec validate`，只验证不修复；失败 → 打回修复重跑。
+5. **最终验证**：Verify 代理在所有 Tester/CR 写入后跑统一基线 `cargo check` → `cargo test` → `npm run test` → `npm run build` → `openspec validate <change> --strict --no-interactive`，任一 fail 即 `verify_failed`，只验证不修复；涉及搜索联动（取词/换源/并发/离线判定）的变更追加**复盘回归清单**（单源换源不被聚合去重破坏、跨 kind 不串扰、离线判定区分网络失败与空结果）并逐项入 `verify.steps`，缺失必选项即 `verify_failed`。
 
 ### ④ 结果处理
 | Workflow 返回 | 处理 |
@@ -121,6 +123,8 @@ Workflow `success` 后，**派 `leader` subagent** 依次执行受控集成，�
 - Workflow 的 `success` 仅表示质量门通过；Leader 必须归档、创建 PR、确认 CI required checks 后合并并写 checkpoint。
 - **集成派 subagent**：⑤–⑦ 的归档/PR/合并/分支清理必须由 `leader` subagent 执行；主会话不直接跑这些 git/gh 命令（只做编排与上报）。
 - **CR 只读**：审查代理不 Edit/Write 代码；问题经 Leader 中转，由开发角色修复。
+- **CR 复盘专项**：CR 必须含复盘专项三检维度（跨模块状态语义 / 竞态与串扰 / 网络与离线判定）；阻断/major 每项必须含 file + issue + specReference + suggestion；`pass=true` 仅当无阻断且无 major。
 - **CR 三轮未通过即挂起**，不无限重试。
+- **统一验证基线**：cargo check → cargo test → npm run test → npm run build → openspec validate `--strict --no-interactive`，任一 fail 即 `verify_failed`，只验证不修复；搜索联动类变更追加复盘回归清单并逐项入 `verify.steps`。
 - 未写失败测试就实现 = 违规。规格改前先改文档。
 - 报告结果如实：失败/挂起就停，不粉饰、不假报全绿。

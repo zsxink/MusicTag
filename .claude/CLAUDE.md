@@ -70,7 +70,7 @@ cargo fmt            # 格式化
   - 子变更内部 **100% 复用 `/pipe`**（一 change 一分支一 PR）；Epic 状态放 `openspec/epics/`，独立于 openspec 变更生命周期
 - **分步命令**：
   - `/cr <name>` —— 自动代码审查（只读 subagent 对照规格审查 diff；有问题打回 Leader 重派开发角色修复）
-  - `/verify <name>` —— 自动验证（cargo check/test + npm run build + openspec validate）
+  - `/verify <name>` —— 自动验证（cargo check/test + npm run test + npm run build + openspec validate --strict --no-interactive）
   - `/opsx:apply <name>`、`/opsx:archive <name>` —— openspec 官方步骤
 - **唯一强制确认点**：PRD（proposal + specs）用户批准（= 需求确认）。**确认后即全自动，用户不再参与**；设计由 Architect 自动产出。流程中不设中间确认，只在歧义/缺陷/验证不过/CR 三轮挂起/用户打断时停下上报。
 
