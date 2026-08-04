@@ -1498,6 +1498,24 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       expect(songStore.lyricSourcePlatform).toBe('migu')
     })
 
+    it('C2 单源 reject（命令级异常）→ 该源跳过，其余源仍可成功（CR 第 2 轮 minor：Promise.all 鲁棒性）', async () => {
+      const cand = makeCand() // netease
+      const fetchLyric = vi.fn(async (source: MusicSourceId) =>
+        source === 'netease' ? null : source === 'migu' ? '[00:00.00] 咪咕词' : null,
+      )
+      // qqmusic searchSource reject，migu 正常返回同曲候选
+      const searchSource = vi.fn(async (source: MusicSourceId) => {
+        if (source === 'qqmusic') throw new Error('IPC 异常')
+        return source === 'migu' ? [makeCand({ source: 'migu', id: 'm1' })] : []
+      })
+
+      await pickLyricCandidate(cand, fetchLyric, searchSource)
+
+      expect(songStore.current!.lyrics).toBe('[00:00.00] 咪咕词') // qqmusic reject → 跳过，继续 migu
+      expect(songStore.lyricSourcePlatform).toBe('migu')
+      expect(songStore.lyricFetchEmpty).toBe(false)
+    })
+
     it('C2 全源失败 → lyricFetchEmpty=true（空态「未找到匹配的歌词，可手动粘贴」）', async () => {
       const fetchLyric = vi.fn(async () => null)
       const searchSource = vi.fn(async () => [makeCand({ source: 'qqmusic', id: 'q1' })])

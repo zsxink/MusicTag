@@ -89,9 +89,6 @@ impl MusicSource for QqMusic {
     }
 }
 
-/// 解析 musicu.fcg 搜索响应 `data.<key>.data.body.song.list[]` → 候选。
-///
-/// 映射（design.md 任务 3.1）：`mid` → id（取歌词用 songmid）；`title`；
 /// 业务错误响应判定（CR v1-search-fixes）：HTTP 200 但顶层 `code` 非 0（如限流/风控 -1）→ 真。
 ///
 /// 成功/正常空结果都带 `code:0`；仅 `code` 缺失（malformed）不算错误（按成功空兜底）。
@@ -99,6 +96,9 @@ fn is_error_response(json: &serde_json::Value) -> bool {
     json["code"].as_i64().is_some_and(|c| c != 0)
 }
 
+/// 解析 musicu.fcg 搜索响应 `data.<key>.data.body.song.list[]` → 候选。
+///
+/// 映射（design.md 任务 3.1）：`mid` → id（取歌词用 songmid）；`title`；
 /// `singer[].name` → artist（逗号连接）；`album.title` → album（空 → `未分类专辑`）；
 /// `album.mid` → 封面模板 `T002R300x300M000{album_mid}.jpg`。
 fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {

@@ -508,7 +508,8 @@ export async function pickLyricCandidate(
     const lists = await Promise.all(
       remaining.map(async (source) => ({
         source,
-        list: await searchSource(source, cand.title, cand.artist),
+        // 单源 reject（命令级异常）→ 该源按空列表跳过，不影响其余源（CR 第 2 轮 minor）
+        list: await searchSource(source, cand.title, cand.artist).catch(() => []),
       })),
     )
     if (raw.lyricSearchSeq !== mySeq) return
