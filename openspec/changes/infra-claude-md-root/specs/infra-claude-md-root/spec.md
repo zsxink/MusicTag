@@ -16,6 +16,25 @@
 - **WHEN** Claude Code 从仓库根进入项目（或任意子目录向上探测到根）
 - **THEN** 根级 `CLAUDE.md` 作为项目规则自动加载，无需 `.claude/` 目录存在
 
+### Requirement: 根级为总览/索引，与 .claude/CLAUDE.md 形成层次
+
+根级 `CLAUDE.md` SHALL 定位为**总索引/总览**，与详细规则 `.claude/CLAUDE.md` 形成层次：根级回答「这是什么项目、规则在哪」（项目是什么、文档入口、关键约束精要、规则详情入口指针），`.claude/CLAUDE.md` 承载全量细节；二层**不互相重复全量全文**。
+
+#### Scenario: 总览结构
+
+- **WHEN** 打开仓库根 `CLAUDE.md`
+- **THEN** 其章节为总览式：项目是什么、文档入口、V1 约束精要（九条一行）、技术栈精要、规则详情入口（指向 `.claude/CLAUDE.md`）、快速上手，而非 `.claude/CLAUDE.md` 的全量副本
+
+#### Scenario: 指针指向详细规则
+
+- **WHEN** 需要常用命令 / OpenSpec-pipe / GitHub-Git / 工作流 / 7 角色协作等全量细节
+- **THEN** 根级 `CLAUDE.md` 通过「规则详情入口」章节指向 `.claude/CLAUDE.md`，二层内容互补不重复
+
+#### Scenario: 二层不互相复制
+
+- **WHEN** 对比根级 `CLAUDE.md` 与 `.claude/CLAUDE.md` 全文
+- **THEN** 根级未整段复制 `.claude/CLAUDE.md` 的详细规则全文，仅含总览精要与指针
+
 ### Requirement: 内容与定稿 specs 一致无矛盾
 
 根级 `CLAUDE.md` 中的项目规则 SHALL 与定稿规格（`docs/V1-PRD.md`、`docs/design/design.md`）一致，V1 关键约束与技术方案转述无矛盾、无新增擅自决策。
@@ -35,19 +54,24 @@
 - **WHEN** 核查根级 `CLAUDE.md` 涉及产品行为的描述
 - **THEN** 不含 specs 之外新增的产品约束/行为决策；涉及规格差异时以定稿 docs 为最终权威
 
-### Requirement: 规范化后与 .claude/CLAUDE.md 口径一致
+### Requirement: 总览精要与 .claude/CLAUDE.md 详细规则口径一致
 
-根级 `CLAUDE.md` SHALL 与现有 `.claude/CLAUDE.md` 的项目规则口径一致，不引入互相矛盾的内容。
+根级 `CLAUDE.md` 的总览/精要 SHALL 与现有 `.claude/CLAUDE.md` 的详细规则**口径一致、指向正确**，不引入互相矛盾的内容（精要不与详细冲突）。
 
-#### Scenario: 二处规则不矛盾
+#### Scenario: 精要与详细不矛盾
 
-- **WHEN** 对比根级 `CLAUDE.md` 与 `.claude/CLAUDE.md` 的对应章节（项目简介、V1 约束、技术栈、命令、OpenSpec/pipe、GitHub、Git 约定、语言）
-- **THEN** 二处表述相互印证、无冲突；根级文档可作为独立入口使用
+- **WHEN** 对比根级 `CLAUDE.md` 的 V1 约束精要、技术栈精要 与 `.claude/CLAUDE.md` 的对应详细章节
+- **THEN** 二处表述相互印证、无冲突；根级精要是 `.claude/` 详情的正确浓缩，而非矛盾的另一种说法
+
+#### Scenario: 指针路径真实存在
+
+- **WHEN** 检查根级 `CLAUDE.md` 中列出的文档入口与规则详情指针
+- **THEN** `.claude/CLAUDE.md`、`docs/V1-PRD.md`、`docs/design/design.md` 路径真实存在，指针可点击到达
 
 #### Scenario: 规则更新需同步
 
-- **WHEN** 未来任一文档中的项目规则被修改
-- **THEN** 另一处文档同步更新，保持口径一致（本变更仅要求当前状态一致，不强制后续自动同步机制）
+- **WHEN** 未来 `.claude/CLAUDE.md` 中的详细规则被修改
+- **THEN** 根级 `CLAUDE.md` 的总览/精要同步更新，保持口径一致（本变更仅要求当前状态一致，不强制后续自动同步机制）
 
 ### Requirement: 不修改 .claude/ 下既有文件
 
