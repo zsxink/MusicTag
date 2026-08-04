@@ -132,7 +132,8 @@ log(`变更域判定：${domain}。设计要点：${architect.designSummary}`)
 phase('开发')
 const devSpec =
   `读取 ${CHANGE_DIR}/design.md、specs/、tasks.md，按任务实现。遵守 TDD（新逻辑先写失败测试）。` +
-  `Rust 侧跑 cargo test --manifest-path src-tauri/Cargo.toml，前端改完跑 npm run build。增量提交 git add + commit（feat(${CHANGE}): 任务）。` +
+  `完成自验证后方可提交：Rust 侧跑 cargo test --manifest-path src-tauri/Cargo.toml、前端跑 npm run build 与 npm run test，任一失败不得提交。` +
+  `增量提交 git add + commit（feat(${CHANGE}): 任务），阶段粒度、崩溃可恢复。` +
   `实现完成后返回 done/summary/filesChanged/tests。`
 
 const runDev = (agentType, scope) =>
@@ -155,7 +156,8 @@ log(`开发完成：${devResults.map((result) => result.summary).join(' | ')}`)
 phase('测试')
 const tester = await agent(
   `你是测试角色。对变更「${CHANGE}」做覆盖审计、补齐缺失测试并跑核心链路冒烟。` +
-    `对照 ${CHANGE_DIR}/specs/ 的 scenarios；任何未覆盖 scenario 都必须列入 missing，且不得声称可进入 CR。` +
+    `对照 ${CHANGE_DIR}/specs/ 的 scenarios；除 happy-path 外，强制审计失败路径与边界（错误分支、空/越界输入、并发/竞态、网络失败与错误码、状态复位）。` +
+    `任何未覆盖 scenario（含失败路径）都必须列入 missing，且不得声称可进入 CR。` +
     `测试或实现存在缺陷时如实返回 smokePassed=false。`,
   { agentType: 'tester', schema: TESTER_SCHEMA, phase: '测试', label: 'tester' }
 )
@@ -260,4 +262,10 @@ if (!integration?.merged) {
   return { status: 'integration_failed', stage: 'integrate', integration, reason: '集成（归档/PR/合并）未完成' }
 }
 
+// ---------- ⑧ 结果（可审计可回溯，供 Leader 汇报与留档） ----------
+// 返回字段说明：
+//   tester.{covered,missing,risks,smokePassed} — 覆盖审计结果；missing 含失败路径未覆盖项
+//   cr.{rounds,result} — CR 轮次 + 每轮 result.{blockers,majors,minors} 各级问题清单
+//   verify.{pass,steps} — 验证步骤明细（step + status + detail，含搜索联动回归清单项）
+// 失败分支如实返回 test_failed / verify_failed / suspended / failed，不降级为 success。
 return { status: 'success', change: CHANGE, domain, architect, dev: devResults, tester, cr: { rounds, result: crResult }, verify, integration }
