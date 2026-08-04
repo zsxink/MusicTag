@@ -69,11 +69,11 @@ pub fn client() -> &'static reqwest::Client {
 /// `search_song(title, artist)`：五源并发搜索 + 打分去重（spec：单源 6s 超时，失败降级空列表）。
 pub async fn search_song(client: &reqwest::Client, title: &str, artist: &str) -> SearchResult {
     let sources: Vec<Box<dyn MusicSource>> = vec![
-        Box::new(netease::Netease),
-        Box::new(qqmusic::QqMusic),
-        Box::new(kugou::Kugou),
-        Box::new(lrclib::Lrclib),
-        Box::new(itunes::Itunes),
+        Box::new(netease::Netease::default()),
+        Box::new(qqmusic::QqMusic::default()),
+        Box::new(kugou::Kugou::default()),
+        Box::new(lrclib::Lrclib::default()),
+        Box::new(itunes::Itunes::default()),
     ];
     search_song_with_sources(client, title, artist, sources, SEARCH_TIMEOUT).await
 }
@@ -160,11 +160,11 @@ pub async fn search_source(
     artist: &str,
 ) -> Vec<SongCandidate> {
     let s: Box<dyn MusicSource> = match source {
-        MusicSourceId::Netease => Box::new(netease::Netease),
-        MusicSourceId::QqMusic => Box::new(qqmusic::QqMusic),
-        MusicSourceId::Kugou => Box::new(kugou::Kugou),
-        MusicSourceId::Lrclib => Box::new(lrclib::Lrclib),
-        MusicSourceId::Itunes => Box::new(itunes::Itunes),
+        MusicSourceId::Netease => Box::new(netease::Netease::default()),
+        MusicSourceId::QqMusic => Box::new(qqmusic::QqMusic::default()),
+        MusicSourceId::Kugou => Box::new(kugou::Kugou::default()),
+        MusicSourceId::Lrclib => Box::new(lrclib::Lrclib::default()),
+        MusicSourceId::Itunes => Box::new(itunes::Itunes::default()),
     };
     search_source_with(client, s, title, artist, SEARCH_TIMEOUT).await
 }
@@ -190,11 +190,11 @@ pub async fn fetch_lyric(
     id: &str,
 ) -> Option<String> {
     let s: Box<dyn MusicSource> = match source {
-        MusicSourceId::Netease => Box::new(netease::Netease),
-        MusicSourceId::QqMusic => Box::new(qqmusic::QqMusic),
-        MusicSourceId::Kugou => Box::new(kugou::Kugou),
-        MusicSourceId::Lrclib => Box::new(lrclib::Lrclib),
-        MusicSourceId::Itunes => Box::new(itunes::Itunes),
+        MusicSourceId::Netease => Box::new(netease::Netease::default()),
+        MusicSourceId::QqMusic => Box::new(qqmusic::QqMusic::default()),
+        MusicSourceId::Kugou => Box::new(kugou::Kugou::default()),
+        MusicSourceId::Lrclib => Box::new(lrclib::Lrclib::default()),
+        MusicSourceId::Itunes => Box::new(itunes::Itunes::default()),
     };
     s.fetch_lyric(client, id).await
 }
@@ -374,10 +374,35 @@ pub(crate) fn json_string(v: &serde_json::Value) -> Option<String> {
         .or_else(|| v.as_u64().map(|n| n.to_string()))
 }
 
+/// 测试共享工具：启动极简 HTTP 服务器（一次请求后关闭），返回 mock URL。
+///
+/// 各源「HTTP 非 2xx → Err 分支」回归测试（Tester 缺失项）与 `download_cover` 限流单测共用：
+/// 对每个连接读请求头后写回 `response` 字节，处理一个请求后关闭。
+#[cfg(test)]
+pub(crate) mod test_util {
+    use std::io::{Read, Write};
+
+    pub fn mock_http_once(response: Vec<u8>) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
+        let addr = listener.local_addr().expect("取本地端口");
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { continue };
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf);
+                let _ = s.write_all(&response);
+                let _ = s.flush();
+                break;
+            }
+        });
+        format!("http://{addr}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
+    use crate::service::searcher::test_util::mock_http_once;
 
     fn cand(source: MusicSourceId, id: &str, title: &str, artist: &str) -> SongCandidate {
         SongCandidate {
@@ -885,23 +910,6 @@ mod tests {
     }
 
     // ---- download_cover：5s 超时 + 12MB 限流 ----
-
-    /// 启动极简 HTTP 服务器：对每个连接读请求头后写回 `response` 字节，处理一个请求后关闭。
-    fn mock_http_once(response: Vec<u8>) -> String {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
-        let addr = listener.local_addr().expect("取本地端口");
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut s) = stream else { continue };
-                let mut buf = [0u8; 4096];
-                let _ = s.read(&mut buf);
-                let _ = s.write_all(&response);
-                let _ = s.flush();
-                break;
-            }
-        });
-        format!("http://{addr}")
-    }
 
     #[tokio::test]
     async fn download_cover_success_returns_bytes() {

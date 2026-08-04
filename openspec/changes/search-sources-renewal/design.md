@@ -21,6 +21,7 @@ MusicTag V1 的搜索后端（`src-tauri/src/service/searcher/`）三源并发�
 
 ### 1. 网易云搜索改走 linuxapi 转发 `/api/cloudsearch/pc`
 weapi 搜索路径 2026 起被风控空响应；本项目 `crypto::linuxapi` 已实现并用于取词（一直正常）。把搜索 body 改为 `{method:"POST", url:"https://music.163.com/api/cloudsearch/pc", params:{s,type:1,limit:10,offset:0}}` POST 到 `/api/linux/forward`。响应结构 `result.songs[]` 与 weapi 相同，**解析代码零改动**。
+**取词同样走 `/api/linux/forward` 转发 `/api/song/lyric`**：`{method:"POST", url:"https://music.163.com/api/song/lyric", params:{id, lv:-1, kv:-1, tv:-1}}`（spec「网易云加密」requirement）——live 实测直接 POST `/api/song/lyric?lv=-1&kv=-1&tv=-1` 返回 `{"code":400,"wrong params"}` 取词不可用，转发后 linuxapi forward 透传原 API 响应，`lrc.lyric` 解析不变。
 **为什么**：复用已稳定运行的 linuxapi 取词链路，**零新增加密代码**——`crypto::linuxapi` 已有已知向量单测锁定，风险最低。替代方案 weapi 补 cookie/csrf_token——无账号拿不到稳定 cookie，弃。
 
 ### 2. QQ 搜索改走 `client_search_cp` GET

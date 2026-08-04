@@ -4,7 +4,9 @@
 // - 搜索：POST `/api/linux/forward`，form `eparams` = `crypto::linuxapi(json!({"method":"POST",
 //   "url":"https://music.163.com/api/cloudsearch/pc","params":{"s":title,"type":1,"limit":10,"offset":0}}))`
 //   → 响应结构 `result.songs[]` 与 weapi 相同，解析代码零改动；
-// - 取词：POST `api/song/lyric?lv=-1&kv=-1&tv=-1`，linuxapi 加密 body `{ id, method:POST }` → `lrc.lyric`。
+// - 取词：同样 POST `/api/linux/forward`，form `eparams` = `crypto::linuxapi(lyric_payload)` 转发
+//   `/api/song/lyric`（`{method:"POST",url:...,params:{id,lv:-1,kv:-1,tv:-1}}`）→ `lrc.lyric`
+//   （linuxapi forward 透传原 API 响应，spec「网易云加密」）。
 // 单源失败一律降级为空列表 / None（不 panic、不影响其余源）。
 
 use crate::model::{MusicSourceId, SongCandidate};
@@ -12,7 +14,18 @@ use crate::service::searcher::{crypto, MusicSource};
 use async_trait::async_trait;
 use rand::Rng;
 
-pub struct Netease;
+pub struct Netease {
+    /// linuxapi 转发入口（搜索与取词共用 `/api/linux/forward`；Tester：HTTP 状态分支 mock 注入点）。
+    forward_url: String,
+}
+
+impl Default for Netease {
+    fn default() -> Self {
+        Self {
+            forward_url: FORWARD_URL.to_string(),
+        }
+    }
+}
 
 /// 随机浏览器 UA 列表（design.md D2：伪装降低风控，每次请求随机取一个）。
 const USER_AGENTS: &[&str] = &[
@@ -27,8 +40,8 @@ fn random_ua() -> &'static str {
     USER_AGENTS[rng.random_range(0..USER_AGENTS.len())]
 }
 
-const SEARCH_URL: &str = "https://music.163.com/api/linux/forward";
-const LYRIC_URL: &str = "https://music.163.com/api/song/lyric?lv=-1&kv=-1&tv=-1";
+/// linuxapi 转发入口（搜索与取词共用；Default 字段来源）。
+const FORWARD_URL: &str = "https://music.163.com/api/linux/forward";
 
 /// 网易云搜索 linuxapi 转发的目标接口（`/api/cloudsearch/pc`，响应结构与 weapi 相同）。
 const CLOUDSEARCH_URL: &str = "https://music.163.com/api/cloudsearch/pc";
@@ -54,7 +67,7 @@ impl MusicSource for Netease {
         // 与 `crypto::linuxapi` 已知向量单测锁定，search-sources-renewal D1）。
         let eparams = crypto::linuxapi(&search_payload(title));
         let resp = match client
-            .post(SEARCH_URL)
+            .post(&self.forward_url)
             .header("User-Agent", random_ua())
             .header("Referer", NETEASE_REFERER)
             .header("Cookie", NETEASE_COOKIE)
@@ -81,11 +94,12 @@ impl MusicSource for Netease {
     }
 
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String> {
-        // linuxapi：AES-ECB 加密 `{ id, method:POST }`（lv/kv/tv 走 URL query）
-        let eparams =
-            crypto::linuxapi(&serde_json::json!({"id": id, "method": "POST"}).to_string());
+        // linuxapi 转发 `/api/song/lyric`：form `eparams` = AES-ECB 加密
+        // `{method:"POST",url:"https://music.163.com/api/song/lyric",params:{id,lv,kv,tv}}`
+        // （取词同样走 `/api/linux/forward`，spec「网易云加密」）。
+        let eparams = crypto::linuxapi(&lyric_payload(id));
         let resp = client
-            .post(LYRIC_URL)
+            .post(&self.forward_url)
             .header("User-Agent", random_ua())
             .header("Referer", NETEASE_REFERER)
             .header("Cookie", NETEASE_COOKIE)
@@ -106,6 +120,19 @@ fn search_payload(title: &str) -> String {
         "method": "POST",
         "url": CLOUDSEARCH_URL,
         "params": {"s": title, "type": 1, "limit": 10, "offset": 0},
+    })
+    .to_string()
+}
+
+/// 构建 linuxapi 转发取词 payload（`{ method, url, params }`，spec「网易云加密」）。
+///
+/// `params` 带 `id`/`lv`/`kv`/`tv`（-1 = 全取）。linuxapi forward 透传原 `/api/song/lyric`
+/// 响应，解析 `lrc.lyric` 与直接调用一致。
+fn lyric_payload(id: &str) -> String {
+    serde_json::json!({
+        "method": "POST",
+        "url": "https://music.163.com/api/song/lyric",
+        "params": {"id": id, "lv": -1, "kv": -1, "tv": -1},
     })
     .to_string()
 }
@@ -160,6 +187,7 @@ fn parse_lyric_response(json: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service::searcher::test_util::mock_http_once;
 
     #[test]
     fn search_payload_forwards_to_cloudsearch_via_linuxapi() {
@@ -176,6 +204,28 @@ mod tests {
         let eparams = crypto::linuxapi(&search_payload("晴天"));
         assert!(eparams.len().is_multiple_of(2));
         assert!(eparams.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn lyric_payload_forwards_to_song_lyric_via_linuxapi() {
+        // spec「网易云加密」：取词 payload 走 linuxapi 转发 `/api/song/lyric`——method=POST、
+        // url 指向 `/api/song/lyric`、params 带 id/lv/kv/tv（-1 = 全取）。
+        let payload: serde_json::Value = serde_json::from_str(&lyric_payload("33875191")).unwrap();
+        assert_eq!(payload["method"], "POST");
+        assert_eq!(payload["url"], "https://music.163.com/api/song/lyric");
+        assert_eq!(payload["params"]["id"], "33875191");
+        assert_eq!(payload["params"]["lv"], -1);
+        assert_eq!(payload["params"]["kv"], -1);
+        assert_eq!(payload["params"]["tv"], -1);
+        // linuxapi 加密产物形状：偶数长度 hex 大写（AES-ECB 密文 hex 大写）
+        let eparams = crypto::linuxapi(&lyric_payload("33875191"));
+        assert!(eparams.len().is_multiple_of(2));
+        assert!(
+            eparams
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+            "eparams 应为大写 hex，实际: {eparams}"
+        );
     }
 
     #[test]
@@ -278,5 +328,17 @@ mod tests {
             None
         );
         assert_eq!(parse_lyric_response(&serde_json::json!({})), None);
+    }
+
+    #[tokio::test]
+    async fn http_error_status_returns_err() {
+        // Tester 回归：各源 HTTP 非 2xx → Err 分支（源失败降级），mock server 404。
+        // 构造源指向 mock URL（forward_url），search 返回 Err 且消息含 404。
+        let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec();
+        let url = mock_http_once(response);
+        let netease = Netease { forward_url: url };
+        let client = reqwest::Client::new();
+        let err = netease.search(&client, "晴天", "周杰伦").await.unwrap_err();
+        assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
     }
 }

@@ -16,14 +16,27 @@ use crate::service::searcher::{crypto, json_string, MusicSource};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
-pub struct Kugou;
+pub struct Kugou {
+    /// complexsearch 搜索接口（Tester：HTTP 状态分支 mock 注入点）。
+    search_url: String,
+    /// lyrics.kugou.com/search 取词候选接口。
+    lyric_search_url: String,
+    /// lyrics.kugou.com/download 取词下载接口。
+    lyric_download_url: String,
+}
+
+impl Default for Kugou {
+    fn default() -> Self {
+        Self {
+            search_url: "http://complexsearch.kugou.com/v2/search/song".to_string(),
+            lyric_search_url: "http://lyrics.kugou.com/search".to_string(),
+            lyric_download_url: "http://lyrics.kugou.com/download".to_string(),
+        }
+    }
+}
 
 /// 酷狗复杂搜索接口签名 secret（search-sources-renewal D3）。
 const SIGN_SECRET: &str = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt";
-
-const SEARCH_URL: &str = "http://complexsearch.kugou.com/v2/search/song";
-const LYRIC_SEARCH_URL: &str = "http://lyrics.kugou.com/search";
-const LYRIC_DOWNLOAD_URL: &str = "http://lyrics.kugou.com/download";
 
 const KUGOU_UA: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -107,8 +120,8 @@ impl MusicSource for Kugou {
         let mut params = search_params(title);
         let sig = signature(&params);
         params.push(("signature".to_string(), sig));
-        let url =
-            reqwest::Url::parse_with_params(SEARCH_URL, &params).expect("构造酷狗搜索 URL 失败");
+        let url = reqwest::Url::parse_with_params(&self.search_url, &params)
+            .expect("构造酷狗搜索 URL 失败");
         let resp = match client
             .get(url)
             .header("User-Agent", KUGOU_UA)
@@ -137,7 +150,7 @@ impl MusicSource for Kugou {
         // 两步取词：/search（hash 即候选 FileHash，实测单独即可命中）拿候选 id+accesskey →
         // /download 取 base64 LRC。惰性拉取语义：点选才走这两次请求。
         let search_url = reqwest::Url::parse_with_params(
-            LYRIC_SEARCH_URL,
+            &self.lyric_search_url,
             &[
                 ("ver", "1"),
                 ("man", "yes"),
@@ -157,7 +170,7 @@ impl MusicSource for Kugou {
         let json: serde_json::Value = resp.json().await.ok()?;
         let (lyric_id, accesskey) = parse_lyric_search(&json)?;
         let dl_url = reqwest::Url::parse_with_params(
-            LYRIC_DOWNLOAD_URL,
+            &self.lyric_download_url,
             &[
                 ("ver", "1"),
                 ("client", "pc"),
@@ -238,6 +251,7 @@ fn parse_lyric_download(json: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service::searcher::test_util::mock_http_once;
 
     #[test]
     fn signature_matches_known_vector_simple() {
@@ -439,5 +453,21 @@ mod tests {
             parse_lyric_download(&serde_json::json!({"content": "@@@not-base64@@@"})),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn http_error_status_returns_err() {
+        // Tester 回归：各源 HTTP 非 2xx → Err 分支（源失败降级），mock server 404。
+        // 构造源指向 mock URL（search_url），search 返回 Err 且消息含 404。
+        let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec();
+        let url = mock_http_once(response);
+        let kugou = Kugou {
+            search_url: url,
+            lyric_search_url: String::new(),
+            lyric_download_url: String::new(),
+        };
+        let client = reqwest::Client::new();
+        let err = kugou.search(&client, "晴天", "周杰伦").await.unwrap_err();
+        assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
     }
 }

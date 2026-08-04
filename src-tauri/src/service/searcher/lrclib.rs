@@ -11,13 +11,24 @@ use crate::model::{MusicSourceId, SongCandidate};
 use crate::service::searcher::MusicSource;
 use async_trait::async_trait;
 
-pub struct Lrclib;
+pub struct Lrclib {
+    /// `/api/search` 搜索接口（Tester：HTTP 状态分支 mock 注入点）。
+    search_url: String,
+    /// `/api/get/{id}` 取词接口 base。
+    lyric_url_base: String,
+}
+
+impl Default for Lrclib {
+    fn default() -> Self {
+        Self {
+            search_url: "https://lrclib.net/api/search".to_string(),
+            lyric_url_base: "https://lrclib.net/api/get".to_string(),
+        }
+    }
+}
 
 /// LRCLIB 描述性 User-Agent（公开约定，非浏览器伪装；请求级覆盖共享 client 的默认 UA）。
 const LRCLIB_UA: &str = "MusicTag/1.0 (search)";
-
-const SEARCH_URL: &str = "https://lrclib.net/api/search";
-const LYRIC_URL_BASE: &str = "https://lrclib.net/api/get";
 
 #[async_trait]
 impl MusicSource for Lrclib {
@@ -32,7 +43,7 @@ impl MusicSource for Lrclib {
         artist: &str,
     ) -> Result<Vec<SongCandidate>, String> {
         let url = reqwest::Url::parse_with_params(
-            SEARCH_URL,
+            &self.search_url,
             &[("track_name", title), ("artist_name", artist)],
         )
         .expect("构造 LRCLIB 搜索 URL 失败");
@@ -52,7 +63,7 @@ impl MusicSource for Lrclib {
 
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String> {
         // `/api/get/{id}` 一步取词：syncedLyrics 优先，空回退 plainLyrics。
-        let url = format!("{LYRIC_URL_BASE}/{id}");
+        let url = format!("{}/{}", self.lyric_url_base, id);
         let resp = client
             .get(&url)
             .header("User-Agent", LRCLIB_UA)
@@ -98,6 +109,7 @@ fn parse_lyric_response(json: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service::searcher::test_util::mock_http_once;
 
     #[test]
     fn parses_search_response_full_fields() {
@@ -165,5 +177,20 @@ mod tests {
             parse_lyric_response(&serde_json::json!({"syncedLyrics": null, "plainLyrics": null})),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn http_error_status_returns_err() {
+        // Tester 回归：各源 HTTP 非 2xx → Err 分支（源失败降级），mock server 404。
+        // 构造源指向 mock URL（search_url），search 返回 Err 且消息含 404。
+        let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec();
+        let url = mock_http_once(response);
+        let lrclib = Lrclib {
+            search_url: url,
+            lyric_url_base: String::new(),
+        };
+        let client = reqwest::Client::new();
+        let err = lrclib.search(&client, "晴天", "周杰伦").await.unwrap_err();
+        assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
     }
 }

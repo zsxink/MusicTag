@@ -12,9 +12,18 @@ use crate::model::{MusicSourceId, SongCandidate};
 use crate::service::searcher::MusicSource;
 use async_trait::async_trait;
 
-pub struct Itunes;
+pub struct Itunes {
+    /// `/search` 搜索接口（Tester：HTTP 状态分支 mock 注入点）。
+    search_url: String,
+}
 
-const SEARCH_URL: &str = "https://itunes.apple.com/search";
+impl Default for Itunes {
+    fn default() -> Self {
+        Self {
+            search_url: "https://itunes.apple.com/search".to_string(),
+        }
+    }
+}
 
 #[async_trait]
 impl MusicSource for Itunes {
@@ -32,7 +41,7 @@ impl MusicSource for Itunes {
         // Url::parse_with_params 保证中文 term 正确 URL 编码。
         let term = format!("{title} {artist}").trim().to_string();
         let url = reqwest::Url::parse_with_params(
-            SEARCH_URL,
+            &self.search_url,
             &[
                 ("term", term.as_str()),
                 ("country", "CN"),
@@ -96,6 +105,7 @@ fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service::searcher::test_util::mock_http_once;
 
     #[test]
     fn parses_search_response_full_fields_and_upgrades_cover() {
@@ -135,7 +145,7 @@ mod tests {
         // spec「无歌词降级」：iTunes 无歌词，`fetch_lyric` 恒 None（前端 C2 换其他源取词；
         // iTunes 不入 C2_SOURCE_ORDER，点选其候选会立即触发换源）。
         let client = reqwest::Client::new();
-        let itunes = Itunes;
+        let itunes = Itunes::default();
         assert_eq!(itunes.fetch_lyric(&client, "1584471135").await, None);
         assert_eq!(itunes.fetch_lyric(&client, "").await, None);
     }
@@ -157,5 +167,17 @@ mod tests {
             songs[0].cover_url.as_deref(),
             Some("https://example.com/cover.jpg")
         );
+    }
+
+    #[tokio::test]
+    async fn http_error_status_returns_err() {
+        // Tester 回归：各源 HTTP 非 2xx → Err 分支（源失败降级），mock server 404。
+        // 构造源指向 mock URL（search_url），search 返回 Err 且消息含 404。
+        let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec();
+        let url = mock_http_once(response);
+        let itunes = Itunes { search_url: url };
+        let client = reqwest::Client::new();
+        let err = itunes.search(&client, "晴天", "周杰伦").await.unwrap_err();
+        assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
     }
 }
