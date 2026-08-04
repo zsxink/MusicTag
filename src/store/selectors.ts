@@ -6,15 +6,19 @@ import type { MusicSourceId, SongSummary } from '../api/types'
 import { fileName, fileNameStem } from '../lib/path'
 import { songStore } from './song'
 
-/** 音乐来源平台展示文案（候选来源标签 / badge 平台来源，design §6.4/6.5）。 */
+/** 音乐来源平台展示文案（候选来源标签 / badge 平台来源，design §6.4/6.5，search-sources-renewal D6）。 */
 export function sourceLabel(source: MusicSourceId): string {
   switch (source) {
     case 'netease':
       return '网易云'
     case 'qqmusic':
       return 'QQ音乐'
-    case 'migu':
-      return '咪咕'
+    case 'kugou':
+      return '酷狗'
+    case 'lrclib':
+      return 'LRCLIB'
+    case 'itunes':
+      return 'iTunes'
   }
 }
 

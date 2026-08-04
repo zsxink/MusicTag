@@ -9,7 +9,9 @@ const { mockSearchSongs, mockFetchLyric, mockSearchSource } = vi.hoisted(() => (
     source_stats: [
       ['netease', 0],
       ['qqmusic', 0],
-      ['migu', 0],
+      ['kugou', 0],
+      ['lrclib', 0],
+      ['itunes', 0],
     ],
     all_failed: false,
   })),
@@ -104,9 +106,9 @@ describe('LyricPanel — 来源 badge 三态（design.md D8 文案定稿）', ()
 
   it('lyricSourcePlatform 覆盖内嵌来源显示平台（点选平台优先于原来源）', () => {
     openSong(makeSong({ lyrics_source: 'embedded', lyrics: '[00:00.00] 内嵌' }))
-    songStore.lyricSourcePlatform = 'migu'
+    songStore.lyricSourcePlatform = 'kugou'
     const w = mount(LyricPanel)
-    expect(w.find('.badge').text()).toBe('来源: 咪咕')
+    expect(w.find('.badge').text()).toBe('来源: 酷狗')
   })
 })
 
@@ -152,7 +154,9 @@ describe('LyricPanel — 歌词候选区（v1-search-ui D8：status/列表/空�
       source_stats: [
         ['netease', 0],
         ['qqmusic', 0],
-        ['migu', 0],
+        ['kugou', 0],
+        ['lrclib', 0],
+        ['itunes', 0],
       ],
     })
     openSong()
@@ -267,7 +271,9 @@ describe('LyricPanel — 歌词候选区（v1-search-ui D8：status/列表/空�
       source_stats: [
         ['netease', 1],
         ['qqmusic', 0],
-        ['migu', 0],
+        ['kugou', 0],
+        ['lrclib', 0],
+        ['itunes', 0],
       ],
     })
 

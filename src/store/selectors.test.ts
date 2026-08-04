@@ -69,8 +69,14 @@ describe('store/selectors — 纯展示派生（spec: 搜索过滤 + 文件名�
     it('qqmusic → QQ音乐', () => {
       expect(sourceLabel('qqmusic')).toBe('QQ音乐')
     })
-    it('migu → 咪咕', () => {
-      expect(sourceLabel('migu')).toBe('咪咕')
+    it('kugou → 酷狗', () => {
+      expect(sourceLabel('kugou')).toBe('酷狗')
+    })
+    it('lrclib → LRCLIB', () => {
+      expect(sourceLabel('lrclib')).toBe('LRCLIB')
+    })
+    it('itunes → iTunes', () => {
+      expect(sourceLabel('itunes')).toBe('iTunes')
     })
   })
 })

@@ -99,7 +99,7 @@ interface SongEditor {
   isOffline: boolean
   /** 本首已判定过「选中即搜」（D1 仅一次；删除内容不重算，切歌由 resetSearchState 清零）。 */
   searchedThisSong: boolean
-  /** 点选歌词候选的来源平台（badge 展示「来源: 网易云 / QQ音乐 / 咪咕」；null = 未点选，沿用 lyricsSource）。 */
+  /** 点选歌词候选的来源平台（badge 展示「来源: 网易云 / QQ音乐 / 酷狗 / LRCLIB / iTunes」；null = 未点选，沿用 lyricsSource）。 */
   lyricSourcePlatform: MusicSourceId | null
   /** C2 全源取词失败 → 空态「未找到匹配的歌词，可手动粘贴」。 */
   lyricFetchEmpty: boolean
@@ -349,14 +349,14 @@ function resetSearchState(): void {
  * 有缺失才搜 → 每类捕获独立序号（`++lyricSearchSeq` / `++coverSearchSeq`，过期守卫，v1-search-fixes
  * 按 kind 分离防跨类串扰）→ searching → 分桶填充 → done。
  *
- * resolve 后 `result.all_failed`（后端 v1-search-fixes：三源**全部网络失败/超时**）→ `isOffline=true`
+ * resolve 后 `result.all_failed`（后端 search-sources-renewal D7：五源**全部网络失败/超时**）→ `isOffline=true`
  * （会话级、sticky，仅自动搜索判定 D3）；IPC reject 按全源失败同样标记（防御）。仅将**本次实际
  * 搜索过且结果仍有效的那一类** searchState 归 idle（修复离线分支误归两类、未搜类也显示离线提示）。
- * 冷门歌「三源成功但空」不再判离线（all_failed=false，FR-8.4a 语义）。IPC 依赖以 `searchSongs`
+ * 冷门歌「五源成功但空」不再判离线（all_failed=false，FR-8.4a 语义）。IPC 依赖以 `searchSongs`
  * 注入（默认 api/search.ts，测试注入桩）。
  *
  * 裸文件守卫（CR：避免离线误判）：`title.trim() === ''` 直接 return——后端 `search_song`
- * 对空 title 无短路守卫（空关键字三源很可能全 0），每次选中白发一次必为空的 3 源并发搜索。
+ * 对空 title 无短路守卫（空关键字五源很可能全 0），每次选中白发一次必为空的 5 源并发搜索。
  * D1 设计明确此类应走手动按钮（FR-8.13：填歌名后手动搜）。故裸文件不自动搜、也不置
  * `searchedThisSong`（尚未「判定过」，与 null/readonly/offline 守卫同为前置守卫语义）。
  */
@@ -389,7 +389,7 @@ export async function autoSearchOnSelect(
       raw.coverSearchState = 'done'
     }
     if (result.all_failed) {
-      // 后端 D8/v1-search-fixes：三源全部失败 → 离线（冷门歌正常空结果 all_failed=false 不触发）
+      // 后端 search-sources-renewal D7：五源全部失败 → 离线（冷门歌正常空结果 all_failed=false 不触发）
       raw.isOffline = true
       if (lyricValid) raw.lyricSearchState = 'idle'
       if (coverValid) raw.coverSearchState = 'idle'
@@ -446,8 +446,8 @@ export async function manualSearch(
   }
 }
 
-/** C2 换源固定顺序（netease → qqmusic → migu），跳过原源。 */
-const C2_SOURCE_ORDER: MusicSourceId[] = ['netease', 'qqmusic', 'migu']
+/** C2 换源固定顺序（netease → qqmusic → kugou → lrclib，search-sources-renewal D9：iTunes 无歌词不入链），跳过原源。 */
+const C2_SOURCE_ORDER: MusicSourceId[] = ['netease', 'qqmusic', 'kugou', 'lrclib']
 
 /**
  * 归一化（对齐 Rust `searcher::norm`：trim + 全角转半角 + 小写），供 C2 候选身份校验。
