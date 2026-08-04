@@ -53,4 +53,6 @@ export interface SongCandidate {
 export interface SearchResult {
   songs: SongCandidate[]
   source_stats: Array<[MusicSourceId, number]> // 各家返回条数
+  /** 三源全部失败（网络错误/超时）→ true；至少一源成功（含正常空结果）→ false。前端仅在 true 时判定会话离线（FR-8.4a）。 */
+  all_failed: boolean
 }

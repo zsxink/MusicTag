@@ -9,6 +9,7 @@ import { reactive } from 'vue'
 import { downloadCover as defaultDownloadCover } from '../api/search'
 import { fetchLyric as defaultFetchLyric } from '../api/search'
 import { searchSongs as defaultSearchSongs } from '../api/search'
+import { searchSource as defaultSearchSource } from '../api/search'
 import { renameSong as defaultRename } from '../api/songs'
 import { saveSong as defaultSave } from '../api/songs'
 import type {
@@ -102,8 +103,12 @@ interface SongEditor {
   lyricSourcePlatform: MusicSourceId | null
   /** C2 全源取词失败 → 空态「未找到匹配的歌词，可手动粘贴」。 */
   lyricFetchEmpty: boolean
-  /** 搜索序号（D2.6 过期守卫）：每次搜索捕获 mySeq=++searchSeq，resolve 时 mySeq≠searchSeq 丢弃结果。 */
-  searchSeq: number
+  /** 歌词搜索序号（D2.6 过期守卫，v1-search-fixes 按 kind 分离）：每次歌词搜索捕获
+   *  `mySeq=++lyricSearchSeq`，resolve 时 `mySeq≠lyricSearchSeq` 丢弃结果。
+   *  与封面计数器分离——避免任一面板搜索作废另一面板在途结果（跨 kind 串扰卡死）。 */
+  lyricSearchSeq: number
+  /** 封面搜索序号（同上，独立于歌词）。 */
+  coverSearchSeq: number
 }
 
 /**
@@ -275,7 +280,8 @@ const raw = reactive<SongEditor>({
   searchedThisSong: false,
   lyricSourcePlatform: null,
   lyricFetchEmpty: false,
-  searchSeq: 0,
+  lyricSearchSeq: 0,
+  coverSearchSeq: 0,
 })
 
 /**
@@ -320,9 +326,10 @@ export async function open(path: string, loadSong: (path: string) => Promise<Son
 
 /**
  * 候选生命周期 = 当前歌曲（D5）：清两类候选、searchState 归 idle、searchedThisSong=false、
- * `lyricSourcePlatform=null`、`lyricFetchEmpty=false`、`searchSeq++`（作废在途搜索——
- * 切歌后旧搜索结果 resolve 时 mySeq≠searchSeq 即丢弃，D2.6）。`isOffline` 不清（会话级）。
- * open（成功+失败分支）与 activateFolder 均调用；未点选候选切歌直接丢弃、无弹窗（FR-8.14）。
+ * `lyricSourcePlatform=null`、`lyricFetchEmpty=false`、`lyricSearchSeq++` 与 `coverSearchSeq++`
+ * （作废在途搜索——切歌后旧搜索结果 resolve 时 mySeq≠对应 kind 序号即丢弃，D2.6）。
+ * `isOffline` 不清（会话级）。open（成功+失败分支）与 activateFolder 均调用；
+ * 未点选候选切歌直接丢弃、无弹窗（FR-8.14）。
  */
 function resetSearchState(): void {
   raw.lyricCandidates = []
@@ -332,23 +339,26 @@ function resetSearchState(): void {
   raw.searchedThisSong = false
   raw.lyricSourcePlatform = null
   raw.lyricFetchEmpty = false
-  raw.searchSeq++
+  raw.lyricSearchSeq++
+  raw.coverSearchSeq++
 }
 
 /**
  * 选中即搜（D1）：守卫 current 非空 / !readonly / !searchedThisSong / !isOffline →
- * 判定只补缺失（`lyrics==='' && lyricsSource!=='sidecar'` 搜歌词；`cover===null` 搜封面）→
- * 有缺失才搜 → 捕获 `mySeq=++searchSeq`（过期守卫）→ searching → 分桶填充 → done。
+ * 判定只补缺失（`lyrics.trim()==='' && lyricsSource!=='sidecar'` 搜歌词；`cover===null` 搜封面）→
+ * 有缺失才搜 → 每类捕获独立序号（`++lyricSearchSeq` / `++coverSearchSeq`，过期守卫，v1-search-fixes
+ * 按 kind 分离防跨类串扰）→ searching → 分桶填充 → done。
  *
- * resolve 后 `allEmpty`（songs 空 && source_stats 全 0）→ `isOffline=true`（会话级、sticky，
- * 仅自动搜索判定 D3）；IPC reject 按全源失败同样标记（防御）。搜索态归 idle →
- * 候选区显示「离线：仅手动填写」。IPC 依赖以 `searchSongs` 注入（默认 api/search.ts，测试注入桩）。
+ * resolve 后 `result.all_failed`（后端 v1-search-fixes：三源**全部网络失败/超时**）→ `isOffline=true`
+ * （会话级、sticky，仅自动搜索判定 D3）；IPC reject 按全源失败同样标记（防御）。仅将**本次实际
+ * 搜索过且结果仍有效的那一类** searchState 归 idle（修复离线分支误归两类、未搜类也显示离线提示）。
+ * 冷门歌「三源成功但空」不再判离线（all_failed=false，FR-8.4a 语义）。IPC 依赖以 `searchSongs`
+ * 注入（默认 api/search.ts，测试注入桩）。
  *
  * 裸文件守卫（CR：避免离线误判）：`title.trim() === ''` 直接 return——后端 `search_song`
- * 对空 title 无短路守卫（source_stats 记原始候选条数，空关键字三源很可能全 0 → allEmpty →
- * 误判整会话离线，D3 sticky 至重启），且每次选中都白发一次必为空的 3 源并发搜索。D1 设计
- * 明确此类应走手动按钮（FR-8.13：填歌名后手动搜）。故裸文件不自动搜、也不置 `searchedThisSong`
- * （尚未「判定过」，与 null/readonly/offline 守卫同为前置守卫语义）。
+ * 对空 title 无短路守卫（空关键字三源很可能全 0），每次选中白发一次必为空的 3 源并发搜索。
+ * D1 设计明确此类应走手动按钮（FR-8.13：填歌名后手动搜）。故裸文件不自动搜、也不置
+ * `searchedThisSong`（尚未「判定过」，与 null/readonly/offline 守卫同为前置守卫语义）。
  */
 export async function autoSearchOnSelect(
   searchSongs: (title: string, artist: string) => Promise<SearchResult> = defaultSearchSongs,
@@ -357,34 +367,40 @@ export async function autoSearchOnSelect(
   if (cur === null || raw.readonly || raw.searchedThisSong || raw.isOffline) return
   if (cur.title.trim() === '') return // 裸文件（title 空，FR-8.13）：不自动搜，避免空搜索 + 离线误判；填歌名后走手动按钮
   raw.searchedThisSong = true // 本首已判定过（删除内容后 flag 不重算，切歌才清零）
-  const needLyrics = cur.lyrics === '' && raw.lyricsSource !== 'sidecar'
+  const needLyrics = cur.lyrics.trim() === '' && raw.lyricsSource !== 'sidecar'
   const needCover = cur.cover === null
   if (!needLyrics && !needCover) return // 已有内容 → 不搜（候选区保持 idle）
-  const mySeq = ++raw.searchSeq
+  const lyricSeq = needLyrics ? ++raw.lyricSearchSeq : null
+  const coverSeq = needCover ? ++raw.coverSearchSeq : null
   if (needLyrics) raw.lyricSearchState = 'searching'
   if (needCover) raw.coverSearchState = 'searching'
   try {
     const result = await searchSongs(cur.title, cur.artist) // 一次调用同时喂两类候选（惰性拉取）
-    if (mySeq !== raw.searchSeq) return // 切歌/二次搜索后旧结果不得覆盖新状态
-    if (needLyrics) {
+    // 每类独立校验过期：任一类被新搜索/切歌作废，只丢弃该类，不影响仍有效的那类。
+    const lyricValid = lyricSeq !== null && raw.lyricSearchSeq === lyricSeq
+    const coverValid = coverSeq !== null && raw.coverSearchSeq === coverSeq
+    if (!lyricValid && !coverValid) return
+    if (lyricValid) {
       raw.lyricCandidates = result.songs
       raw.lyricSearchState = 'done'
     }
-    if (needCover) {
+    if (coverValid) {
       raw.coverCandidates = result.songs.filter((s) => s.cover_url !== null)
       raw.coverSearchState = 'done'
     }
-    const allEmpty = result.songs.length === 0 && result.source_stats.every(([, n]) => n === 0)
-    if (allEmpty) {
-      raw.isOffline = true // 后端 D8：三源全 0 → 前端判定离线
-      raw.lyricSearchState = 'idle'
-      raw.coverSearchState = 'idle'
+    if (result.all_failed) {
+      // 后端 D8/v1-search-fixes：三源全部失败 → 离线（冷门歌正常空结果 all_failed=false 不触发）
+      raw.isOffline = true
+      if (lyricValid) raw.lyricSearchState = 'idle'
+      if (coverValid) raw.coverSearchState = 'idle'
     }
   } catch {
-    if (mySeq !== raw.searchSeq) return
+    const lyricValid = lyricSeq !== null && raw.lyricSearchSeq === lyricSeq
+    const coverValid = coverSeq !== null && raw.coverSearchSeq === coverSeq
+    if (!lyricValid && !coverValid) return
     raw.isOffline = true // IPC reject 按全源失败同样标记（防御）
-    raw.lyricSearchState = 'idle'
-    raw.coverSearchState = 'idle'
+    if (lyricValid) raw.lyricSearchState = 'idle'
+    if (coverValid) raw.coverSearchState = 'idle'
   }
 }
 
@@ -401,14 +417,16 @@ export async function manualSearch(
 ): Promise<void> {
   const cur = raw.current
   if (cur === null || raw.readonly) return
-  const mySeq = ++raw.searchSeq // 并发守卫：搜索中重复点按钮重搜 → 旧结果作废
+  // 并发守卫（v1-search-fixes 按 kind 分离）：只自增本类序号——搜索中重复点本类按钮重搜
+  // → 旧结果作废；不再误作废另一类在途搜索（修复跨 kind 串扰卡死）。
+  const mySeq = kind === 'lyrics' ? ++raw.lyricSearchSeq : ++raw.coverSearchSeq
   if (kind === 'lyrics') {
     raw.lyricSearchState = 'searching'
     raw.lyricFetchEmpty = false // 新搜索作废上次 C2 全源失败空态（避免残留旧空态遮蔽新候选）
   } else raw.coverSearchState = 'searching'
   try {
     const result = await searchSongs(cur.title, cur.artist)
-    if (mySeq !== raw.searchSeq) return
+    if (kind === 'lyrics' ? raw.lyricSearchSeq !== mySeq : raw.coverSearchSeq !== mySeq) return
     if (kind === 'lyrics') {
       raw.lyricCandidates = result.songs
       raw.lyricSearchState = 'done'
@@ -417,7 +435,7 @@ export async function manualSearch(
       raw.coverSearchState = 'done'
     }
   } catch {
-    if (mySeq !== raw.searchSeq) return
+    if (kind === 'lyrics' ? raw.lyricSearchSeq !== mySeq : raw.coverSearchSeq !== mySeq) return
     if (kind === 'lyrics') {
       raw.lyricCandidates = []
       raw.lyricSearchState = 'done'
@@ -432,38 +450,74 @@ export async function manualSearch(
 const C2_SOURCE_ORDER: MusicSourceId[] = ['netease', 'qqmusic', 'migu']
 
 /**
+ * 归一化（对齐 Rust `searcher::norm`：trim + 全角转半角 + 小写），供 C2 候选身份校验。
+ * 与后端打分归一化保持同规则，避免前后端判定不一致。
+ */
+function normalizeForMatch(s: string): string {
+  return s
+    .trim()
+    .split('')
+    .map((ch) => {
+      const code = ch.charCodeAt(0)
+      if (code === 0x3000) return ' ' // 全角空格
+      if (code >= 0xff01 && code <= 0xff5e) return String.fromCharCode(code - 0xfee0)
+      return ch
+    })
+    .join('')
+    .toLowerCase()
+}
+
+/** C2：在单源原始候选中找「归一化 title/artist 与点选候选一致」的那条（防「同名不同歌」）。 */
+function findSameSong(list: SongCandidate[], cand: SongCandidate): SongCandidate | undefined {
+  const t = normalizeForMatch(cand.title)
+  const a = normalizeForMatch(cand.artist)
+  return list.find(
+    (c) => normalizeForMatch(c.title) === t && normalizeForMatch(c.artist) === a,
+  )
+}
+
+/**
  * 点选歌词候选（D4）：`fetchLyric(cand.source, cand.id)` 成功 → `current.lyrics` 填入 +
  * `lyricSourcePlatform = cand.source`（badge 显示平台，dirty 翻转，仍可编辑）。
  * None → C2 换源：以 **cand 自身 title/artist**（点选那首歌的身份，非可能被编辑的 current）
- * 重搜一次，按固定顺序跳过 `cand.source` 取该源第一个候选 `fetchLyric`；成功填 + badge=该源；
- * 全源失败 → `lyricFetchEmpty=true`（空态，不降级到低分候选）。
- * 已切歌（searchSeq 变化）→ 结果丢弃不应用。IPC 依赖以 `fetchLyric` / `searchSongs` 注入。
+ * 对每家剩余源走单源 `searchSource`（v1-search-fixes：绕过聚合去重——聚合会把同曲多源候选
+ * 折叠成一条，导致换源找不到其他源），并按归一化 title/artist **身份校验**（防 FR-8.8a 明令
+ * 禁止的「同名不同歌」）后 `fetchLyric`；成功填 + badge=该源；全源失败 → `lyricFetchEmpty=true`
+ * （空态，不降级到低分候选）。已切歌（lyricSearchSeq 变化）→ 结果丢弃不应用。
+ * IPC 依赖以 `fetchLyric` / `searchSource` 注入。
  */
 export async function pickLyricCandidate(
   cand: SongCandidate,
   fetchLyric: (source: MusicSourceId, id: string) => Promise<string | null> = defaultFetchLyric,
-  searchSongs: (title: string, artist: string) => Promise<SearchResult> = defaultSearchSongs,
+  searchSource: (source: MusicSourceId, title: string, artist: string) => Promise<SongCandidate[]> = defaultSearchSource,
 ): Promise<void> {
   if (raw.readonly || raw.current === null) return
-  const mySeq = raw.searchSeq // 当前歌曲身份（切歌 resetSearchState 自增 → 过期丢弃）
+  const mySeq = raw.lyricSearchSeq // 当前歌曲身份（切歌 resetSearchState 自增 → 过期丢弃）
   const text = await fetchLyric(cand.source, cand.id)
-  if (raw.searchSeq !== mySeq) return
+  if (raw.lyricSearchSeq !== mySeq) return
   if (text !== null && text !== undefined) {
     raw.current.lyrics = text
     raw.lyricSourcePlatform = cand.source
     raw.lyricFetchEmpty = false
     return
   }
-  // C2：取词 None → 换另一家源重试同一首歌（不降级到低分候选）
+  // C2：取词 None → 换另一家源重试同一首歌（不降级到低分候选）。
+  // 剩余源无顺序依赖，`searchSource` 并行发起（最坏 6s 而非串行 12s）；命中仍按固定序。
   try {
-    const retry = await searchSongs(cand.title, cand.artist)
-    if (raw.searchSeq !== mySeq) return
-    for (const source of C2_SOURCE_ORDER) {
-      if (source === cand.source) continue // 跳过原源
-      const c = retry.songs.find((x) => x.source === source)
+    const remaining = C2_SOURCE_ORDER.filter((source) => source !== cand.source) // 跳过原源
+    const lists = await Promise.all(
+      remaining.map(async (source) => ({
+        source,
+        // 单源 reject（命令级异常）→ 该源按空列表跳过，不影响其余源（CR 第 2 轮 minor）
+        list: await searchSource(source, cand.title, cand.artist).catch(() => []),
+      })),
+    )
+    if (raw.lyricSearchSeq !== mySeq) return
+    for (const { source, list } of lists) {
+      const c = findSameSong(list, cand) // 身份校验：找不到同曲候选 → 跳过该源
       if (c === undefined) continue
       const text2 = await fetchLyric(source, c.id)
-      if (raw.searchSeq !== mySeq) return
+      if (raw.lyricSearchSeq !== mySeq) return
       if (text2 !== null && text2 !== undefined) {
         raw.current.lyrics = text2
         raw.lyricSourcePlatform = source
@@ -473,7 +527,7 @@ export async function pickLyricCandidate(
     }
     raw.lyricFetchEmpty = true // 全源失败 → 空态
   } catch {
-    if (raw.searchSeq !== mySeq) return
+    if (raw.lyricSearchSeq !== mySeq) return
     raw.lyricFetchEmpty = true
   }
 }
@@ -482,7 +536,7 @@ export async function pickLyricCandidate(
  * 点选封面候选（D6）：`cover_url` null 忽略 → `downloadCover(url)` → 裸 bytes →
  * `bytesToCoverInput`（魔数嗅探 mime + data URL + ≤2048 压缩）→ `setCover`（复用既有动作，
  * cover 在 DIRTY_FIELDS → 自动翻转 dirty）。下载 / 解码 / 压缩失败 → **静默从 coverCandidates
- * 移除该张**（其余不受影响，不报错不标红，验收 #12）；已切歌（searchSeq 变化）→ 丢弃结果不应用。
+ * 移除该张**（其余不受影响，不报错不标红，验收 #12）；已切歌（coverSearchSeq 变化）→ 丢弃结果不应用。
  */
 export async function pickCoverCandidate(
   cand: SongCandidate,
@@ -491,15 +545,15 @@ export async function pickCoverCandidate(
 ): Promise<void> {
   if (raw.readonly || raw.current === null) return
   if (cand.cover_url === null) return
-  const mySeq = raw.searchSeq
+  const mySeq = raw.coverSearchSeq
   try {
     const bytes = await downloadCover(cand.cover_url)
-    if (raw.searchSeq !== mySeq) return // 已切歌，丢弃结果不应用
+    if (raw.coverSearchSeq !== mySeq) return // 已切歌，丢弃结果不应用
     const input = await bytesToCoverInput(bytes)
-    if (raw.searchSeq !== mySeq) return
+    if (raw.coverSearchSeq !== mySeq) return
     setCover(input)
   } catch {
-    if (raw.searchSeq !== mySeq) return
+    if (raw.coverSearchSeq !== mySeq) return
     // 静默移除该张（按 source+id 匹配——同一候选身份，不依赖对象引用，其余不受影响）
     raw.coverCandidates = raw.coverCandidates.filter((c) => !(c.source === cand.source && c.id === cand.id))
   }

@@ -45,7 +45,7 @@ impl MusicSource for Netease {
         client: &reqwest::Client,
         title: &str,
         _artist: &str,
-    ) -> Vec<SongCandidate> {
+    ) -> Result<Vec<SongCandidate>, String> {
         let enc = crypto::weapi(
             &serde_json::json!({"s": title, "type": 1, "limit": 10, "offset": 0}).to_string(),
         );
@@ -59,13 +59,21 @@ impl MusicSource for Netease {
             .await
         {
             Ok(r) => r,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(format!("网易云搜索请求失败: {e}")),
         };
+        if !resp.status().is_success() {
+            return Err(format!("网易云搜索失败: HTTP {}", resp.status().as_u16()));
+        }
         let json: serde_json::Value = match resp.json().await {
             Ok(v) => v,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(format!("网易云搜索响应解析失败: {e}")),
         };
-        parse_search_response(&json)
+        // 业务错误码（如风控 code=50000005）：HTTP 200 但 code≠200 → 计为源失败，
+        // 不得算作「成功空」（否则全源被阻断时 all_failed=false，离线降级失效）。
+        if is_error_response(&json) {
+            return Err(format!("网易云搜索被拒: code={}", json["code"]));
+        }
+        Ok(parse_search_response(&json))
     }
 
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String> {
@@ -84,6 +92,13 @@ impl MusicSource for Netease {
         let json: serde_json::Value = resp.json().await.ok()?;
         parse_lyric_response(&json)
     }
+}
+
+/// 业务错误响应判定（CR v1-search-fixes）：HTTP 200 但 `code` 非 200（风控 50000005 等）→ 真。
+///
+/// 成功/正常空结果都带 `code:200`；仅 `code` 缺失（malformed）不算错误（按成功空兜底）。
+fn is_error_response(json: &serde_json::Value) -> bool {
+    json["code"].as_i64().is_some_and(|c| c != 200)
 }
 
 /// 解析 weapi 搜索响应 `result.songs[]` → 候选。
@@ -189,6 +204,15 @@ mod tests {
         // 无 songs / 整体错误结构 → 空列表（单源降级）
         assert!(parse_search_response(&serde_json::json!({"result": {}})).is_empty());
         assert!(parse_search_response(&serde_json::json!({"code": 400})).is_empty());
+    }
+
+    #[test]
+    fn is_error_response_detects_business_rejection() {
+        // CR v1-search-fixes：风控等业务拒绝是 HTTP 200 + code≠200，必须判为「源失败」而非「成功空」
+        assert!(is_error_response(&serde_json::json!({"code": 50000005, "msg": "风控"})), "风控 50000005 应判错误");
+        assert!(is_error_response(&serde_json::json!({"code": 400})));
+        assert!(!is_error_response(&serde_json::json!({"code": 200, "result": {"songs": []}})), "code 200 成功");
+        assert!(!is_error_response(&serde_json::json!({"result": {}})), "malformed 无 code → 按成功空");
     }
 
     #[test]

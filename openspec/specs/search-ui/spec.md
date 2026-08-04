@@ -1,7 +1,8 @@
 # search-ui Specification
 
 ## Purpose
-TBD - created by archiving change v1-search-ui. Update Purpose after archive.
+MusicTag V1 前端搜索联动（FR-8）：选中即搜（仅一次、只补缺失）、歌词/封面候选区、点选写入（不自动覆盖）、取词失败自动换源（C2）、离线降级（失败首响）、候选生命周期切歌即弃、手动搜索按钮、搜索中/空态、封面候选失败静默。消费 `search-sources` 后端 command。v1-search-fixes 补充：C2 走单源 `search_source` + 归一化身份校验；离线仅当 `all_failed`（冷门歌无结果不标离线）。
+
 ## Requirements
 ### Requirement: 选中即搜（仅一次，只补缺失）
 选中歌曲那一刻 SHALL 仅对缺失的歌词/封面自动发起 `search_song`；已有内容、删除内容后不再自动触发。
@@ -38,18 +39,26 @@ TBD - created by archiving change v1-search-ui. Update Purpose after archive.
 
 #### Scenario: 换源重试
 - **WHEN** 点选某候选取词返回 None
-- **THEN** 自动换另一家源重试同一首歌
+- **THEN** 按固定来源序（netease→qqmusic→migu）跳过原源，对每家走单源 `search_source` 重搜同一首歌
+
+#### Scenario: 同名不同歌拒绝
+- **WHEN** 另一家源返回的候选与点选歌曲归一化 title/artist 不一致（如 Live 版/翻唱）
+- **THEN** 跳过该源，不填「同名不同歌」的歌词（FR-8.8a）
 
 #### Scenario: 全源失败空态
 - **WHEN** 所有源取词均失败
 - **THEN** 显示空态（如「未找到匹配的歌词，可手动粘贴」）
 
 ### Requirement: 离线降级（失败首响）
-本会话第一次自动搜索全源失败时 SHALL 标记会话离线，后续选中不再自动搜、候选区不出现，界面提示「离线：仅手动填写」，只留手动搜索按钮。
+本会话第一次自动搜索**三源全部网络失败**（`all_failed=true`）时 SHALL 标记会话离线，后续选中不再自动搜、候选区不出现，界面提示「离线：仅手动填写」，只留手动搜索按钮。
 
 #### Scenario: 标记离线
-- **WHEN** 会话内第一次自动搜索全源失败
+- **WHEN** 会话内第一次自动搜索 `all_failed=true`（断网/三源全失败）
 - **THEN** 标记会话离线，提示「离线：仅手动填写」，候选区不出现
+
+#### Scenario: 无结果不标离线
+- **WHEN** 三源均成功但无匹配候选（冷门歌，`all_failed=false`）
+- **THEN** 不标记离线，仅显示空态且保留手动填写入口
 
 #### Scenario: 后续不自动搜
 - **WHEN** 会话已离线且用户再选中歌曲

@@ -35,7 +35,7 @@ impl MusicSource for QqMusic {
         client: &reqwest::Client,
         title: &str,
         _artist: &str,
-    ) -> Vec<SongCandidate> {
+    ) -> Result<Vec<SongCandidate>, String> {
         // 参数对齐参照库：`comm.ct=19` + 无 `grp`（实测 ct=24/grp=1 返回空列表但 estimate_sum>0，
         // 属参数结构不对；ct=19 正常返回结果）。
         let body = serde_json::json!({
@@ -55,13 +55,20 @@ impl MusicSource for QqMusic {
             .await
         {
             Ok(r) => r,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(format!("QQ 音乐搜索请求失败: {e}")),
         };
+        if !resp.status().is_success() {
+            return Err(format!("QQ 音乐搜索失败: HTTP {}", resp.status().as_u16()));
+        }
         let json: serde_json::Value = match resp.json().await {
             Ok(v) => v,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(format!("QQ 音乐搜索响应解析失败: {e}")),
         };
-        parse_search_response(&json)
+        // 业务错误码（HTTP 200 但 code≠0）：计为源失败，不误算「成功空」（离线判定依赖）。
+        if is_error_response(&json) {
+            return Err(format!("QQ 音乐搜索被拒: code={}", json["code"]));
+        }
+        Ok(parse_search_response(&json))
     }
 
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String> {
@@ -80,6 +87,13 @@ impl MusicSource for QqMusic {
         let json: serde_json::Value = serde_json::from_str(&text).ok()?;
         parse_lyric_response(&json)
     }
+}
+
+/// 业务错误响应判定（CR v1-search-fixes）：HTTP 200 但顶层 `code` 非 0（如限流/风控 -1）→ 真。
+///
+/// 成功/正常空结果都带 `code:0`；仅 `code` 缺失（malformed）不算错误（按成功空兜底）。
+fn is_error_response(json: &serde_json::Value) -> bool {
+    json["code"].as_i64().is_some_and(|c| c != 0)
 }
 
 /// 解析 musicu.fcg 搜索响应 `data.<key>.data.body.song.list[]` → 候选。
@@ -195,6 +209,14 @@ mod tests {
         });
         let songs = parse_search_response(&json);
         assert_eq!(songs[0].artist, "A, B");
+    }
+
+    #[test]
+    fn is_error_response_detects_business_rejection() {
+        // CR v1-search-fixes：HTTP 200 但 code≠0（限流/风控）→ 源失败，不误算「成功空」
+        assert!(is_error_response(&serde_json::json!({"code": -1})));
+        assert!(!is_error_response(&serde_json::json!({"code": 0, "data": {}})), "code 0 成功");
+        assert!(!is_error_response(&serde_json::json!({"data": {}})), "malformed 无 code → 按成功空");
     }
 
     #[test]

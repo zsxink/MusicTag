@@ -30,6 +30,9 @@ const COVER_LIMIT: usize = 12 * 1024 * 1024;
 const TOP_N: usize = 10;
 
 /// 统一搜索源接口（design.md D1：每家一个客户端，统一双接口）。
+///
+/// `search` 返回 `Result<Vec<SongCandidate>, String>`（v1-search-fixes）：`Err` = 网络/解析失败，
+/// `Ok(vec)` = 成功（含空列表）。供聚合区分「全源失败」与「正常空结果」（`all_failed`）。
 #[async_trait]
 pub trait MusicSource: Send + Sync {
     fn id(&self) -> MusicSourceId;
@@ -38,7 +41,7 @@ pub trait MusicSource: Send + Sync {
         client: &reqwest::Client,
         title: &str,
         artist: &str,
-    ) -> Vec<SongCandidate>;
+    ) -> Result<Vec<SongCandidate>, String>;
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String>;
 }
 
@@ -71,8 +74,9 @@ pub async fn search_song(client: &reqwest::Client, title: &str, artist: &str) ->
 
 /// 并发聚合（可注入源列表与超时，供超时降级单测）。
 ///
-/// `JoinSet` 并行执行各源搜索，`tokio::time::timeout` 包单源超时；超时/失败 → 该源空列表 +
-/// `source_stats` 记 0（D8），其余源结果不受影响。
+/// `JoinSet` 并行执行各源搜索，`tokio::time::timeout` 包单源超时；超时/失败 → 该源
+/// `source_stats` 记 0（D8）+ 计为失败，其余源结果不受影响。
+/// `all_failed` = 三源全部失败（无任何源成功）；至少一源成功（含正常空结果）→ false。
 async fn search_song_with_sources(
     client: &reqwest::Client,
     title: &str,
@@ -80,6 +84,11 @@ async fn search_song_with_sources(
     sources: Vec<Box<dyn MusicSource>>,
     timeout: Duration,
 ) -> SearchResult {
+    let order = [
+        MusicSourceId::Netease,
+        MusicSourceId::QqMusic,
+        MusicSourceId::Migu,
+    ];
     let mut set = tokio::task::JoinSet::new();
     for source in sources {
         let client = client.clone();
@@ -88,14 +97,16 @@ async fn search_song_with_sources(
         set.spawn(async move {
             let fut = source.search(&client, &title, &artist);
             match tokio::time::timeout(timeout, fut).await {
-                Ok(list) => (source.id(), list),
-                Err(_) => (source.id(), Vec::new()),
+                Ok(Ok(list)) => (source.id(), Some(list)),
+                _ => (source.id(), None), // 超时 / 网络 / 解析失败 → 失败
             }
         });
     }
 
-    // 收集各源原始结果（失败/超时 → 空列表）
-    let mut raw: HashMap<MusicSourceId, Vec<SongCandidate>> = HashMap::new();
+    // 收集各源结果：成功 → Some(list)（含空列表），失败/超时 → None（v1-search-fixes）。
+    // 先为固定来源序各占一位，保证任务异常缺失的源也按「失败」计入 all_failed。
+    let mut raw: HashMap<MusicSourceId, Option<Vec<SongCandidate>>> =
+        order.iter().map(|id| (*id, None)).collect();
     while let Some(joined) = set.join_next().await {
         if let Ok((id, list)) = joined {
             raw.insert(id, list);
@@ -103,21 +114,62 @@ async fn search_song_with_sources(
     }
 
     // source_stats：固定来源顺序（Netease → QqMusic → Migu），记成功返回的候选条数（D8）。
-    let order = [
-        MusicSourceId::Netease,
-        MusicSourceId::QqMusic,
-        MusicSourceId::Migu,
-    ];
     let source_stats: Vec<(MusicSourceId, usize)> = order
         .iter()
-        .map(|id| (*id, raw.get(id).map_or(0, |l| l.len())))
+        .map(|id| {
+            (
+                *id,
+                raw.get(id).and_then(|o| o.as_ref()).map_or(0, |l| l.len()),
+            )
+        })
         .collect();
 
-    let all: Vec<SongCandidate> = raw.into_values().flatten().collect();
+    // all_failed：三源全部失败（None）→ true；至少一源成功 → false（冷门歌空结果不判离线）。
+    let all_failed = raw.values().all(|o| o.is_none());
+
+    let all: Vec<SongCandidate> = raw
+        .values()
+        .flatten()
+        .flat_map(|l| l.iter().cloned())
+        .collect();
     let songs = aggregate(title, artist, all);
     SearchResult {
         songs,
         source_stats,
+        all_failed,
+    }
+}
+
+/// `search_source(source, title, artist) -> Vec<SongCandidate>`（v1-search-fixes）：单源搜索，C2 换源用。
+///
+/// 与 `search_song` 不同：**不做跨源聚合去重**——C2 需要「其他来源对同一首歌的候选」，
+/// 聚合去重会把同曲多源候选折叠成一条（Netease 稳定胜出）导致换源找不到其他源。同一 6s
+/// 超时；失败/超时 → 空列表（前端跳过该源）。返回该源原始候选（截前 N 条控制 IPC 载荷）。
+pub async fn search_source(
+    client: &reqwest::Client,
+    source: MusicSourceId,
+    title: &str,
+    artist: &str,
+) -> Vec<SongCandidate> {
+    let s: Box<dyn MusicSource> = match source {
+        MusicSourceId::Netease => Box::new(netease::Netease),
+        MusicSourceId::QqMusic => Box::new(qqmusic::QqMusic),
+        MusicSourceId::Migu => Box::new(migu::Migu),
+    };
+    search_source_with(client, s, title, artist, SEARCH_TIMEOUT).await
+}
+
+/// 单源搜索实现（可注入源与超时，供单测复用 FakeSource）。失败/超时 → 空列表。
+async fn search_source_with(
+    client: &reqwest::Client,
+    source: Box<dyn MusicSource>,
+    title: &str,
+    artist: &str,
+    timeout: Duration,
+) -> Vec<SongCandidate> {
+    match tokio::time::timeout(timeout, source.search(client, title, artist)).await {
+        Ok(Ok(list)) => list.into_iter().take(TOP_N).collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -459,11 +511,12 @@ mod tests {
 
     // ---- 并发聚合 + 超时降级 ----
 
-    /// 测试用假源：可注入「立即返回」或「挂起」（挂起由注入的短超时切断）。
+    /// 测试用假源：可注入「立即返回」「挂起」（挂起由注入的短超时切断）或「失败」（Err）。
     #[derive(Clone)]
     enum FakeBehavior {
         Return(Vec<SongCandidate>),
         Hang,
+        Fail,
     }
 
     #[derive(Clone)]
@@ -482,13 +535,14 @@ mod tests {
             _client: &reqwest::Client,
             _title: &str,
             _artist: &str,
-        ) -> Vec<SongCandidate> {
+        ) -> Result<Vec<SongCandidate>, String> {
             match &self.behavior {
-                FakeBehavior::Return(list) => list.clone(),
+                FakeBehavior::Return(list) => Ok(list.clone()),
                 FakeBehavior::Hang => {
                     tokio::time::sleep(Duration::from_secs(3600)).await;
-                    Vec::new()
+                    Ok(Vec::new())
                 }
+                FakeBehavior::Fail => Err("fake 源失败".into()),
             }
         }
         async fn fetch_lyric(&self, _client: &reqwest::Client, _id: &str) -> Option<String> {
@@ -543,6 +597,7 @@ mod tests {
         assert_eq!(result.songs[0].id, "1");
         assert_eq!(result.songs[1].id, "3");
         assert!(!result.songs.iter().any(|s| s.source == MusicSourceId::Migu));
+        assert!(!result.all_failed, "三源均成功 → 非离线");
     }
 
     #[tokio::test]
@@ -586,11 +641,12 @@ mod tests {
             ]
         );
         assert_eq!(result.songs.len(), 1, "其余源结果不受影响");
+        assert!(!result.all_failed, "qq 源成功 → 非离线");
     }
 
     #[tokio::test]
     async fn search_all_fail_returns_empty_and_zero_stats() {
-        // 全源失败（断网/超时）→ 空候选 + source_stats 全 0（供前端离线降级判定）
+        // 全源失败（断网/超时）→ 空候选 + source_stats 全 0 + all_failed=true（供前端离线判定）
         let client = reqwest::Client::new();
         let sources: Vec<Box<dyn MusicSource>> = vec![
             Box::new(FakeSource {
@@ -599,7 +655,7 @@ mod tests {
             }),
             Box::new(FakeSource {
                 id: MusicSourceId::QqMusic,
-                behavior: FakeBehavior::Hang,
+                behavior: FakeBehavior::Fail,
             }),
             Box::new(FakeSource {
                 id: MusicSourceId::Migu,
@@ -619,6 +675,106 @@ mod tests {
             result.source_stats.iter().map(|(_, n)| *n).sum::<usize>(),
             0
         );
+        assert!(result.all_failed, "三源全失败 → 离线信号");
+    }
+
+    #[tokio::test]
+    async fn search_all_succeed_empty_not_offline() {
+        // v1-search-fixes（C2/离线误判）：三源**成功但空**（冷门歌无匹配）→ all_failed=false，
+        // 不触发会话离线（FR-8.4a「全部源失败」指网络失败，非正常空结果）。
+        let client = reqwest::Client::new();
+        let sources: Vec<Box<dyn MusicSource>> = vec![
+            Box::new(FakeSource {
+                id: MusicSourceId::Netease,
+                behavior: FakeBehavior::Return(vec![]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::QqMusic,
+                behavior: FakeBehavior::Return(vec![]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Migu,
+                behavior: FakeBehavior::Return(vec![]),
+            }),
+        ];
+        let result = search_song_with_sources(
+            &client,
+            "冷门曲",
+            "某作者",
+            sources,
+            Duration::from_millis(50),
+        )
+        .await;
+        assert!(result.songs.is_empty());
+        assert_eq!(
+            result.source_stats,
+            vec![
+                (MusicSourceId::Netease, 0),
+                (MusicSourceId::QqMusic, 0),
+                (MusicSourceId::Migu, 0),
+            ]
+        );
+        assert!(!result.all_failed, "正常空结果不得标记离线");
+    }
+
+    #[tokio::test]
+    async fn search_mixed_fail_and_empty_not_offline() {
+        // 部分源失败、部分源成功空 → 网络可用 → 非离线（all_failed=false）。
+        let client = reqwest::Client::new();
+        let sources: Vec<Box<dyn MusicSource>> = vec![
+            Box::new(FakeSource {
+                id: MusicSourceId::Netease,
+                behavior: FakeBehavior::Fail,
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::QqMusic,
+                behavior: FakeBehavior::Return(vec![]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Migu,
+                behavior: FakeBehavior::Fail,
+            }),
+        ];
+        let result = search_song_with_sources(
+            &client,
+            "晴天",
+            "周杰伦",
+            sources,
+            Duration::from_millis(50),
+        )
+        .await;
+        assert!(!result.all_failed, "至少一源成功（qq）→ 非离线");
+    }
+
+    #[tokio::test]
+    async fn search_source_returns_raw_candidates_and_empty_on_fail() {
+        // CR v1-search-fixes：单源 search_source 返回**原始候选**（不做聚合去重折叠），
+        // TOP_N 截断；失败 / 超时 → 空列表（C2 跳过该源）。
+        let client = reqwest::Client::new();
+        // 15 个归一化同曲候选（聚合去重会折叠成 1 条）——search_source 必须保留全部（截前 10）
+        let many: Vec<SongCandidate> = (1..=15)
+            .map(|i| cand(MusicSourceId::QqMusic, &i.to_string(), "晴天", "周杰伦"))
+            .collect();
+        let ok: Box<dyn MusicSource> = Box::new(FakeSource {
+            id: MusicSourceId::QqMusic,
+            behavior: FakeBehavior::Return(many),
+        });
+        let got = search_source_with(&client, ok, "晴天", "周杰伦", Duration::from_millis(50)).await;
+        assert_eq!(got.len(), TOP_N, "单源原始候选不被聚合去重折叠，仅 TOP_N 截断");
+        assert!(got.iter().all(|c| c.source == MusicSourceId::QqMusic));
+
+        // 失败 → 空
+        let fail: Box<dyn MusicSource> = Box::new(FakeSource {
+            id: MusicSourceId::Migu,
+            behavior: FakeBehavior::Fail,
+        });
+        assert!(search_source_with(&client, fail, "x", "y", Duration::from_millis(50)).await.is_empty());
+        // 超时 → 空
+        let hang: Box<dyn MusicSource> = Box::new(FakeSource {
+            id: MusicSourceId::Netease,
+            behavior: FakeBehavior::Hang,
+        });
+        assert!(search_source_with(&client, hang, "x", "y", Duration::from_millis(50)).await.is_empty());
     }
 
     // ---- download_cover：5s 超时 + 12MB 限流 ----

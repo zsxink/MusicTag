@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 // mock ../api/search → LyricPanel 经 store 动作（manualSearch/pickLyricCandidate）的默认注入兜底
 // （api/client.ts 必须保留 `import { invoke } from '@tauri-apps/api/core'`，改源失效）。
-const { mockSearchSongs, mockFetchLyric } = vi.hoisted(() => ({
+const { mockSearchSongs, mockFetchLyric, mockSearchSource } = vi.hoisted(() => ({
   mockSearchSongs: vi.fn(async () => ({
     songs: [],
     source_stats: [
@@ -11,11 +11,14 @@ const { mockSearchSongs, mockFetchLyric } = vi.hoisted(() => ({
       ['qqmusic', 0],
       ['migu', 0],
     ],
+    all_failed: false,
   })),
   mockFetchLyric: vi.fn(async () => null),
+  mockSearchSource: vi.fn(async () => []),
 }))
 vi.mock('../api/search', () => ({
   searchSongs: mockSearchSongs,
+  searchSource: mockSearchSource,
   fetchLyric: mockFetchLyric,
   downloadCover: vi.fn(async () => []),
 }))

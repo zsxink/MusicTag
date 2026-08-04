@@ -321,7 +321,8 @@ interface SongCandidate {
 
 interface SearchResult {
   songs: SongCandidate[];
-  source_stats: Array<[MusicSourceId, number]>;  // 各家返回条数
+  source_stats: Array<[MusicSourceId, number]>;  // 各家返回条数（失败/超时记 0）
+  all_failed: boolean;  // 三源全部失败（网络错误/超时）→ true；至少一源成功（含正常空结果）→ false
 }
 ```
 
@@ -336,13 +337,14 @@ interface SearchResult {
 
 | command | 参数 → 返回 | 用途 |
 |---|---|---|
-| `list_songs(dir)` | `PathBuf → Vec<SongSummary>` | 打开文件夹，深度遍历；**只读列表项**（`path`/`title`/`artist`，歌名/作者空时前端回退显示文件名） |
-| `open_song(path)` | `PathBuf → Song` | 读取一首的**完整**标签 + 封面 base64，放进编辑区（按需读取） |
+| `list_songs(dir)` | `String → Vec<SongSummary>` | 打开文件夹，深度遍历；**只读列表项**（`path`/`title`/`artist`，歌名/作者空时前端回退显示文件名） |
+| `open_song(path)` | `String → Result<Song, String>` | 读取一首的**完整**标签 + 封面 base64，放进编辑区（按需读取；坏标签 → `Err`，表单只读） |
 | `save_song(song, exportLrc)` | `Song, bool → Result<(), String>` | 写回原文件（cover 为 base64，Rust 侧解码）；`exportLrc` 勾选时同步写同目录同名 `.lrc`（空歌词忽略） |
-| `rename_song(path, new_name)` | `PathBuf, String → Result` | 音频 + `.lrc` 改名 |
-| `search_song(title, artist)` | `String, String → SearchResult` | 三家并发搜索 |
-| `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本 |
-| `download_cover(url)` | `String → Vec<u8>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`） |
+| `rename_song(path, new_name)` | `String, String → Result<(), String>` | 音频 + `.lrc` 改名 |
+| `search_song(title, artist)` | `String, String → SearchResult` | 三家并发搜索 + 打分去重（含 `all_failed`：三源全失败才 true，冷门歌空结果 false） |
+| `search_source(source, title, artist)` | `MusicSourceId, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（v1-search-fixes，C2 换源用）：绕过跨源聚合去重——聚合会把同曲多源候选折叠成一条导致换源失效；失败/超时 → 空列表，前端跳过该源 |
+| `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |
+| `download_cover(url)` | `String → Result<Vec<u8>, String>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`；失败 → `Err` 前端静默忽略该张） |
 
 **封面传递**：`Song.cover` 用 **base64 data URL**（`data:image/jpeg;base64,...`），`<img :src="song.cover">` 直接用；一次只编辑一首、图不大，不必配置 asset 协议。写盘时 `save_song` 收到 base64，Rust 侧解码回 `Vec<u8>` 再写原文件（磁盘落盘形式仍是原始字节，见 PRD §5.3）。
 
