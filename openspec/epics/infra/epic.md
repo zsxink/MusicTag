@@ -52,7 +52,7 @@
 
 ## 已探明的实施事实（决策输入）
 
-- **icons 回归**：`src-tauri/icons/` 磁盘目录被删（git 索引跟踪 52 文件，v1-skeleton `1104eb5` 提交），属未提交误删回归；源图 `icon/musictag.png`（512×512 RGBA）未跟踪。S6 重生成补回并纳入版本控制。
+- **icons 现状**：`src-tauri/icons/` 内是 v1-skeleton `1104eb5` 入库的脚手架**默认图标（52 文件）**，已被**用户手动清理**（有意删除旧图标，非误删）；`tauri.conf.json` 仍引用 5 个 icons 文件（磁盘缺失）。S6 用新源图重建图标取代旧图标，并将源图与设计文档入库；`icon/musictag copy.png`（与源图内容相同的副本）不入库。
 - **图标设计文档**：`docs/design/musictag-icon-design.md` 磁盘上已存在（用户提供），S6 直接纳入版本控制即可。
 - **codegraph**：仓库无 `.codegraph/` 索引；S3 建索引并决策 `.gitignore` 忽略（本地 SQLite 索引产物，非源码）。
 - **CI 现状**：`.github/workflows/ci.yml` 为 PR/push 校验门禁（OpenSpec validate + npm build/test + cargo check/test），S7 的发布 CI 与之互补不冲突。

@@ -58,16 +58,25 @@ SHALL 存在图标设计文档 `docs/design/musictag-icon-design.md`，定义图
 - **WHEN** 检查 `docs/design/musictag-icon-design.md`
 - **THEN** 该文件存在、为 Markdown、内容含图标风格与配色规范，且已被 git 跟踪（未忽略）
 
-### Requirement: icons 目录删除回归已修复
+### Requirement: 新图标取代旧默认图标，git 索引与磁盘一致
 
-`src-tauri/icons/` 的 git 索引与磁盘 SHALL 一致：v1-skeleton 提交（`1104eb5`）起的全部图标文件恢复到版本控制中，磁盘上不再缺失。
+重建的新图标 SHALL 取代被清理的旧默认图标入库：`src-tauri/icons/` 的 git 索引与磁盘 SHALL 最终一致，无 `D` 状态残留；旧图标的删除随本变更提交。
 
 #### Scenario: git 索引与磁盘一致
 
 - **WHEN** 检查 `git status` 与 `git ls-files src-tauri/icons/`
-- **THEN** 无 `D`（deleted）状态的图标文件，`git ls-files src-tauri/icons/` 列出的文件在磁盘上全部存在
+- **THEN** 无 `D`（deleted）状态的图标文件，`git ls-files src-tauri/icons/` 列出的文件在磁盘上全部存在（重建的新图标全集）
 
 #### Scenario: 全量入库
 
 - **WHEN** 核对 `src-tauri/icons/` 的版本控制范围
 - **THEN** 三端打包所需图标（含 `icon.icns`、`icon.ico`、各尺寸 PNG、`@2x` retina）全部纳入 git，非 gitignore 忽略对象
+
+### Requirement: 源图副本不纳入版本控制
+
+`icon/musictag copy.png`（与 `icon/musictag.png` 内容相同的手动备份副本）SHALL 不纳入版本控制，也不作为 `tauri icon` 的输入。
+
+#### Scenario: 副本不入库
+
+- **WHEN** 检查 `git status` 与 `git ls-files icon/`
+- **THEN** `icon/musictag.png` 被 git 跟踪；`icon/musictag copy.png` 未被跟踪（由 `.gitignore` 排除或人工删除），不作为生成输入

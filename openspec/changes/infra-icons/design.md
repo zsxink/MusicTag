@@ -2,9 +2,9 @@
 
 ## Context
 
-MusicTag（Tauri 2 + Rust）的 `src-tauri/tauri.conf.json` 已声明 `bundle.icon` 数组（`icons/32x32.png`、`icons/128x128.png`、`icons/128x128@2x.png`、`icons/icon.icns`、`icons/icon.ico`），但 `src-tauri/icons/` 目录在磁盘上被整体删除（未提交），而 git 索引仍跟踪着 v1-skeleton 提交（`1104eb5`）以来的 52 个图标文件。其后果是 `npm run tauri build` 因找不到 bundle.icon 引用文件而失败，三端图标资产缺失。
+MusicTag（Tauri 2 + Rust）的 `src-tauri/tauri.conf.json` 已声明 `bundle.icon` 数组（`icons/32x32.png`、`icons/128x128.png`、`icons/128x128@2x.png`、`icons/icon.icns`、`icons/icon.ico`）。`src-tauri/icons/` 目录内的图标是脚手架默认生成（v1-skeleton 提交 `1104eb5` 时入库 52 个文件），**已被用户手动删除**（有意清理旧默认图标），git 索引仍跟踪着这 52 个文件（工作区显示 `D`）。其后果是 `npm run tauri build` 因找不到 bundle.icon 引用文件而失败，三端图标资产缺失——需用新源图重建取代。
 
-与此同时，用户已提供图标设计文档 `docs/design/musictag-icon-design.md`（磁盘上存在，未提交）与源图 `icon/musictag.png`（512×512 RGBA，未提交、未被 gitignore）。本变更（Epic「项目基建初始化」子变更 #54，域 frontend + infra，无依赖）把这些资产固化进仓库，并建立「设计文档 → 源图 → `npm run tauri icon` → 三端图标」的可重复管线，同时修复 icons 删除回归。
+与此同时，用户已提供图标设计文档 `docs/design/musictag-icon-design.md`（磁盘上存在，未提交）与源图 `icon/musictag.png`（512×512 RGBA，未提交、未被 gitignore）。本变更（Epic「项目基建初始化」子变更 #54，域 frontend + infra，无依赖）把这些资产固化进仓库，并建立「设计文档 → 源图 → `npm run tauri icon` → 三端图标」的可重复管线，重建后的新图标取代旧图标入库。
 
 ## Goals / Non-Goals
 
@@ -13,7 +13,7 @@ MusicTag（Tauri 2 + Rust）的 `src-tauri/tauri.conf.json` 已声明 `bundle.ic
 - `icon/musictag.png`（512×512 RGBA）纳入版本控制，作为 `tauri icon` 的可重复输入源图。
 - 用 `npm run tauri icon icon/musictag.png` 重建 `src-tauri/icons/` 全套三端图标：
   - Windows `icon.ico`（16/24/32/48/64/256 内嵌图层）、macOS `icon.icns`（16/32/128/256/512 内嵌图层）、Linux 各尺寸 PNG（含 `128x128@2x.png` retina）。
-- 修复删除回归：`src-tauri/icons/` 的 git 索引与磁盘一致（恢复 52 个文件入库，无 `D` 状态残留）。
+- 用重建的新图标取代旧默认图标：`src-tauri/icons/` 的 git 索引与磁盘一致（新图标入库，旧图标删除随本变更提交，无 `D` 状态残留）。
 - 产物与 `tauri.conf.json` bundle.icon 数组吻合：5 个引用文件全部存在且格式正确；`@2x` 命名不可改。
 - 验证三端打包机制就绪：Linux freedesktop hicolor 图标 + `.desktop` `Icon=`、AppImage 自动选最大方形 PNG；`cargo check` / `npm run build` 不受影响。
 
@@ -69,19 +69,20 @@ Tauri 2 在 Linux 打包时：
 - **AppImage** 打包自动选用可用的最大方形 PNG 作为 AppImage 内嵌图标（AppImage 格式要求单一方形图标）。
 - 故 Linux 侧产物必须保留 `128x128.png` / `128x128@2x.png` 等完整尺寸集；`@2x` retina 由 Tauri 识别并写入对应 hicolor 尺寸槽。
 
-### D6 icons 目录删除回归修复与提交决策
+### D6 旧图标删除的语义与提交决策
 
-- **现状**：`git ls-files src-tauri/icons/` 列出 52 个文件（与 v1-skeleton `1104eb5` 一致）；磁盘上目录不存在；`.gitignore` 未忽略 `src-tauri/icons/`（`git check-ignore` 返回 exit=1），属纯工作区误删。
-- **修复**：重生成全套 icons 后 `git add src-tauri/icons/`，恢复 52 个文件入库（含 `icon.icns` / `icon.ico` / 各尺寸 PNG / `@2x` / `android/` / `ios/` / `Square*Logo.png` / `StoreLogo.png`）；`git status` 不再出现 `D` 状态。
+- **现状**：`git ls-files src-tauri/icons/` 列出 52 个文件（v1-skeleton `1104eb5` 时入库的**旧默认图标**）；磁盘上该目录已被**用户手动删除**（有意清理旧图标，非误删、非 gitignore 所致——`.gitignore` 未忽略该目录，`git check-ignore` 返回 exit=1）。
+- **语义**：旧图标不还原。S6 用新源图 `icon/musictag.png` 重建一套**新图标**，重建结果入库取代旧图标；旧图标的删除随本变更提交（提交「删除旧默认图标 + 新增新图标」）。
 - **提交决策：icons 目录入库（YES）**。理由：bundle.icon 引用的是仓库内相对路径，打包机/CI 从干净 checkout 构建必须能拿到这些文件；且 `tauri icon` 从源图可重复生成，未来源图变更时重跑命令再提交即可，不存在「二进制产物不可重建」的维护负担。`src-tauri/target/` 等真正可再生的构建产物仍由 `.gitignore` 排除。
 - 源图 `icon/musictag.png` 与设计文档一并 `git add` 入库。
+- **副本文件** `icon/musictag copy.png`（与 `musictag.png` 内容完全相同的手动备份）**不纳入版本控制**，也不作为 `tauri icon` 输入（避免重复资产）；由 `.gitignore` 或人工删除处理。
 
 ### D7 验证方式
 
-- **icons 齐全**：`ls src-tauri/icons/` 对照 bundle.icon 5 个引用文件逐一存在；`git ls-files src-tauri/icons/ | wc -l` = 52，无 `D` 状态。
+- **icons 齐全**：`ls src-tauri/icons/` 对照 bundle.icon 5 个引用文件逐一存在；`git ls-files src-tauri/icons/ | wc -l` ≥ 52（重建的新图标全套），无 `D` 状态。
 - **格式校验**：`file` 确认 `icon.ico`/`icon.icns` 为有效 ICO/ICNS；PNG 尺寸用 `file`/`sips` 抽查（`32x32.png`=32、`128x128.png`=128、`128x128@2x.png`≥256）。
 - **config 吻合**：bundle.icon 数组每个路径 `test -f src-tauri/<path>` 通过；`@2x` 文件名未改。
-- **回归检查**：`git status` 无 icons 相关 `D`；`git check-ignore` 确认 icons 与源图未被忽略。
+- **git 卫生**：`git status` 无 icons 相关 `D`（旧图标删除已随新图标提交一并处理）；`git check-ignore` 确认 icons 与源图未被忽略；`icon/musictag copy.png` 副本未入库。
 - **构建不受影响**：`cargo check --manifest-path src-tauri/Cargo.toml` + `npm run build` 通过（本变更零代码改动，应原样通过）。
 
 ## Risks / Trade-offs
@@ -95,9 +96,9 @@ Tauri 2 在 Linux 打包时：
 
 ## 任务拆分建议
 
-依赖顺序：**设计文档 → 生成 icons → 修复回归 → 验证**（严格顺序，生成依赖源图就绪、回归修复依赖生成完成）。单 Agent 顺序执行即可，无跨域并行：
+依赖顺序：**设计文档 → 生成 icons → 提交新图标（取代旧图标）→ 验证**（严格顺序，生成依赖源图就绪、提交依赖生成完成）。单 Agent 顺序执行即可，无跨域并行：
 
 1. **设计文档入库**（D1）：`git add docs/design/musictag-icon-design.md`（内容已在磁盘，无需重写）。
 2. **生成 icons**（D2–D4）：确认 `icon/musictag.png` 存在（512×512 RGBA）→ `npm run tauri icon icon/musictag.png` → 检查输出完整（ico/icns/各尺寸 PNG/`@2x`）。
-3. **修复回归 + 入库**（D6）：`git add src-tauri/icons/`（恢复 52 个文件）+ `git add icon/musictag.png`；确认无 `D` 状态、无 gitignore 误吞。
+3. **提交新图标取代旧图标**（D6）：`git add src-tauri/icons/`（新图标全套入库；旧图标删除随本变更提交，无 `D` 残留）+ `git add icon/musictag.png`；确认 `icon/musictag copy.png` 副本不入库。
 4. **验证**（D7）：icons 齐全（bundle.icon 5 文件逐一存在、格式抽查）→ config 吻合（`@2x` 命名未改）→ `cargo check` + `npm run build` 通过 → 提交 PR 前核对 Issue 关联（`feat(54): ...`、`Closes #54`、基分支 `main`）。
