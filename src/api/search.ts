@@ -4,11 +4,20 @@
 // download_cover。实现 = `invokeCommand` 透传（同 songs.ts 模式），候选生命周期
 // （选中即搜、切歌即弃、离线、C2、静默忽略）逻辑在 store/song.ts，不在 api 层。
 import { invokeCommand } from './client'
-import type { MusicSourceId, SearchResult } from './types'
+import type { MusicSourceId, SearchResult, SongCandidate } from './types'
 
 /** 三源并发搜索（标题 + 作者 → 打分去重候选；空 title 由后端守卫过滤 → 空态）。 */
 export function searchSongs(title: string, artist: string): Promise<SearchResult> {
   return invokeCommand<SearchResult>('search_song', { title, artist })
+}
+
+/** 单源搜索原始候选（`MusicSourceId, String, String → SongCandidate[]`；C2 换源用，绕过聚合去重）。 */
+export function searchSource(
+  source: MusicSourceId,
+  title: string,
+  artist: string,
+): Promise<SongCandidate[]> {
+  return invokeCommand<SongCandidate[]>('search_source', { source, title, artist })
 }
 
 /** 点选歌词候选拉文本（`MusicSourceId, String → Option<String>`；None = 取词失败，供 C2 换源）。 */
