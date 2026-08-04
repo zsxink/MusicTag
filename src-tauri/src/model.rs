@@ -63,18 +63,22 @@ pub struct CoverInput {
     pub mime: String,
 }
 
-/// 搜索来源（design.md §10.3 契约形状：`"netease" | "qqmusic" | "migu"`，v1-search-backend）。
+/// 搜索来源（design.md §10.3 契约形状：`"netease" | "qqmusic" | "kugou" | "lrclib" | "itunes"`，
+/// v1-search-backend / search-sources-renewal 五源）。
 ///
 /// serde 默认会把 enum 序列化成 `{"Netease":null}` 对象形状，且 `rename_all = "snake_case"`
 /// 会把 `QqMusic` 序列化成 `"qq_music"`（≠ 前端 TS 字面量 `'qqmusic'`），必须显式
 /// `#[serde(rename = "qqmusic")]` —— 与 `LyricsSource::SidecarLrc` 显式 `rename = "sidecar"` 同款教训。
+/// `Kugou`/`Lrclib`/`Itunes` 在 snake_case 下自动映射 `"kugou"|"lrclib"|"itunes"`，无需显式 rename。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MusicSourceId {
     Netease,
     #[serde(rename = "qqmusic")]
     QqMusic,
-    Migu,
+    Kugou,
+    Lrclib,
+    Itunes,
 }
 
 /// 搜索候选（design.md §10.3 契约，v1-search-backend）。
@@ -91,11 +95,11 @@ pub struct SongCandidate {
     pub cover_url: Option<String>,
 }
 
-/// 三源并发搜索结果（design.md §10.3 契约，v1-search-backend / v1-search-fixes）。
+/// 五源并发搜索结果（design.md §10.3 契约，v1-search-backend / v1-search-fixes / search-sources-renewal）。
 ///
 /// `source_stats` 元组序列化为 `[source, count]` 数组，对齐 TS
 /// `Array<[MusicSourceId, number]>`（各家成功返回的候选条数，失败/超时记 0）。
-/// `all_failed`：三源**全部失败**（网络错误/超时）→ true；至少一源成功（含正常空结果）→
+/// `all_failed`：五源**全部失败**（网络错误/超时）→ true；至少一源成功（含正常空结果）→
 /// false。前端仅在 `all_failed` 时判定会话离线（FR-8.4a「全部源失败」——冷门歌正常空结果不标离线）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -212,8 +216,9 @@ mod tests {
 
     #[test]
     fn music_source_id_serializes_to_contract_shape() {
-        // 契约形状冻结（design.md D6）：netease / qqmusic / migu 字面量。
-        // 杜绝 `{"Netease":null}` 对象形状与 `"qq_music"`（snake_case 陷阱，同 SidecarLrc 教训）。
+        // 契约形状冻结（design.md D6 / search-sources-renewal D6）：netease / qqmusic / kugou /
+        // lrclib / itunes 字面量。杜绝 `{"Netease":null}` 对象形状与 `"qq_music"`（snake_case
+        // 陷阱，同 SidecarLrc 教训）。
         assert_eq!(
             serde_json::to_string(&MusicSourceId::Netease).unwrap(),
             r#""netease""#
@@ -224,8 +229,16 @@ mod tests {
             "QqMusic 必须显式 rename 为 qqmusic，不得出现 qq_music"
         );
         assert_eq!(
-            serde_json::to_string(&MusicSourceId::Migu).unwrap(),
-            r#""migu""#
+            serde_json::to_string(&MusicSourceId::Kugou).unwrap(),
+            r#""kugou""#
+        );
+        assert_eq!(
+            serde_json::to_string(&MusicSourceId::Lrclib).unwrap(),
+            r#""lrclib""#
+        );
+        assert_eq!(
+            serde_json::to_string(&MusicSourceId::Itunes).unwrap(),
+            r#""itunes""#
         );
         // 反序列化对称
         assert_eq!(
@@ -237,8 +250,16 @@ mod tests {
             MusicSourceId::Netease
         );
         assert_eq!(
-            serde_json::from_str::<MusicSourceId>(r#""migu""#).unwrap(),
-            MusicSourceId::Migu
+            serde_json::from_str::<MusicSourceId>(r#""kugou""#).unwrap(),
+            MusicSourceId::Kugou
+        );
+        assert_eq!(
+            serde_json::from_str::<MusicSourceId>(r#""lrclib""#).unwrap(),
+            MusicSourceId::Lrclib
+        );
+        assert_eq!(
+            serde_json::from_str::<MusicSourceId>(r#""itunes""#).unwrap(),
+            MusicSourceId::Itunes
         );
     }
 
@@ -283,13 +304,17 @@ mod tests {
             source_stats: vec![
                 (MusicSourceId::Netease, 3),
                 (MusicSourceId::QqMusic, 0),
-                (MusicSourceId::Migu, 2),
+                (MusicSourceId::Kugou, 2),
+                (MusicSourceId::Lrclib, 0),
+                (MusicSourceId::Itunes, 1),
             ],
             all_failed: false,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(
-            json.contains(r#"source_stats":[["netease",3],["qqmusic",0],["migu",2]]"#),
+            json.contains(
+                r#"source_stats":[["netease",3],["qqmusic",0],["kugou",2],["lrclib",0],["itunes",1]]"#
+            ),
             "source_stats 应序列化为 [source, count] 数组，实际: {json}"
         );
         assert!(
