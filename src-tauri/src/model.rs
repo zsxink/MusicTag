@@ -91,14 +91,17 @@ pub struct SongCandidate {
     pub cover_url: Option<String>,
 }
 
-/// 三源并发搜索结果（design.md §10.3 契约，v1-search-backend）。
+/// 三源并发搜索结果（design.md §10.3 契约，v1-search-backend / v1-search-fixes）。
 ///
 /// `source_stats` 元组序列化为 `[source, count]` 数组，对齐 TS
-/// `Array<[MusicSourceId, number]>`（各家成功返回的候选条数，失败/超时记 0，供前端离线判定）。
+/// `Array<[MusicSourceId, number]>`（各家成功返回的候选条数，失败/超时记 0）。
+/// `all_failed`：三源**全部失败**（网络错误/超时）→ true；至少一源成功（含正常空结果）→
+/// false。前端仅在 `all_failed` 时判定会话离线（FR-8.4a「全部源失败」——冷门歌正常空结果不标离线）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub songs: Vec<SongCandidate>,
     pub source_stats: Vec<(MusicSourceId, usize)>,
+    pub all_failed: bool,
 }
 
 #[cfg(test)]
@@ -282,11 +285,19 @@ mod tests {
                 (MusicSourceId::QqMusic, 0),
                 (MusicSourceId::Migu, 2),
             ],
+            all_failed: false,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(
             json.contains(r#"source_stats":[["netease",3],["qqmusic",0],["migu",2]]"#),
             "source_stats 应序列化为 [source, count] 数组，实际: {json}"
         );
+        assert!(
+            json.contains(r#""all_failed":false"#),
+            "all_failed 应序列化（契约 v1-search-fixes），实际: {json}"
+        );
+        // 反序列化对称
+        let back: SearchResult = serde_json::from_str(&json).unwrap();
+        assert!(!back.all_failed);
     }
 }

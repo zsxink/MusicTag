@@ -31,7 +31,7 @@ impl MusicSource for Migu {
         client: &reqwest::Client,
         title: &str,
         _artist: &str,
-    ) -> Vec<SongCandidate> {
+    ) -> Result<Vec<SongCandidate>, String> {
         // keyword 须 URL 编码（中文/空格），用 Url::parse_with_params 保证。
         let url = reqwest::Url::parse_with_params(
             SEARCH_URL,
@@ -51,13 +51,13 @@ impl MusicSource for Migu {
             .await
         {
             Ok(r) => r,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(format!("咪咕搜索请求失败: {e}")),
         };
         let json: serde_json::Value = match resp.json().await {
             Ok(v) => v,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(format!("咪咕搜索响应解析失败: {e}")),
         };
-        parse_search_response(&json)
+        Ok(parse_search_response(&json))
     }
 
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String> {

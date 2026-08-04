@@ -45,7 +45,7 @@ impl MusicSource for Netease {
         client: &reqwest::Client,
         title: &str,
         _artist: &str,
-    ) -> Vec<SongCandidate> {
+    ) -> Result<Vec<SongCandidate>, String> {
         let enc = crypto::weapi(
             &serde_json::json!({"s": title, "type": 1, "limit": 10, "offset": 0}).to_string(),
         );
@@ -59,13 +59,13 @@ impl MusicSource for Netease {
             .await
         {
             Ok(r) => r,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(format!("网易云搜索请求失败: {e}")),
         };
         let json: serde_json::Value = match resp.json().await {
             Ok(v) => v,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(format!("网易云搜索响应解析失败: {e}")),
         };
-        parse_search_response(&json)
+        Ok(parse_search_response(&json))
     }
 
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String> {

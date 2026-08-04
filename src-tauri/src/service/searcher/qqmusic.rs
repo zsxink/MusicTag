@@ -35,7 +35,7 @@ impl MusicSource for QqMusic {
         client: &reqwest::Client,
         title: &str,
         _artist: &str,
-    ) -> Vec<SongCandidate> {
+    ) -> Result<Vec<SongCandidate>, String> {
         // 参数对齐参照库：`comm.ct=19` + 无 `grp`（实测 ct=24/grp=1 返回空列表但 estimate_sum>0，
         // 属参数结构不对；ct=19 正常返回结果）。
         let body = serde_json::json!({
@@ -55,13 +55,13 @@ impl MusicSource for QqMusic {
             .await
         {
             Ok(r) => r,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(format!("QQ 音乐搜索请求失败: {e}")),
         };
         let json: serde_json::Value = match resp.json().await {
             Ok(v) => v,
-            Err(_) => return Vec::new(),
+            Err(e) => return Err(format!("QQ 音乐搜索响应解析失败: {e}")),
         };
-        parse_search_response(&json)
+        Ok(parse_search_response(&json))
     }
 
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String> {
