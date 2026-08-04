@@ -381,5 +381,5 @@ interface SearchResult {
 > 以上 5 个子变更均已实现并归档（`openspec/changes/archive/` 齐全），本表保留为架构落位参照，不再有「未来/后续」含义。
 
 - 新 command 一律：Rust `commands/` 加薄壳 → `service/` 落业务 → `lib.rs` `generate_handler!` 注册；前端 `api/` 加封装 → store 注入 → 组件消费。
-- `searcher` 的加密（aes/cbc/rsa）与三家 HTTP 聚合是纯逻辑，无 Tauri 依赖，放 service 层（单元测试内联）。
+- `searcher` 的加密（aes/cbc/rsa）与五家 HTTP 聚合是纯逻辑，无 Tauri 依赖，放 service 层（单元测试内联）。
 - `api/search.ts` 只做 IPC 透传（同 `songs.ts` 模式），候选生命周期（选中即搜、切歌即弃）逻辑在 store，不在 api 层。
