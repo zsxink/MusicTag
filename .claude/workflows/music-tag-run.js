@@ -222,8 +222,13 @@ if (!crPassed) {
 // ---------- ⑥ 最终验证（Tester/CR 任何写入后重新执行） ----------
 phase('验证')
 const verify = await agent(
-  `你是验证(CI)角色。对变更「${CHANGE}」运行完整最终验证：cargo check/test --manifest-path src-tauri/Cargo.toml、npm run build、openspec validate ${CHANGE}。` +
-    `只验证，不修复；全部通过才 pass=true，并逐项返回 steps。`,
+  `你是验证(CI)角色。对变更「${CHANGE}」运行完整最终验证，统一基线按序短路：` +
+    `cargo check --manifest-path src-tauri/Cargo.toml → cargo test --manifest-path src-tauri/Cargo.toml → ` +
+    `npm run test → npm run build → openspec validate ${CHANGE} --strict --no-interactive。` +
+    `任一 fail 即整体 verify_failed，只验证不修复，失败输出如实上报。` +
+    `若变更触及搜索取词/单源换源/并发/离线降级路径，追加复盘回归清单并逐项入 steps：` +
+    `单源换源不被聚合去重破坏、歌词/封面跨 kind 不串扰（无永久搜索中）、离线判定区分全源网络失败 vs 正常空结果；` +
+    `否则 steps 中注明「不适用」。全部通过才 pass=true，并逐项返回 steps（step + status + detail）。`,
   { agentType: 'verify-agent', schema: VERIFY_SCHEMA, phase: '验证', label: 'verify' }
 )
 if (!verify?.pass || verify.steps.some((step) => step.status !== 'pass')) {
