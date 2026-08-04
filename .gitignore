@@ -10,6 +10,9 @@ src-tauri/gen/schemas/
 # 构建产物
 *.log
 
+# 本地 codegraph 索引（SQLite 二进制，随代码变更重建；可随时 `codegraph index` 重建）
+.codegraph/
+
 # macOS / Finder 元数据
 .DS_Store
 .AppleDouble
