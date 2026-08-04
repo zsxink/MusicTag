@@ -66,6 +66,8 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Install frontend dependencies
+        run: npm ci
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
