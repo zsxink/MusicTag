@@ -11,10 +11,10 @@
     { "name": "spec-review", "issue": 52, "domain": "docs", "dependsOn": [], "status": "done", "implementationCommit": "f2426a5", "slice": "Issue #48 工作点 4 · spec 四源复核" },
     { "name": "workflow-optimize", "issue": 53, "domain": "infra", "dependsOn": ["spec-review"], "status": "done", "implementationCommit": "fe5a8a0", "slice": "Issue #48 工作点 5 · 工作流优化" },
     { "name": "infra-icons", "issue": 54, "domain": "frontend", "dependsOn": [], "status": "done", "implementationCommit": "99fa622", "slice": "Issue #48 工作点 6 · 图标三端适配 + 回归修复" },
-    { "name": "ci-release", "issue": 55, "domain": "infra", "dependsOn": ["infra-icons"], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 7 · 三端发布 CI" },
+    { "name": "ci-release", "issue": 55, "domain": "infra", "dependsOn": ["infra-icons"], "status": "done", "implementationCommit": "262c3e7", "slice": "Issue #48 工作点 7 · 三端发布 CI" },
     { "name": "infra-review-gate", "issue": 56, "domain": "infra", "dependsOn": ["infra-repo-docs", "infra-claude-md-root", "infra-codegraph", "spec-review", "workflow-optimize", "infra-icons", "ci-release"], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 8 · GATE 独立复核门禁" }
   ],
-  "cursor": 6,
+  "cursor": 7,
   "error": null,
   "sourceRevision": "3eecb2cf150d6e4e8564c3a5defb4e1008f44dd4"
 }
