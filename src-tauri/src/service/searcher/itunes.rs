@@ -130,6 +130,16 @@ mod tests {
         assert!(parse_search_response(&serde_json::json!({"results": []})).is_empty());
     }
 
+    #[tokio::test]
+    async fn fetch_lyric_always_returns_none() {
+        // spec「无歌词降级」：iTunes 无歌词，`fetch_lyric` 恒 None（前端 C2 换其他源取词；
+        // iTunes 不入 C2_SOURCE_ORDER，点选其候选会立即触发换源）。
+        let client = reqwest::Client::new();
+        let itunes = Itunes;
+        assert_eq!(itunes.fetch_lyric(&client, "1584471135").await, None);
+        assert_eq!(itunes.fetch_lyric(&client, "").await, None);
+    }
+
     #[test]
     fn parses_search_response_cover_url_unmodified_when_no_bb_pattern() {
         // 非 `100x100bb` 模板（异常 URL）→ 原样保留

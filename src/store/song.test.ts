@@ -1551,6 +1551,26 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       expect(songStore.lyricFetchEmpty).toBe(true)
     })
 
+    it('C2 点选 iTunes 候选（无歌词源）→ fetch None 后换其他四源取词（spec「无歌词降级」）', async () => {
+      // iTunes 恒无歌词：点选其候选首取即 None → C2 在剩余四源（netease/qqmusic/kugou/lrclib）
+      // 中按固定序找同曲取词——验证「前端 C2 换源从其他源取词」整条链路。
+      const cand = makeCand({ source: 'itunes', id: 'i1', cover_url: 'https://i/1.jpg' })
+      const fetchLyric = vi.fn(async (source: MusicSourceId) =>
+        source === 'itunes' ? null : source === 'lrclib' ? '[00:00.00] LRCLIB 词' : null,
+      )
+      const searchSource = vi.fn(async (source: MusicSourceId) =>
+        source === 'lrclib' ? [makeCand({ source: 'lrclib', id: 'l1' })] : [],
+      )
+
+      await pickLyricCandidate(cand, fetchLyric, searchSource)
+
+      // 首取 itunes（点选那一下）→ None → C2 依 C2_SOURCE_ORDER 依次尝试四源，lrclib 命中
+      expect(fetchLyric).toHaveBeenCalledWith('itunes', 'i1')
+      expect(songStore.current!.lyrics).toBe('[00:00.00] LRCLIB 词')
+      expect(songStore.lyricSourcePlatform).toBe('lrclib')
+      expect(songStore.lyricFetchEmpty).toBe(false)
+    })
+
     it('已切歌（lyricSearchSeq 变化）→ 取词结果丢弃不应用', async () => {
       let resolveFetch!: (t: string | null) => void
       const fetchLyric = vi.fn(() => new Promise<string | null>((res) => { resolveFetch = res }))

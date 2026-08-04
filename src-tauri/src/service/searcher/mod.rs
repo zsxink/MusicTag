@@ -496,6 +496,34 @@ mod tests {
     }
 
     #[test]
+    fn aggregate_tie_keeps_full_five_source_rank_order() {
+        // search-sources-renewal D8：同分平手按五源固定序 Netease(0)→QqMusic(1)→Kugou(2)→
+        // Lrclib(3)→Itunes(4) 仲裁——中文源前置、公共源垫底。五家全给同曲同分 → 只留 Netease；
+        // 且 Lrclib 同分必胜 Itunes（公共源内部也按注册序稳定）。
+        let five = vec![
+            cand(MusicSourceId::Netease, "n", "晴天", "周杰伦"),
+            cand(MusicSourceId::QqMusic, "q", "晴天", "周杰伦"),
+            cand(MusicSourceId::Kugou, "k", "晴天", "周杰伦"),
+            cand(MusicSourceId::Lrclib, "l", "晴天", "周杰伦"),
+            cand(MusicSourceId::Itunes, "i", "晴天", "周杰伦"),
+        ];
+        let songs = aggregate("晴天", "周杰伦", five);
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].source, MusicSourceId::Netease);
+        assert_eq!(songs[0].id, "n");
+
+        // 仅 Lrclib 与 Itunes 同分 → 保留 Lrclib（rank 3 < 4）
+        let pub_only = vec![
+            cand(MusicSourceId::Lrclib, "l", "晴天", "周杰伦"),
+            cand(MusicSourceId::Itunes, "i", "晴天", "周杰伦"),
+        ];
+        let songs = aggregate("晴天", "周杰伦", pub_only);
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].source, MusicSourceId::Lrclib);
+        assert_eq!(songs[0].id, "l");
+    }
+
+    #[test]
     fn aggregate_limits_to_top_ten() {
         // 15 个不同 title 的候选（title 均包含查询词）→ 前 N=10
         let cands: Vec<SongCandidate> = (1..=15)
