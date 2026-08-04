@@ -12,9 +12,9 @@
     { "name": "workflow-optimize", "issue": 53, "domain": "infra", "dependsOn": ["spec-review"], "status": "done", "implementationCommit": "fe5a8a0", "slice": "Issue #48 工作点 5 · 工作流优化" },
     { "name": "infra-icons", "issue": 54, "domain": "frontend", "dependsOn": [], "status": "done", "implementationCommit": "99fa622", "slice": "Issue #48 工作点 6 · 图标三端适配 + 回归修复" },
     { "name": "ci-release", "issue": 55, "domain": "infra", "dependsOn": ["infra-icons"], "status": "done", "implementationCommit": "262c3e7", "slice": "Issue #48 工作点 7 · 三端发布 CI" },
-    { "name": "infra-review-gate", "issue": 56, "domain": "infra", "dependsOn": ["infra-repo-docs", "infra-claude-md-root", "infra-codegraph", "spec-review", "workflow-optimize", "infra-icons", "ci-release"], "status": "todo", "implementationCommit": null, "error": "GATE 复核挂起：维度2「工作流可运行」不通过——.claude/agents/rust-backend.md:11 command 契约仍列废弃 embed_cover 且遗漏 pick_folder/pick_cover_file/read_cover_path/search_source（lib.rs 真值 11 command 无 embed_cover，spec-review 遗漏该文件）。已合并 7 项不回滚。修复需另开变更补齐 rust-backend.md command 契约后重跑 GATE。", "slice": "Issue #48 工作点 8 · GATE 独立复核门禁" }
+    { "name": "infra-review-gate", "issue": 56, "domain": "infra", "dependsOn": ["infra-repo-docs", "infra-claude-md-root", "infra-codegraph", "spec-review", "workflow-optimize", "infra-icons", "ci-release"], "status": "done", "implementationCommit": "98527ca", "slice": "Issue #48 工作点 8 · GATE 独立复核门禁" }
   ],
-  "cursor": 7,
+  "cursor": 8,
   "error": null,
   "sourceRevision": "3eecb2cf150d6e4e8564c3a5defb4e1008f44dd4"
 }
