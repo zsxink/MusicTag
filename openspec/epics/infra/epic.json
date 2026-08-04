@@ -14,7 +14,7 @@
     { "name": "ci-release", "issue": 55, "domain": "infra", "dependsOn": ["infra-icons"], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 7 · 三端发布 CI" },
     { "name": "infra-review-gate", "issue": 56, "domain": "infra", "dependsOn": ["infra-repo-docs", "infra-claude-md-root", "infra-codegraph", "spec-review", "workflow-optimize", "infra-icons", "ci-release"], "status": "todo", "implementationCommit": null, "slice": "Issue #48 工作点 8 · GATE 独立复核门禁" }
   ],
-  "cursor": 1,
+  "cursor": 0,
   "error": null,
   "sourceRevision": "3eecb2cf150d6e4e8564c3a5defb4e1008f44dd4"
 }
