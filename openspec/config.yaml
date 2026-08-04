@@ -43,3 +43,7 @@ rules:
   tasks:
     - Rust 侧：lofty 读写、网易云加密、封面压缩相关任务必须附带测试
     - 任务按依赖排序，Rust 后端（Tauri command）优先于前端接入
+  workflow:
+    - 流程脚本变更（.claude/workflows/）必须附带静态自检通过的证据（node --check / bash -n；Node 脚本按 workflow 引擎的 async 函数包裹方式检查语法）
+    - agent/skill 描述与 workflow prompt 必须保持一致（防 prompt 漂移）；变更涉及搜索联动（取词/换源/并发/离线判定）时，CR/验证环节必须体现复盘回归维度（见 Issue #46/#47）
+    - proposal 须说明该流程变更如何拦截同类缺陷（链接复盘 Issue #46/#47），并列出验证基线与新增门禁

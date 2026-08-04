@@ -132,7 +132,8 @@ log(`变更域判定：${domain}。设计要点：${architect.designSummary}`)
 phase('开发')
 const devSpec =
   `读取 ${CHANGE_DIR}/design.md、specs/、tasks.md，按任务实现。遵守 TDD（新逻辑先写失败测试）。` +
-  `Rust 侧跑 cargo test --manifest-path src-tauri/Cargo.toml，前端改完跑 npm run build。增量提交 git add + commit（feat(${CHANGE}): 任务）。` +
+  `完成自验证后方可提交：Rust 侧跑 cargo test --manifest-path src-tauri/Cargo.toml、前端跑 npm run build 与 npm run test，任一失败不得提交。` +
+  `增量提交 git add + commit（feat(${CHANGE}): 任务），阶段粒度、崩溃可恢复。` +
   `实现完成后返回 done/summary/filesChanged/tests。`
 
 const runDev = (agentType, scope) =>
@@ -155,7 +156,8 @@ log(`开发完成：${devResults.map((result) => result.summary).join(' | ')}`)
 phase('测试')
 const tester = await agent(
   `你是测试角色。对变更「${CHANGE}」做覆盖审计、补齐缺失测试并跑核心链路冒烟。` +
-    `对照 ${CHANGE_DIR}/specs/ 的 scenarios；任何未覆盖 scenario 都必须列入 missing，且不得声称可进入 CR。` +
+    `对照 ${CHANGE_DIR}/specs/ 的 scenarios；除 happy-path 外，强制审计失败路径与边界（错误分支、空/越界输入、并发/竞态、网络失败与错误码、状态复位）。` +
+    `任何未覆盖 scenario（含失败路径）都必须列入 missing，且不得声称可进入 CR。` +
     `测试或实现存在缺陷时如实返回 smokePassed=false。`,
   { agentType: 'tester', schema: TESTER_SCHEMA, phase: '测试', label: 'tester' }
 )
@@ -184,7 +186,11 @@ while (rounds < 3) {
   crResult = await agent(
     `你是 CR（只读，不改代码）。审查变更「${CHANGE}」当前分支相对 main 的改动（git diff main...HEAD），` +
       `对照 ${CHANGE_DIR}/specs/、design.md、docs/V1-PRD.md、docs/design/design.md。` +
-      `所有 blocker/major 必须给出 file，并按真实文件归属标注。`,
+      `所有 blocker/major 必须给全 file + issue + specReference + suggestion 四项，pass=true 仅当无 blocker 且无 major。` +
+      `除规格一致性/遗漏/缺陷外，追加复盘专项三检（按变更涉及面取舍，不适用标「不适用」）：` +
+      `①跨模块状态语义：聚合/去重/折叠是否破坏单源换源、身份校验防同名不同歌（FR-8.8a）；` +
+      `②竞态与串扰：共享计数器/请求序号/全局状态是否跨 kind/面板互相污染、在途结果被无关操作作废或卡死；` +
+      `③网络与离线判定：网络失败（超时/HTTP 状态/业务错误码）与正常空结果是否区分、离线仅由全源网络失败触发。`,
     { agentType: 'cr-agent', schema: CR_SCHEMA, phase: 'CR', label: `cr-round-${rounds}` }
   )
   if (!crResult) return { status: 'failed', stage: 'cr', error: `CR 第${rounds}轮未返回` }
@@ -218,8 +224,13 @@ if (!crPassed) {
 // ---------- ⑥ 最终验证（Tester/CR 任何写入后重新执行） ----------
 phase('验证')
 const verify = await agent(
-  `你是验证(CI)角色。对变更「${CHANGE}」运行完整最终验证：cargo check/test --manifest-path src-tauri/Cargo.toml、npm run build、openspec validate ${CHANGE}。` +
-    `只验证，不修复；全部通过才 pass=true，并逐项返回 steps。`,
+  `你是验证(CI)角色。对变更「${CHANGE}」运行完整最终验证，统一基线按序短路：` +
+    `cargo check --manifest-path src-tauri/Cargo.toml → cargo test --manifest-path src-tauri/Cargo.toml → ` +
+    `npm run test → npm run build → openspec validate ${CHANGE} --strict --no-interactive。` +
+    `任一 fail 即整体 verify_failed，只验证不修复，失败输出如实上报。` +
+    `若变更触及搜索取词/单源换源/并发/离线降级路径，追加复盘回归清单并逐项入 steps：` +
+    `单源换源不被聚合去重破坏、歌词/封面跨 kind 不串扰（无永久搜索中）、离线判定区分全源网络失败 vs 正常空结果；` +
+    `否则 steps 中注明「不适用」。全部通过才 pass=true，并逐项返回 steps（step + status + detail）。`,
   { agentType: 'verify-agent', schema: VERIFY_SCHEMA, phase: '验证', label: 'verify' }
 )
 if (!verify?.pass || verify.steps.some((step) => step.status !== 'pass')) {
@@ -251,4 +262,10 @@ if (!integration?.merged) {
   return { status: 'integration_failed', stage: 'integrate', integration, reason: '集成（归档/PR/合并）未完成' }
 }
 
+// ---------- ⑧ 结果（可审计可回溯，供 Leader 汇报与留档） ----------
+// 返回字段说明：
+//   tester.{covered,missing,risks,smokePassed} — 覆盖审计结果；missing 含失败路径未覆盖项
+//   cr.{rounds,result} — CR 轮次 + 每轮 result.{blockers,majors,minors} 各级问题清单
+//   verify.{pass,steps} — 验证步骤明细（step + status + detail，含搜索联动回归清单项）
+// 失败分支如实返回 test_failed / verify_failed / suspended / failed，不降级为 success。
 return { status: 'success', change: CHANGE, domain, architect, dev: devResults, tester, cr: { rounds, result: crResult }, verify, integration }
