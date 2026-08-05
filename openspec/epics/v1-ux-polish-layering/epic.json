@@ -55,12 +55,12 @@
       "issue": 92,
       "domain": "infra",
       "dependsOn": ["readme-product-copy", "ui-editor-layout", "candidate-collapse", "rust-tests-separation", "dir-memory"],
-      "status": "todo",
+      "status": "done",
       "implementationCommit": null,
       "slice": "总复核门禁：全部子项合并后对最终仓库状态做只读独立复核"
     }
   ],
-  "cursor": 5,
+  "cursor": 6,
   "error": null,
   "sourceRevision": "21f74f1214b3cff2a27b0fded30c9975a8de68a5"
 }
