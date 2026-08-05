@@ -33,7 +33,15 @@ onMounted(() => {
   void getLastDir()
     .then((dir) => {
       // falsy 统一守卫（null/undefined/'' 均 no-op）：目录已删/无记忆 → 保持「未打开文件夹」空态
-      if (dir) void initLastDir(dir, (d) => listSongs(d))
+      if (!dir) return
+      // 启动自动加载 best-effort：initLastDir 复用 activateFolder 激活链路（含列表加载）。
+      // rejection 兜底复位空态——list_songs IPC 失败时 activateFolder 已先设 folderPath
+      // （半打开态 + 空列表，UI 会误显「文件夹中没有音乐」），此处复位为「未打开文件夹」
+      // 空态，与无记忆空态同语义，且不产生 unhandled rejection（tester 审计）。
+      return initLastDir(dir, (d) => listSongs(d)).catch(() => {
+        songStore.folderPath = null
+        songStore.songs = []
+      })
     })
     .catch(() => {
       // 启动自动加载 best-effort：getLastDir IPC 异常 → 静默降级为无记忆空态（不阻塞渲染、不报错）
