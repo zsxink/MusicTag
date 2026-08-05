@@ -215,7 +215,7 @@ const canSearch = computed(() => !songStore.readonly && songStore.current !== nu
 
 .lyrics-box {
   width: 100%;
-  min-height: 180px;
+  min-height: 360px;
   resize: vertical;
   border: 1px solid var(--border);
   border-radius: 8px;

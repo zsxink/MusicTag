@@ -370,10 +370,11 @@ describe('FieldGrid — 两列布局（spec: 左字段列 + 右封面区 `1fr 20
     expect(grid.findComponent(CoverPanel).exists()).toBe(true)
   })
 
-  it('字段列含 8 个字段行（歌名/作者/专辑/专辑作者/音轨号/年份/流派/文件名）', () => {
+  it('字段列含 8 个字段行（文件名/歌名/作者/专辑/专辑作者/音轨号/年份/流派）', () => {
     const w = mount(FieldGrid)
     const labels = w.findAll('.field-label').map((n) => n.text())
     expect(labels).toEqual([
+      '文件名',
       '歌名',
       '作者',
       '专辑',
@@ -381,7 +382,6 @@ describe('FieldGrid — 两列布局（spec: 左字段列 + 右封面区 `1fr 20
       '音轨号',
       '年份',
       '流派',
-      '文件名',
     ])
   })
 
