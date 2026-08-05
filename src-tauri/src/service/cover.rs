@@ -6,7 +6,7 @@
 // - 嵌入侧 `compress_cover`（任一边 >2048 等比缩至 ≤2048×2048；双维 ≤2048 的图无论体积原样返回）+ `cover_from_path`
 //   （文件 → 压缩 → data URL），供 `pick_cover_file` / `read_cover_path`（v1-cover-embed）。
 // `encode_cover`/`decode_cover`/`compress_cover` 不触碰文件系统；单测外置
-// `src-tauri/tests/service_cover_tests.rs`（rust-tests-separation：`src/` 零 `#[cfg(test)]`）。
+// `src-tauri/tests/service_cover_tests.rs`（rust-tests-separation：`src/` 生产代码零 cfg(test)）。
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use image::GenericImageView;

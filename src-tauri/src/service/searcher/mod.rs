@@ -4,9 +4,9 @@
 // 纯业务层无 Tauri 依赖（service 分层不变量 §10.0）：函数接受 `&reqwest::Client` 参数，
 // 可脱离 Tauri 直接单测；命令薄壳在 `commands/search.rs` 只做参数接收 + 委托。
 // `search_song_with_sources`/`search_source_with`/`download_cover_with_timeout`/`to_halfwidth`/
-// `title_match`/`artist_match`/`source_rank` 提 `pub`：rust-tests-separation 单测外置
+// `title_match`/`artist_match`/`source_rank`/`TOP_N` 提 `pub`：rust-tests-separation 单测外置
 // `tests/searcher_mod_tests.rs`（集成测试是独立 crate，仅 `pub` 可见；design.md 原 `pub(crate)`
-// 方案经实测 E0603 不可行，改为 `pub`）。原 `test_util::mock_http_once` 迁 `tests/common/`。
+// 方案经实测 E0603 不可行，改为 `pub`）。原 mock HTTP 工具迁 `tests/common/`。
 //
 // 数据流（design.md）：
 // - `search_song(title, artist)`：`tokio::join_all`（JoinSet）五源并发 + 单源 6s 超时 →
