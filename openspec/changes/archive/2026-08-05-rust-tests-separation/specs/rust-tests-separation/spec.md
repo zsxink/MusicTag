@@ -32,16 +32,16 @@ Rust 生产代码 `src-tauri/src/` SHALL 不含任何 `#[cfg(test)]` 模块；�
 #### Scenario: 测试引用统一
 
 - **WHEN** searcher 测试文件使用 mock HTTP
-- **THEN** 经 `use crate::common::mock_http_once;` 引用
+- **THEN** 经 `use common::mock_http_once;` 引用（`mod common;` 声明；design 决策 3 选与既有 5 集成测试一致的 `use common::`，非 spec 原字面的 `use crate::common::`，Rust 2018+ 语义等价）
 
-### Requirement: 被测私有项提 pub(crate)
+### Requirement: 被测私有项提 pub（可见性最小化的实施修正）
 
-从生产文件拆出的单测所引用的私有函数/类型 SHALL 提升为 `pub(crate)`（不暴露为 `pub` 外部 API），保持可见性最小化。
+从生产文件拆出的单测所引用的私有函数/类型 SHALL 提升为 `pub`（design D2 实施修正：实测 rustc 1.96 E0603，`pub(crate)` 仅对 `app_lib` crate 内部可见，`tests/` 是独立 crate 走 `app_lib::` 路径无法访问 `pub(crate)` 项，故必须 `pub`）。提权范围仅限「被测试引用」项，不做全量提权，保持可见性最小化。
 
-#### Scenario: 可见性最小化
+#### Scenario: 可见性最小化（pub 而非 pub(crate)，因集成测试 crate 需跨 crate 访问）
 
 - **WHEN** 审查被提升可见性的生产项
-- **THEN** 均为 `pub(crate)`（非 `pub`），仅因 `tests/` 独立 crate 需跨 crate 访问
+- **THEN** 仅「被测试引用」的私有项被提为 `pub`（非 `pub(crate)`——实测 E0603 不可行），且不触 command 契约、泄露面可控；未引用的私有项保持私有
 
 ### Requirement: 零行为变更
 

@@ -18,6 +18,28 @@ use std::fs;
 use std::io::Cursor;
 use std::path::Path;
 
+/// 启动极简 HTTP 服务器（一次请求后关闭），返回 mock URL。
+///
+/// 各源「HTTP 非 2xx → Err 分支」回归测试（Tester 缺失项）与 `download_cover` 限流单测共用：
+/// 对每个连接读请求头后写回 `response` 字节，处理一个请求后关闭。纯 std `TcpListener` 实现
+/// （原为 `searcher/mod.rs` 的 `#[cfg(test)] test_util`，rust-tests-separation 迁入共享 fixture）。
+pub fn mock_http_once(response: Vec<u8>) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
+    let addr = listener.local_addr().expect("取本地端口");
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf);
+            let _ = s.write_all(&response);
+            let _ = s.flush();
+            break;
+        }
+    });
+    format!("http://{addr}")
+}
+
 /// 生成一张 2x2 红色 PNG 的字节（`image` crate 编码）。
 pub fn tiny_png_bytes() -> Vec<u8> {
     let mut buf = Cursor::new(Vec::new());

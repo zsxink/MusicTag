@@ -66,31 +66,10 @@ pub fn rename_song(old_path: &Path, new_name: &str) -> Result<(), String> {
 }
 
 /// `new_name` 防御校验（D7）：拒绝路径分隔符（`/`、`\`）与 `..`，防改名逃逸当前目录。
-fn is_illegal_name(new_name: &str) -> bool {
+///
+/// `pub`：供 `src-tauri/tests/service_rename_tests.rs` 直接断言（rust-tests-separation
+/// 单测外置；集成测试是独立 crate，仅 `pub` 可见）。
+pub fn is_illegal_name(new_name: &str) -> bool {
     new_name.contains('/') || new_name.contains('\\') || new_name.contains("..")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn illegal_names_rejected() {
-        // 纯逻辑校验（design.md §10.4 内联单测，无文件 I/O）
-        assert!(is_illegal_name("../a.mp3"));
-        assert!(is_illegal_name("a/b.mp3"));
-        assert!(is_illegal_name("a\\b.mp3"));
-        assert!(is_illegal_name(".."));
-        assert!(!is_illegal_name("新歌.mp3"));
-        assert!(!is_illegal_name("a.b.c.mp3"));
-        assert!(!is_illegal_name("song.flac"));
-    }
-
-    #[test]
-    fn empty_name_is_not_illegal_but_resolved_as_dir_collision() {
-        // 空串在 service 层不做特殊拦截：`dir.join("")` → 目录本身，
-        // 撞名预检（exists）会命中「目标已存在」；前端 `setPendingRename` 已把空串归一为 null，
-        // 此路径只在防御性调用时兜底。
-        assert!(!is_illegal_name(""));
-    }
-}

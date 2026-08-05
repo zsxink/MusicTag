@@ -1,0 +1,608 @@
+// MusicTag — `service/searcher/mod.rs` 五源并发搜索聚合 + 惰性拉取单测（rust-tests-separation 外置）。
+//
+// 原 `#[cfg(test)] mod tests` + `test_util` 内嵌块整体迁出（production `src/` 零 `#[cfg(test)]`）。
+// 覆盖 design.md D1–D8 / D2：
+// - `norm`/`title_match`/`artist_match` 归一化与打分权重（空串防退化命中、多艺人分段取 max）；
+// - `aggregate` 过滤零关联 → 打分 → 归一化去重 → score 降序 → 前 10 条（同分五源序仲裁）；
+// - `search_song_with_sources` 并发聚合 + 超时降级（FakeSource 注入 Hang/Fail/Return）；
+//   `search_source_with` 单源原始候选（TOP_N 截断，不做聚合去重折叠）；
+// - `download_cover*` 5s 超时 + 12MB 限流（Content-Length 预检 + 流式上限）。
+// `mock_http_once` 用 `tests/common` 共享工具；fake 源/cand helper 为测试专用，复制进本文件。
+
+mod common;
+
+use app_lib::model::{MusicSourceId, SongCandidate};
+use app_lib::service::searcher::{
+    MusicSource, TOP_N, aggregate, artist_match, download_cover, download_cover_with_timeout, norm,
+    search_song_with_sources, search_source_with, title_match,
+};
+use async_trait::async_trait;
+use common::mock_http_once;
+use std::time::Duration;
+
+fn cand(source: MusicSourceId, id: &str, title: &str, artist: &str) -> SongCandidate {
+    SongCandidate {
+        source,
+        id: id.to_string(),
+        title: title.to_string(),
+        artist: artist.to_string(),
+        album: String::new(),
+        cover_url: None,
+    }
+}
+
+// ---- 归一化 ----
+
+#[test]
+fn norm_trims_fullwidth_and_lowercases() {
+    assert_eq!(norm(" 晴天 "), "晴天");
+    assert_eq!(norm("ＨＥＬＬＯ　ＷＯＲＬＤ"), "hello world");
+    assert_eq!(norm("  AbC　１２３ "), "abc 123");
+    // 半角已保序；简繁不转换（V1 不做）
+    assert_eq!(norm("晴天"), "晴天");
+}
+
+// ---- 打分权重 ----
+
+#[test]
+fn title_match_weights() {
+    assert_eq!(title_match("晴天", "晴天"), 0.5, "title 相等 0.5");
+    assert_eq!(title_match("晴天", "晴天娃娃"), 0.2, "t⊆q 互相包含 0.2");
+    assert_eq!(title_match("晴天娃娃", "晴天"), 0.2, "q⊆t 互相包含 0.2");
+    assert_eq!(title_match("晴天", "雨天"), 0.0, "零关联 0");
+    // 空查询/空候选 title 不给分（防退化命中，与 artist_match 对称）
+    assert_eq!(title_match("", "晴天"), 0.0, "空查询不得退化命中");
+    assert_eq!(title_match("晴天", ""), 0.0, "空候选 title 不得命中");
+    assert_eq!(title_match("", ""), 0.0);
+}
+
+#[test]
+fn aggregate_filters_everything_on_empty_title_query() {
+    // 空 title 查询（裸文件无标签）→ 任何候选 title 都「包含空串」若不加守卫全得 0.2；
+    // 空守卫下 title_match==0 → 全部过滤，返回空而非噪声候选。
+    let songs = aggregate(
+        "",
+        "周杰伦",
+        vec![cand(MusicSourceId::Netease, "1", "晴天", "周杰伦")],
+    );
+    assert!(songs.is_empty(), "空 title 查询不得退化命中所有候选");
+}
+
+#[test]
+fn artist_match_weights_and_multi_artist_max() {
+    assert_eq!(artist_match("周杰伦", "周杰伦"), 0.4, "artist 相等 0.4");
+    assert_eq!(
+        artist_match("周杰伦", "周杰伦/李健"),
+        0.4,
+        "多艺人分段取 max"
+    );
+    assert_eq!(artist_match("周杰伦", "李健,王力宏"), 0.0, "无关联 0");
+    assert_eq!(
+        artist_match("周杰伦", "王力宏,周杰伦"),
+        0.4,
+        "多艺人含查询 → 0.4"
+    );
+    assert_eq!(artist_match("杰伦", "周杰伦"), 0.1, "互相包含 0.1");
+    // 空查询/空候选不给分（防退化命中）
+    assert_eq!(artist_match("", "周杰伦"), 0.0);
+    assert_eq!(artist_match("周杰伦", ""), 0.0);
+    assert_eq!(artist_match("", ""), 0.0);
+}
+
+#[test]
+fn aggregate_filters_zero_title_match() {
+    // title 零关联（不含查询词）→ 过滤（spec：title_match==0 不进候选集）
+    let songs = aggregate(
+        "晴天",
+        "周杰伦",
+        vec![cand(MusicSourceId::Netease, "1", "海阔天空", "Beyond")],
+    );
+    assert!(songs.is_empty(), "title_match==0 的候选应被过滤");
+}
+
+#[test]
+fn aggregate_scores_and_sorts_desc() {
+    let songs = aggregate(
+        "晴天",
+        "周杰伦",
+        vec![
+            cand(MusicSourceId::Netease, "1", "晴天", "周杰伦"), // 0.5 + 0.4 = 0.9
+            cand(MusicSourceId::Netease, "2", "晴天娃娃", "周杰伦"), // 0.2 + 0.4 = 0.6
+            cand(MusicSourceId::Netease, "3", "晴天", "周杰伦/李健"), // 0.5 + 分段 max 0.4 = 0.9
+            cand(MusicSourceId::Netease, "4", "雨天", "周杰伦"),      // 0.0 → 过滤
+        ],
+    );
+    assert_eq!(songs.len(), 3);
+    // 降序：0.9 → 0.9 → 0.6；0.9 同分按 artist 归一化稳定（"周杰伦" < "周杰伦/李健"）
+    assert_eq!(songs[0].id, "1");
+    assert_eq!(songs[1].id, "3");
+    assert_eq!(songs[2].id, "2");
+}
+
+#[test]
+fn aggregate_dedup_keeps_earliest_source_on_tie() {
+    // 同一归一化 (title, artist) 多源都返回 → 同分保留来源序更早（Netease < QqMusic < Kugou）
+    let songs = aggregate(
+        "晴天",
+        "周杰伦",
+        vec![
+            cand(MusicSourceId::Kugou, "k", "晴天", "周杰伦"),
+            cand(MusicSourceId::Netease, "n", "晴天", "周杰伦"),
+            cand(MusicSourceId::QqMusic, "q", "晴天", "周杰伦"),
+        ],
+    );
+    assert_eq!(songs.len(), 1);
+    assert_eq!(songs[0].id, "n");
+    assert_eq!(songs[0].source, MusicSourceId::Netease);
+}
+
+#[test]
+fn aggregate_tie_keeps_full_five_source_rank_order() {
+    // search-sources-renewal D8：同分平手按五源固定序 Netease(0)→QqMusic(1)→Kugou(2)→
+    // Lrclib(3)→Itunes(4) 仲裁——中文源前置、公共源垫底。五家全给同曲同分 → 只留 Netease；
+    // 且 Lrclib 同分必胜 Itunes（公共源内部也按注册序稳定）。
+    let five = vec![
+        cand(MusicSourceId::Netease, "n", "晴天", "周杰伦"),
+        cand(MusicSourceId::QqMusic, "q", "晴天", "周杰伦"),
+        cand(MusicSourceId::Kugou, "k", "晴天", "周杰伦"),
+        cand(MusicSourceId::Lrclib, "l", "晴天", "周杰伦"),
+        cand(MusicSourceId::Itunes, "i", "晴天", "周杰伦"),
+    ];
+    let songs = aggregate("晴天", "周杰伦", five);
+    assert_eq!(songs.len(), 1);
+    assert_eq!(songs[0].source, MusicSourceId::Netease);
+    assert_eq!(songs[0].id, "n");
+
+    // 仅 Lrclib 与 Itunes 同分 → 保留 Lrclib（rank 3 < 4）
+    let pub_only = vec![
+        cand(MusicSourceId::Lrclib, "l", "晴天", "周杰伦"),
+        cand(MusicSourceId::Itunes, "i", "晴天", "周杰伦"),
+    ];
+    let songs = aggregate("晴天", "周杰伦", pub_only);
+    assert_eq!(songs.len(), 1);
+    assert_eq!(songs[0].source, MusicSourceId::Lrclib);
+    assert_eq!(songs[0].id, "l");
+}
+
+#[test]
+fn aggregate_limits_to_top_ten() {
+    // 15 个不同 title 的候选（title 均包含查询词）→ 前 N=10
+    let cands: Vec<SongCandidate> = (1..=15)
+        .map(|i| {
+            cand(
+                MusicSourceId::Netease,
+                &i.to_string(),
+                &format!("晴天{i}"),
+                "周杰伦",
+            )
+        })
+        .collect();
+    let songs = aggregate("晴天", "周杰伦", cands);
+    assert_eq!(songs.len(), 10, "应只返回前 10 条");
+}
+
+#[test]
+fn aggregate_normalizes_fullwidth_query() {
+    // 全角查询「ＡＢＣ」→ 归一化 "abc" 匹配候选 "abc"（全角转半角 + 小写）
+    let songs = aggregate(
+        "ＡＢＣ",
+        "Ａ",
+        vec![cand(MusicSourceId::Netease, "1", "abc", "a")],
+    );
+    assert_eq!(songs.len(), 1);
+    assert_eq!(songs[0].id, "1");
+}
+
+// ---- 并发聚合 + 超时降级 ----
+
+/// 测试用假源：可注入「立即返回」「挂起」（挂起由注入的短超时切断）或「失败」（Err）。
+#[derive(Clone)]
+enum FakeBehavior {
+    Return(Vec<SongCandidate>),
+    Hang,
+    Fail,
+}
+
+#[derive(Clone)]
+struct FakeSource {
+    id: MusicSourceId,
+    behavior: FakeBehavior,
+}
+
+#[async_trait]
+impl MusicSource for FakeSource {
+    fn id(&self) -> MusicSourceId {
+        self.id
+    }
+    async fn search(
+        &self,
+        _client: &reqwest::Client,
+        _title: &str,
+        _artist: &str,
+    ) -> Result<Vec<SongCandidate>, String> {
+        match &self.behavior {
+            FakeBehavior::Return(list) => Ok(list.clone()),
+            FakeBehavior::Hang => {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+                Ok(Vec::new())
+            }
+            FakeBehavior::Fail => Err("fake 源失败".into()),
+        }
+    }
+    async fn fetch_lyric(&self, _client: &reqwest::Client, _id: &str) -> Option<String> {
+        None
+    }
+}
+
+#[tokio::test]
+async fn search_aggregates_five_sources_and_stats() {
+    let client = reqwest::Client::new();
+    let sources: Vec<Box<dyn MusicSource>> = vec![
+        Box::new(FakeSource {
+            id: MusicSourceId::Netease,
+            behavior: FakeBehavior::Return(vec![cand(
+                MusicSourceId::Netease,
+                "1",
+                "晴天",
+                "周杰伦",
+            )]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::QqMusic,
+            behavior: FakeBehavior::Return(vec![
+                cand(MusicSourceId::QqMusic, "2", "晴天", "周杰伦"),
+                cand(MusicSourceId::QqMusic, "3", "晴天娃娃", "周杰伦"),
+            ]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Kugou,
+            behavior: FakeBehavior::Return(vec![cand(
+                MusicSourceId::Kugou,
+                "4",
+                "晴天",
+                "周杰伦",
+            )]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Lrclib,
+            behavior: FakeBehavior::Return(vec![cand(
+                MusicSourceId::Lrclib,
+                "5",
+                "晴天",
+                "周杰伦",
+            )]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Itunes,
+            behavior: FakeBehavior::Return(vec![cand(
+                MusicSourceId::Itunes,
+                "6",
+                "晴天",
+                "周杰伦",
+            )]),
+        }),
+    ];
+    let result =
+        search_song_with_sources(&client, "晴天", "周杰伦", sources, Duration::from_secs(1)).await;
+    // source_stats：各家成功返回的候选条数（固定五源来源序，search-sources-renewal D8）
+    assert_eq!(
+        result.source_stats,
+        vec![
+            (MusicSourceId::Netease, 1),
+            (MusicSourceId::QqMusic, 2),
+            (MusicSourceId::Kugou, 1),
+            (MusicSourceId::Lrclib, 1),
+            (MusicSourceId::Itunes, 1),
+        ]
+    );
+    // 去重：「晴天/周杰伦」五家各一条 → 只留来源序最早的 Netease；「晴天娃娃」另算
+    assert_eq!(result.songs.len(), 2);
+    assert_eq!(result.songs[0].id, "1");
+    assert_eq!(result.songs[1].id, "3");
+    assert!(!result
+        .songs
+        .iter()
+        .any(|s| s.source == MusicSourceId::Kugou));
+    assert!(!result.all_failed, "五源均成功 → 非离线");
+}
+
+#[tokio::test]
+async fn search_timeout_degrades_hanging_source_to_zero() {
+    // 单源 6s 超时语义：挂起源降级空列表 + source_stats 记 0，其余源结果不受影响。
+    // 测试注入 50ms 超时（不等真实 6s），FakeBehavior::Hang 睡 1h 由 timeout 切断。
+    let client = reqwest::Client::new();
+    let sources: Vec<Box<dyn MusicSource>> = vec![
+        Box::new(FakeSource {
+            id: MusicSourceId::Netease,
+            behavior: FakeBehavior::Hang,
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::QqMusic,
+            behavior: FakeBehavior::Return(vec![cand(
+                MusicSourceId::QqMusic,
+                "2",
+                "晴天",
+                "周杰伦",
+            )]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Kugou,
+            behavior: FakeBehavior::Hang,
+        }),
+    ];
+    let result = search_song_with_sources(
+        &client,
+        "晴天",
+        "周杰伦",
+        sources,
+        Duration::from_millis(50),
+    )
+    .await;
+    assert_eq!(
+        result.source_stats,
+        vec![
+            (MusicSourceId::Netease, 0),
+            (MusicSourceId::QqMusic, 1),
+            (MusicSourceId::Kugou, 0),
+            (MusicSourceId::Lrclib, 0),
+            (MusicSourceId::Itunes, 0),
+        ]
+    );
+    assert_eq!(result.songs.len(), 1, "其余源结果不受影响");
+    assert!(!result.all_failed, "qq 源成功 → 非离线");
+}
+
+#[tokio::test]
+async fn search_all_fail_returns_empty_and_zero_stats() {
+    // 全源失败（断网/超时）→ 空候选 + source_stats 全 0 + all_failed=true（供前端离线判定）
+    let client = reqwest::Client::new();
+    let sources: Vec<Box<dyn MusicSource>> = vec![
+        Box::new(FakeSource {
+            id: MusicSourceId::Netease,
+            behavior: FakeBehavior::Hang,
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::QqMusic,
+            behavior: FakeBehavior::Fail,
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Kugou,
+            behavior: FakeBehavior::Hang,
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Lrclib,
+            behavior: FakeBehavior::Fail,
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Itunes,
+            behavior: FakeBehavior::Hang,
+        }),
+    ];
+    let result = search_song_with_sources(
+        &client,
+        "晴天",
+        "周杰伦",
+        sources,
+        Duration::from_millis(50),
+    )
+    .await;
+    assert!(result.songs.is_empty());
+    assert_eq!(
+        result.source_stats.iter().map(|(_, n)| *n).sum::<usize>(),
+        0
+    );
+    assert!(result.all_failed, "五源全失败 → 离线信号");
+}
+
+#[tokio::test]
+async fn search_all_succeed_empty_not_offline() {
+    // v1-search-fixes（C2/离线误判）：五源**成功但空**（冷门歌无匹配）→ all_failed=false，
+    // 不触发会话离线（FR-8.4a「全部源失败」指网络失败，非正常空结果）。
+    let client = reqwest::Client::new();
+    let sources: Vec<Box<dyn MusicSource>> = vec![
+        Box::new(FakeSource {
+            id: MusicSourceId::Netease,
+            behavior: FakeBehavior::Return(vec![]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::QqMusic,
+            behavior: FakeBehavior::Return(vec![]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Kugou,
+            behavior: FakeBehavior::Return(vec![]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Lrclib,
+            behavior: FakeBehavior::Return(vec![]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Itunes,
+            behavior: FakeBehavior::Return(vec![]),
+        }),
+    ];
+    let result = search_song_with_sources(
+        &client,
+        "冷门曲",
+        "某作者",
+        sources,
+        Duration::from_millis(50),
+    )
+    .await;
+    assert!(result.songs.is_empty());
+    assert_eq!(
+        result.source_stats,
+        vec![
+            (MusicSourceId::Netease, 0),
+            (MusicSourceId::QqMusic, 0),
+            (MusicSourceId::Kugou, 0),
+            (MusicSourceId::Lrclib, 0),
+            (MusicSourceId::Itunes, 0),
+        ]
+    );
+    assert!(!result.all_failed, "正常空结果不得标记离线");
+}
+
+#[tokio::test]
+async fn search_mixed_fail_and_empty_not_offline() {
+    // 部分源失败、部分源成功空 → 网络可用 → 非离线（all_failed=false）。
+    let client = reqwest::Client::new();
+    let sources: Vec<Box<dyn MusicSource>> = vec![
+        Box::new(FakeSource {
+            id: MusicSourceId::Netease,
+            behavior: FakeBehavior::Fail,
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::QqMusic,
+            behavior: FakeBehavior::Return(vec![]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Kugou,
+            behavior: FakeBehavior::Fail,
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Lrclib,
+            behavior: FakeBehavior::Return(vec![]),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::Itunes,
+            behavior: FakeBehavior::Fail,
+        }),
+    ];
+    let result = search_song_with_sources(
+        &client,
+        "晴天",
+        "周杰伦",
+        sources,
+        Duration::from_millis(50),
+    )
+    .await;
+    assert!(!result.all_failed, "至少一源成功（qq/lrclib）→ 非离线");
+}
+
+#[tokio::test]
+async fn search_source_returns_raw_candidates_and_empty_on_fail() {
+    // CR v1-search-fixes：单源 search_source 返回**原始候选**（不做聚合去重折叠），
+    // TOP_N 截断；失败 / 超时 → 空列表（C2 跳过该源）。
+    let client = reqwest::Client::new();
+    // 15 个归一化同曲候选（聚合去重会折叠成 1 条）——search_source 必须保留全部（截前 10）
+    let many: Vec<SongCandidate> = (1..=15)
+        .map(|i| cand(MusicSourceId::QqMusic, &i.to_string(), "晴天", "周杰伦"))
+        .collect();
+    let ok: Box<dyn MusicSource> = Box::new(FakeSource {
+        id: MusicSourceId::QqMusic,
+        behavior: FakeBehavior::Return(many),
+    });
+    let got =
+        search_source_with(&client, ok, "晴天", "周杰伦", Duration::from_millis(50)).await;
+    assert_eq!(
+        got.len(),
+        TOP_N,
+        "单源原始候选不被聚合去重折叠，仅 TOP_N 截断"
+    );
+    assert!(got.iter().all(|c| c.source == MusicSourceId::QqMusic));
+
+    // 失败 → 空
+    let fail: Box<dyn MusicSource> = Box::new(FakeSource {
+        id: MusicSourceId::Kugou,
+        behavior: FakeBehavior::Fail,
+    });
+    assert!(
+        search_source_with(&client, fail, "x", "y", Duration::from_millis(50))
+            .await
+            .is_empty()
+    );
+    // 超时 → 空
+    let hang: Box<dyn MusicSource> = Box::new(FakeSource {
+        id: MusicSourceId::Netease,
+        behavior: FakeBehavior::Hang,
+    });
+    assert!(
+        search_source_with(&client, hang, "x", "y", Duration::from_millis(50))
+            .await
+            .is_empty()
+    );
+}
+
+// ---- download_cover：5s 超时 + 12MB 限流 ----
+
+#[tokio::test]
+async fn download_cover_success_returns_bytes() {
+    let body = b"\x89PNG\r\n\x1a\ncover bytes".to_vec();
+    let mut response =
+        format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len()).into_bytes();
+    response.extend_from_slice(&body);
+    let url = mock_http_once(response);
+    let client = reqwest::Client::new();
+    let bytes = download_cover(&client, &url).await.expect("应成功下载");
+    assert_eq!(bytes, body);
+}
+
+#[tokio::test]
+async fn download_cover_rejects_content_length_over_12mb() {
+    // Content-Length 预检：>12MB 直接拒绝（不读响应体）
+    let response = b"HTTP/1.1 200 OK\r\nContent-Length: 13000000\r\n\r\n".to_vec();
+    let url = mock_http_once(response);
+    let client = reqwest::Client::new();
+    let err = download_cover(&client, &url).await.unwrap_err();
+    assert!(
+        err.contains("12MB"),
+        "Content-Length 超限应拒绝，实际: {err}"
+    );
+}
+
+#[tokio::test]
+async fn download_cover_streaming_cap_rejects_over_12mb() {
+    // 流式上限：不报 Content-Length（chunked）但流式超过 12MB → 拒绝（防内存放大）。
+    // 构造 13MB chunked 响应（1MB/块），客户端累计到 >12MB 即 Err。
+    let mut response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+    for _ in 0..13 {
+        response.extend_from_slice(b"100000\r\n");
+        response.extend(std::iter::repeat_n(b'x', 1024 * 1024));
+        response.extend_from_slice(b"\r\n");
+    }
+    response.extend_from_slice(b"0\r\n\r\n");
+    let url = mock_http_once(response);
+    let client = reqwest::Client::new();
+    let err = download_cover(&client, &url).await.unwrap_err();
+    assert!(err.contains("12MB"), "流式超限应拒绝，实际: {err}");
+}
+
+#[tokio::test]
+async fn download_cover_times_out_on_hanging_server() {
+    // 请求级超时（spec：封面下载单独 5s；测试注入 50ms，不等真实 5s）：
+    // 服务器接受连接但挂起不返回 → reqwest 请求级 timeout 切断 → Err（前端静默忽略该张候选）。
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
+    let addr = listener.local_addr().expect("取本地端口");
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(_s) = stream else { continue };
+            // 读到请求后挂起连接（不写响应），由客户端 timeout 切断。
+            std::thread::sleep(Duration::from_secs(3600));
+            break;
+        }
+    });
+    let url = format!("http://{addr}");
+    let client = reqwest::Client::new();
+    let started = std::time::Instant::now();
+    let err = download_cover_with_timeout(&client, &url, Duration::from_millis(50))
+        .await
+        .unwrap_err();
+    assert!(
+        err.contains("下载封面失败"),
+        "挂起服务器应超时报错，实际: {err}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "应 50ms 超时即返回，不应等真实 5s/更长"
+    );
+}
+
+#[tokio::test]
+async fn download_cover_rejects_non_success_status() {
+    let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec();
+    let url = mock_http_once(response);
+    let client = reqwest::Client::new();
+    let err = download_cover(&client, &url).await.unwrap_err();
+    assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
+}
