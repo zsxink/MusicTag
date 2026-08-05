@@ -1,11 +1,8 @@
 # ui-editor-layout Specification
 
 ## Purpose
-
-编辑表单布局打磨：文件名字段置顶、歌词框默认高度 ×2、左栏高度锁定窗口可用区（右栏超高仅内部滚动）。
-
-## MODIFIED Requirements
-
+TBD - created by archiving change ui-editor-layout. Update Purpose after archive.
+## Requirements
 ### Requirement: 文件名字段置顶
 
 编辑表单字段顺序 SHALL 将「文件名」行置于最上方（歌名之前）。
@@ -42,3 +39,4 @@
 
 - **WHEN** 未选中歌曲（右栏空态）或正常编辑
 - **THEN** 左栏、右栏、窗口高度行为与现状一致（无回归）
+
