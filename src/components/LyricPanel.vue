@@ -42,12 +42,13 @@ const candidatesCollapsed = ref(false)
 function toggleCandidates(): void {
   candidatesCollapsed.value = !candidatesCollapsed.value
 }
-/** 候选区有内容才显示折叠按钮——与模板 v-if 分支（searching / lyricFetchEmpty / done+候选 / 离线）逐条对齐。 */
+/** 候选区有内容才显示折叠按钮——与模板 v-if 分支（searching / lyricFetchEmpty / done+候选(含空态) / 离线）逐条对齐。 */
 const candidatesVisible = computed(
   () =>
     songStore.lyricSearchState === 'searching'
     || songStore.lyricFetchEmpty
     || (songStore.lyricSearchState === 'done' && songStore.lyricCandidates.length > 0)
+    || (songStore.lyricSearchState === 'done' && songStore.lyricCandidates.length === 0)
     || songStore.isOffline,
 )
 </script>
