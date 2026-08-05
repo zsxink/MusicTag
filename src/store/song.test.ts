@@ -21,6 +21,16 @@ vi.mock('../api/search', () => ({
   downloadCover: vi.fn(async () => []),
 }))
 
+// mock @tauri-apps/api/core → store/song.ts 新增 `rememberLastDir` 后，activateFolder 默认
+// saveDir 走 api/songs.ts 的 saveLastDir（invokeCommand('save_last_dir')）。song.test.ts 此前
+// 只 mock ../api/search，必须新增此兜底（design.md dir-memory Risks：§10.2 的 core mock 仅适用于
+// editor/client 测试）——save_last_dir 变 no-op（fire-and-forget 吞掉即可），否则激活路径用例
+// 报 unhandled rejection。dir-memory 用例亦经 mockInvoke 断言「换目录即持久化」。
+const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn(async () => undefined) }))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: mockInvoke,
+}))
+
 import type { CoverInput, MusicSourceId, SearchResult, Song, SongCandidate, SongSummary } from '../api/types'
 import { searchSongs as mockedSearchSongs } from '../api/search'
 import {
@@ -28,10 +38,12 @@ import {
   autoSearchOnSelect,
   cancelPending,
   clearCover,
+  initLastDir,
   manualSearch,
   open,
   pickCoverCandidate,
   pickLyricCandidate,
+  rememberLastDir,
   requestFolder,
   requestSwitch,
   resolvePending,
@@ -1647,5 +1659,108 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       await pickCoverCandidate(makeCand({ cover_url: 'https://x/1.jpg' }), downloadCover)
       expect(downloadCover).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('songStore — dir-memory 记住上次目录（design.md dir-memory：initLastDir/rememberLastDir）', () => {
+  beforeEach(() => {
+    songStore.folderPath = null
+    songStore.songs = []
+    songStore.selectedPath = null
+    songStore.current = null
+    songStore.original = null
+    songStore.readonly = false
+    songStore.lyricsSource = 'none'
+    songStore.exportLrc = false
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+    songStore.pendingRename = null
+    songStore.renameRejected = false
+    songStore.pendingAction = null
+    songStore.lyricCandidates = []
+    songStore.coverCandidates = []
+    songStore.lyricSearchState = 'idle'
+    songStore.coverSearchState = 'idle'
+    songStore.searchedThisSong = false
+    songStore.lyricSourcePlatform = null
+    songStore.lyricFetchEmpty = false
+    songStore.lyricSearchSeq = 0
+    songStore.coverSearchSeq = 0
+    mockInvoke.mockClear()
+  })
+
+  it('initLastDir 非空 dir → 走 activateFolder 语义（folderPath/songs 更新、resetSearchState）', async () => {
+    // 先制造残留搜索态：resetSearchState 应清空候选/搜索态/序号自增（候选生命周期 = 当前歌曲）
+    const stale: SongCandidate = {
+      source: 'netease',
+      id: 'n1',
+      title: '歌名',
+      artist: '作者',
+      album: '专辑',
+      cover_url: 'https://p1.music.126.net/1.jpg',
+    }
+    songStore.lyricCandidates = [stale]
+    songStore.coverCandidates = [stale]
+    songStore.lyricSearchState = 'done'
+    songStore.coverSearchState = 'done'
+    songStore.searchedThisSong = true
+    songStore.lyricSourcePlatform = 'netease'
+    songStore.lyricFetchEmpty = true
+    const seqBefore = songStore.lyricSearchSeq
+    const fresh = [s('/music/a.flac', 'A', 'AA')]
+    const loadSongs = vi.fn(async () => fresh)
+
+    await initLastDir('/music', loadSongs)
+
+    expect(loadSongs).toHaveBeenCalledWith('/music')
+    expect(songStore.folderPath).toBe('/music')
+    expect(songStore.songs).toEqual(fresh)
+    expect(songStore.selectedPath).toBeNull() // 换目录重置选中
+    expect(songStore.lyricCandidates).toEqual([])
+    expect(songStore.coverCandidates).toEqual([])
+    expect(songStore.lyricSearchState).toBe('idle')
+    expect(songStore.coverSearchState).toBe('idle')
+    expect(songStore.searchedThisSong).toBe(false)
+    expect(songStore.lyricSourcePlatform).toBeNull()
+    expect(songStore.lyricFetchEmpty).toBe(false)
+    expect(songStore.lyricSearchSeq).toBe(seqBefore + 1)
+    expect(songStore.coverSearchSeq).toBe(seqBefore + 1)
+  })
+
+  it('initLastDir 空 / null dir → no-op（保持「未打开文件夹」空态，不加载列表）', async () => {
+    const loadSongs = vi.fn(async () => [])
+    await initLastDir('', loadSongs)
+    await initLastDir(null as unknown as string, loadSongs)
+    await initLastDir(undefined as unknown as string, loadSongs)
+    expect(songStore.folderPath).toBeNull()
+    expect(songStore.songs).toEqual([])
+    expect(loadSongs).not.toHaveBeenCalled()
+  })
+
+  it('rememberLastDir：注入 spy saveDir → 被调用一次并传目录', async () => {
+    const saveDir = vi.fn(async () => undefined)
+    await rememberLastDir('/music', saveDir)
+    expect(saveDir).toHaveBeenCalledTimes(1)
+    expect(saveDir).toHaveBeenCalledWith('/music')
+  })
+
+  it('rememberLastDir：saveDir reject → 静默不抛出（fire-and-forget 失败吞掉，下次启动自然降级）', async () => {
+    const saveDir = vi.fn(async () => {
+      throw new Error('disk full')
+    })
+    await expect(rememberLastDir('/music', saveDir)).resolves.toBeUndefined()
+  })
+
+  it('activateFolder 触发 rememberLastDir（持久化点收敛：换目录即更新记忆）', async () => {
+    const loadSongs = vi.fn(async () => [])
+    await activateFolder('/music', loadSongs)
+    expect(mockInvoke).toHaveBeenCalledWith('save_last_dir', { dir: '/music' })
+  })
+
+  it('activateFolder 取消（dir 为 null/空）→ 不触发持久化', async () => {
+    const loadSongs = vi.fn(async () => [])
+    await activateFolder(null, loadSongs)
+    await activateFolder('', loadSongs)
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_last_dir', expect.anything())
   })
 })
