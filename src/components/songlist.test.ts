@@ -221,4 +221,56 @@ describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounte
     expect(songStore.songs).toEqual([])
     expect(w.text()).toContain('未打开文件夹')
   })
+
+  it('竞态（tester 审计）：启动自动加载 list_songs 慢 + 用户已手动换到新目录 + 启动加载随后失败 → 不得复位清掉手动目录', async () => {
+    // 竞态守卫缺口：activateFolder 的 `folderPath !== dir` 守卫只护成功路径；失败路径上
+    // SongList onMounted 的 `.catch` 无条件复位 folderPath=null/songs=[]——
+    // 若启动自动加载（慢的 list_songs）在用户手动切到新目录**之后**才失败，
+    // catch 会把手动切换的目录一并清掉（回归「未打开文件夹」空态，用户操作被吞）。
+    // 期望：启动失败复位只应作用于仍处于启动目录的场景；用户已切走 → 不得动 manual 目录。
+    let rejectStartup!: (e: Error) => void
+    let resolveManual!: (v: unknown) => void
+    let listCalls = 0
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_last_dir') return Promise.resolve('/music')
+      if (cmd === 'pick_folder') return Promise.resolve('/manual')
+      if (cmd === 'list_songs') {
+        listCalls++
+        if (listCalls === 1) {
+          // 启动自动加载：慢，等测试手动 reject
+          return new Promise((_, rej) => {
+            rejectStartup = rej
+          })
+        }
+        // 手动换目录：快，可手动 resolve
+        return new Promise((res) => {
+          resolveManual = res
+        })
+      }
+      if (cmd === 'save_last_dir') return Promise.resolve(undefined)
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+
+    const w = mount(SongList)
+    await flushPromises()
+    // 启动自动加载已发起（folderPath='/music'，loadSongs in-flight）
+    expect(songStore.folderPath).toBe('/music')
+
+    // 用户手动打开新目录并成功加载
+    await w.get('button.open-btn').trigger('click')
+    await flushPromises()
+    expect(songStore.folderPath).toBe('/manual')
+    resolveManual([{ path: '/manual/x.flac', title: 'M', artist: 'MM' }])
+    await flushPromises()
+    expect(songStore.folderPath).toBe('/manual')
+    expect(songStore.songs).toEqual([{ path: '/manual/x.flac', title: 'M', artist: 'MM' }])
+
+    // 启动自动加载此刻才失败 → catch 复位
+    rejectStartup(new Error('list_songs IPC failed'))
+    await flushPromises()
+
+    // 期望：用户手动目录不被启动失败复位吞掉（当前实现无条件 folderPath=null，此断言失败即缺陷）
+    expect(songStore.folderPath).toBe('/manual')
+    expect(songStore.songs).toEqual([{ path: '/manual/x.flac', title: 'M', artist: 'MM' }])
+  })
 })
