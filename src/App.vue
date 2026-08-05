@@ -5,6 +5,7 @@
 // v-if 由 store.pendingAction 驱动——有未保存修改切歌/换目录时全窗口模态三选一。
 import AppBar from './components/AppBar.vue'
 import Editor from './components/Editor.vue'
+import EulaDialog from './components/EulaDialog.vue'
 import SongList from './components/SongList.vue'
 import SwitchDialog from './components/SwitchDialog.vue'
 import { songStore } from './store/song'
@@ -25,6 +26,11 @@ import { songStore } from './store/song'
 
     <!-- 切歌/换目录未保存三选一弹窗（pendingAction 非 null → 渲染；全窗口遮罩） -->
     <SwitchDialog v-if="songStore.pendingAction !== null" />
+
+    <!-- 首次启动授权门禁（pre-release-check T1.3）：无条件挂载，EulaDialog 自门禁——
+         已同意自渲染空（二次启动不弹），未同意全窗口遮罩盖住主界面（同帧渲染，无启动闪烁） -->
+    <EulaDialog />
+
   </div>
 </template>
 
