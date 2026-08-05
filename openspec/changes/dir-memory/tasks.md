@@ -19,14 +19,16 @@
 ## G3 前端 API + store（前端）
 
 - [ ] 3.1 `src/api/songs.ts`：`getLastDir(): Promise<string | null>` / `saveLastDir(dir): Promise<void>` 封装
-- [ ] 3.2 失败测试：`src/store/song.test.ts` 新增目录记忆 describe：
+- [ ] 3.2 失败测试：`src/store/song.test.ts` 新增目录记忆 describe（覆盖 spec「换目录即持久化」「启动自动加载」「不保存编辑状态」）：
   - `initLastDir` 非空 dir → 走 activateFolder 语义（folderPath/songs 更新、resetSearchState）
-  - `initLastDir` 空/null dir → no-op（保持未打开空态）
-  - `rememberLastDir` 注入 spy saveDir → 被调用一次；saveDir reject → 静默不抛出
-  - `activateFolder` 触发 rememberLastDir（持久化点收敛）
+  - `initLastDir` 空 / null / undefined dir → no-op（保持未打开空态）
+  - `rememberLastDir` 注入 spy saveDir → 被调用一次并传目录；saveDir reject → 静默不抛出
+  - `activateFolder` 触发 rememberLastDir（持久化点收敛）；取消（null/空）→ 不持久化
+  - 手动路径（requestFolder → resolvePending discard）→ 持久化新目录；保存失败 → 不切换不持久化
+  - 并发切换目录竞态守卫：慢的旧目录响应后到 → 不覆盖新目录 songs / last_dir
   - `initLastDir` loadSongs reject → 不触发持久化（成功切换才持久化）、不 panic 不污染启动
   确认 FAIL
-- [ ] 3.3 `store/song.ts`：`import { saveLastDir } from '../api/songs'`；新增 `initLastDir` / `rememberLastDir(dir, saveDir = saveLastDir)`；`activateFolder` 末尾 `void rememberLastDir(dir)`（fire-and-forget）
+- [ ] 3.3 `store/song.ts`：`import { saveLastDir } from '../api/songs'`；新增 `initLastDir` / `rememberLastDir(dir, saveDir = saveLastDir)`；`activateFolder` 末尾 `void rememberLastDir(dir)`（fire-and-forget）；`await loadSongs(dir)` 后、写 `songs` 前加竞态守卫（`raw.folderPath !== dir` → stale 作废，不覆盖列表、不持久化）
 - [ ] 3.4 `npx vitest run src/store/song.test.ts` 保绿：**新增** `vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))`（现文件只 mock ../api/search），既有 activateFolder 用例不再走真实 invoke
 
 ## G4 启动自动加载（前端）
