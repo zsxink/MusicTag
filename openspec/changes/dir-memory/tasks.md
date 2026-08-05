@@ -3,7 +3,7 @@
 ## G1 Rust 配置模块（后端）
 
 - [ ] 1.1 `src-tauri/Cargo.toml`：`[dependencies]` 追加 `dirs = "6"`
-- [ ] 1.2 失败测试：`src-tauri/tests/config_tests.rs` 写 5 个用例（读写往返/缺失 None/损坏 None/目录已删 None/覆盖更新）；跑 `cargo test --manifest-path src-tauri/Cargo.toml --test config_tests` 确认 FAIL（app_lib::service::config 不存在）
+- [ ] 1.2 失败测试：`src-tauri/tests/config_tests.rs` 写 9 个用例（读写往返/缺失 None/损坏 None/字段缺失 None/目录已删 None/覆盖更新/保存失败 Err/空串 None/仅目录字段——覆盖 spec 全部场景含「不保存编辑状态·仅目录」与写失败路径）；跑 `cargo test --manifest-path src-tauri/Cargo.toml --test config_tests` 确认 FAIL（app_lib::service::config 不存在）
 - [ ] 1.3 实现 `src-tauri/src/service/config.rs`（`default_config_path`/`load_last_dir`/`save_last_dir`）：
   - `save_last_dir`：先 `fs::create_dir_all(parent)`，临时文件写同目录 → rename 原子替换（复用 tempfile+persist 模式），失败返回 `Err`
   - `load_last_dir`：`serde_json::from_str` 失败 → None；`last_dir` 非空且 `Path::new(&last_dir).is_dir()` 才返回 Some（目录已删 → None）
@@ -24,6 +24,7 @@
   - `initLastDir` 空/null dir → no-op（保持未打开空态）
   - `rememberLastDir` 注入 spy saveDir → 被调用一次；saveDir reject → 静默不抛出
   - `activateFolder` 触发 rememberLastDir（持久化点收敛）
+  - `initLastDir` loadSongs reject → 不触发持久化（成功切换才持久化）、不 panic 不污染启动
   确认 FAIL
 - [ ] 3.3 `store/song.ts`：`import { saveLastDir } from '../api/songs'`；新增 `initLastDir` / `rememberLastDir(dir, saveDir = saveLastDir)`；`activateFolder` 末尾 `void rememberLastDir(dir)`（fire-and-forget）
 - [ ] 3.4 `npx vitest run src/store/song.test.ts` 保绿：**新增** `vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))`（现文件只 mock ../api/search），既有 activateFolder 用例不再走真实 invoke

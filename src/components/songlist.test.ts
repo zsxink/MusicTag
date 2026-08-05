@@ -201,4 +201,24 @@ describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounte
     expect(w.text()).toContain('未打开文件夹')
     expect(w.text()).not.toContain('文件夹中没有音乐')
   })
+
+  it('getLastDir 返回目录但 list_songs IPC 失败 → 启动自动加载失败静默降级（不 unhandled、保持空态）', async () => {
+    // 失败路径（tester 审计）：启动自动加载的列表加载失败（list_songs IPC 异常）——
+    // getLastDir 的 .catch 只兜 getLastDir 自身，initLastDir 的 rejection 在组件边界无 catch。
+    // 期望：与「无记忆空态」同语义静默降级——folderPath 不残留半打开态、不产生 unhandled rejection。
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_last_dir') return '/music'
+      if (cmd === 'list_songs') throw new Error('list_songs IPC failed')
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+
+    const w = mount(SongList)
+    await flushPromises()
+
+    expect(mockInvoke).toHaveBeenCalledWith('get_last_dir', undefined)
+    expect(mockInvoke).toHaveBeenCalledWith('list_songs', { dir: '/music' })
+    expect(songStore.folderPath).toBeNull() // 期望：启动失败 → 保持「未打开文件夹」空态（当前实现残留 '/music'，此断言失败即缺陷）
+    expect(songStore.songs).toEqual([])
+    expect(w.text()).toContain('未打开文件夹')
+  })
 })

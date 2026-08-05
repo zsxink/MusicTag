@@ -38,7 +38,7 @@ pub fn save_last_dir(path: &Path, dir: &str) -> Result<(), String>  // 原子写
 
 **目录已删降级**：`load_last_dir` 解析出 `last_dir` 字符串后必须 `Path::new(&last_dir).is_dir()` 校验——目录不存在或非目录 → `None`（spec「目录已删降级」）。该校验同时保护 `get_last_dir` 与 `pick_folder` 的起始定位，二者都不会打开不存在的目录。
 
-**仅目录**：serde 结构体只含 `last_dir` 单字段（spec「不保存编辑状态」）：`#[derive(Serialize, Deserialize)] struct Config { last_dir: Option<String> }`——不持久化选中歌曲/编辑草稿/搜索候选；`load_last_dir` 用 `serde_json::from_str`，JSON 损坏或字段缺失 → `None`。
+**仅目录**：serde 结构体只含 `last_dir` 单字段（spec「不保存编辑状态」）：`#[derive(Serialize, Deserialize)] struct Config { last_dir: Option<String> }`——不持久化选中歌曲/编辑草稿/搜索候选；`load_last_dir` 用 `serde_json::from_str`：JSON 损坏 → `None`；`last_dir` 为 `Option` 字段，字段缺失反序列化默认 `None`（与损坏同归静默降级）；`last_dir` 为空串（`""`）→ 以 `.filter(|d| !d.is_empty())` 过滤为 `None`（防空串路径打开当前目录）。两个边界分别有测试锚定：`missing_last_dir_field_returns_none`（字段缺失）、`empty_string_last_dir_returns_none`（空串）。spec「仅目录」与写失败路径亦分别由 `config_json_contains_only_last_dir_field`（断言 config.json 只含 `last_dir` 单字段）与 `save_failure_reports_err`（写失败 → `Err`，命令层 fire-and-forget 吞掉，下次启动自然降级）锚定。
 
 ### 2. command 层（commands/folder.rs）
 
