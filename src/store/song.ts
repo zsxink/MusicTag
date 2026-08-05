@@ -11,6 +11,7 @@ import { fetchLyric as defaultFetchLyric } from '../api/search'
 import { searchSongs as defaultSearchSongs } from '../api/search'
 import { searchSource as defaultSearchSource } from '../api/search'
 import { renameSong as defaultRename } from '../api/songs'
+import { saveLastDir as defaultSaveLastDir } from '../api/songs'
 import { saveSong as defaultSave } from '../api/songs'
 import type {
   CoverInput,
@@ -158,7 +159,47 @@ export async function activateFolder(
   raw.pendingRename = null // design.md D8：换目录弃置改名草稿
   raw.renameRejected = false
   resetSearchState() // D5：换目录候选生命周期 = 当前歌曲，作废在途搜索（isOffline 会话级不清）
-  raw.songs = await loadSongs(dir)
+  const songs = await loadSongs(dir)
+  // 竞态守卫（tester 审计）：await 期间用户可能已切到新目录（folderPath 已变）——
+  // 慢的旧目录响应后到不得覆盖新目录的 songs / last_dir（换目录即持久化以最新成功切换为准）。
+  // 守卫在写 songs 之前：本次结果若已 stale（folderPath ≠ dir），整段作废，不覆盖列表、不持久化。
+  if (raw.folderPath !== dir) return
+  raw.songs = songs
+  // dir-memory：持久化点唯一收敛于此——手动路径（requestFolder → dirty 拦截 → resolvePending 后）
+  // 与启动路径（initLastDir → activateFolder）都汇到这里，保证「成功切换才持久化」且不重复。
+  // fire-and-forget：不阻塞列表加载（rememberLastDir 内部吞失败，不 panic）。
+  void rememberLastDir(dir)
+}
+
+/**
+ * 启动自动加载上次目录（dir-memory）：dir 非空 → 复用 `activateFolder` 激活链路
+ * （含列表加载、搜索重置语义；启动时无 dirty，不经 requestFolder 弹窗）；
+ * dir 空 / null / undefined（`getLastDir` 返回 None，含目录已删）→ no-op，
+ * 保持「未打开文件夹」空态。dir 由调用方（SongList onMounted）从 `getLastDir()` 获取后传入，
+ * store 不依赖 IPC 类型。
+ */
+export async function initLastDir(
+  dir: string,
+  loadSongs: (dir: string) => Promise<SongSummary[]>,
+): Promise<void> {
+  if (dir === undefined || dir === null || dir === '') return
+  await activateFolder(dir, loadSongs)
+}
+
+/**
+ * 持久化上次打开目录（dir-memory）：`saveDir(dir)` 包 try/catch，失败静默
+ * （fire-and-forget，不向外报错——下次启动自然降级为无记忆）。`saveDir` 可注入
+ * （仿 `saveFn` 先例，store 单测可传 spy 桩），默认 `api/songs.ts` 的 `saveLastDir`。
+ */
+export async function rememberLastDir(
+  dir: string,
+  saveDir: (dir: string) => Promise<void> = defaultSaveLastDir,
+): Promise<void> {
+  try {
+    await saveDir(dir)
+  } catch {
+    // 失败静默吞掉：持久化是尽力而为，不影响当前会话（列表/编辑照常）
+  }
 }
 
 /**
