@@ -2,7 +2,8 @@
 // 覆盖 spec 场景：首次启动渲染授权遮罩、同意 → 写持久化 + 关遮罩、拒绝 → 调 closeWindow、
 // 已同意 → 不渲染（二次启动不弹）。零 Tauri 模块依赖（组件不 import @tauri-apps/api/*）。
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { h } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
 
 // 桩 store/eula 三个函数：isEulaAccepted（自门禁）由用例设置，acceptEula/rejectEula 记录调用。
 const { mockIsAccepted, mockAccept, mockReject } = vi.hoisted(() => ({
@@ -81,6 +82,43 @@ describe('EulaDialog — 拒绝 → 退出应用（spec「拒绝则退出应用�
     expect(mockReject).toHaveBeenCalledTimes(1)
     // rejectEula 关闭窗口，应用退出；组件侧不写持久化、不清门禁
     expect(mockAccept).not.toHaveBeenCalled()
+  })
+})
+
+describe('EulaDialog — 键盘隔离（CR：遮罩期间主界面 inert + 初始焦点落「同意并继续」）', () => {
+  // 包装父容器模拟 `.app`：主界面按钮 + EulaDialog 遮罩为兄弟节点
+  const mountWithMain = () =>
+    mount({
+      render: () => h('div', [h('button', { class: 'main-ui', type: 'button' }, '主界面按钮'), h(EulaDialog)]),
+    })
+
+  it('遮罩渲染时对主界面兄弟节点置 inert（Tab 不可聚焦遮罩下方控件）', () => {
+    const w = mountWithMain()
+    const mainBtn = w.find('button.main-ui')
+    expect(mainBtn.exists()).toBe(true)
+    expect(mainBtn.element.hasAttribute('inert')).toBe(true)
+    // 遮罩自身不可 inert——「同意并继续 / 拒绝」按钮须可聚焦
+    const overlay = w.get('[data-testid="eula-dialog"]').element.parentElement!
+    expect(overlay.className).toContain('overlay')
+    expect(overlay.hasAttribute('inert')).toBe(false)
+  })
+
+  it('同意关闭后移除主界面 inert（恢复可交互）', async () => {
+    const w = mountWithMain()
+    expect(w.find('button.main-ui').element.hasAttribute('inert')).toBe(true)
+
+    const acceptBtn = w.findAll('button').find((b) => b.text() === '同意并继续')!
+    await acceptBtn.trigger('click')
+
+    expect(mockAccept).toHaveBeenCalledTimes(1)
+    expect(w.find('button.main-ui').element.hasAttribute('inert')).toBe(false)
+  })
+
+  it('初始焦点落「同意并继续」（安全默认，回车即同意）', async () => {
+    const w = mount(EulaDialog, { attachTo: document.body })
+    await flushPromises() // 等 onMounted 的 nextTick 聚焦微任务
+    expect(document.activeElement?.textContent).toBe('同意并继续')
+    w.unmount()
   })
 })
 

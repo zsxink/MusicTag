@@ -5,12 +5,47 @@
 // 遮罩与主界面同帧渲染，无「主界面先闪现再盖遮罩」的启动闪烁。
 // 分层：组件只依赖 store/eula（组件→store 方向合法，守 §10.0）；
 // **不直引 Tauri IPC 模块**（layering 守卫禁止组件 invoke）；窗口关闭经 store env 注入（defaultEnv 的 closeWindow）。
-import { ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { acceptEula, isEulaAccepted, rejectEula } from '../store/eula'
 
 /** 自门禁：已同意 → 不渲染；未同意 → 渲染全窗口模态。同步计算（localStorage 同步读）。 */
 const showDialog = ref(!isEulaAccepted())
+
+// CR(pre-release-check)：overlay position:fixed 只拦指针不拦键盘——Tab 可聚焦遮罩下方的
+// AppBar/SongList/Editor 交互控件并以回车触发，spec「主界面不可交互」可被键盘绕过。
+// 修复：showDialog 为 true 时对 `.app` 内遮罩以外的兄弟节点加 `inert`（主界面键盘+指针均不可交互），
+// 并把初始焦点置于「同意并继续」（安全默认，回车即同意）；同意关闭后移除 inert。
+const overlayEl = ref<HTMLElement | null>(null)
+const acceptBtnEl = ref<HTMLButtonElement | null>(null)
+/** 被置 inert 的主界面兄弟节点（遮罩自身不可 inert——同意/拒绝按钮需可聚焦）。 */
+let inertedSiblings: Element[] = []
+
+function applyInert(active: boolean) {
+  if (active) {
+    const overlay = overlayEl.value
+    const root = overlay?.parentElement
+    inertedSiblings = root ? Array.from(root.children).filter((el) => el !== overlay) : []
+    for (const el of inertedSiblings) el.setAttribute('inert', '')
+  } else {
+    for (const el of inertedSiblings) el.removeAttribute('inert')
+    inertedSiblings = []
+  }
+}
+
+onMounted(() => {
+  if (showDialog.value) {
+    applyInert(true)
+    void nextTick(() => acceptBtnEl.value?.focus())
+  }
+})
+
+watch(showDialog, (open) => {
+  applyInert(open)
+  if (open) void nextTick(() => acceptBtnEl.value?.focus())
+})
+
+onBeforeUnmount(() => applyInert(false))
 
 function onAccept() {
   acceptEula()
@@ -23,7 +58,7 @@ function onReject() {
 </script>
 
 <template>
-  <div v-if="showDialog" class="overlay">
+  <div v-if="showDialog" ref="overlayEl" class="overlay">
     <div
       class="dialog"
       role="dialog"
@@ -41,7 +76,7 @@ function onReject() {
       </ul>
       <p class="dialog-footnote">完整协议见仓库 <span class="mono">README</span> 与 <span class="mono">LICENSE</span>（Business Source License 1.1）。</p>
       <div class="dialog-actions">
-        <button class="btn btn-primary" type="button" @click="onAccept">同意并继续</button>
+        <button ref="acceptBtnEl" class="btn btn-primary" type="button" @click="onAccept">同意并继续</button>
         <button class="btn btn-danger" type="button" @click="onReject">拒绝</button>
       </div>
     </div>

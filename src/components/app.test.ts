@@ -196,27 +196,47 @@ describe('App — EulaDialog 授权门禁（pre-release-check：首次启动弹�
     songStore.pendingAction = null
   })
 
+  // CR(pre-release-check)：overlay 只拦指针不拦键盘——遮罩期间 `.app` 内主界面兄弟节点须 `inert`（键盘+指针均不可交互）
+  const mainSiblingsOf = (w: ReturnType<typeof mount<typeof App>>) => {
+    const overlay = w.get('[data-testid="eula-dialog"]').element.parentElement! // div.overlay，`.app` 直属子节点
+    return Array.from(w.get('.app').element.children).filter(
+      (el) => el !== overlay && el.nodeType === 1,
+    )
+  }
+
   it('默认未同意 → EulaDialog 全窗口模态遮罩存在（主界面不可交互，spec 场景）', () => {
     const w = mount(App)
     const dialog = w.get('[data-testid="eula-dialog"]')
     expect(dialog.attributes('role')).toBe('dialog')
     expect(dialog.attributes('aria-modal')).toBe('true')
+
+    // 主界面（AppBar/workspace 等 `.app` 内除遮罩外的兄弟）置 inert——Tab 不可聚焦到下方控件
+    const siblings = mainSiblingsOf(w)
+    expect(siblings.length).toBeGreaterThan(0)
+    for (const el of siblings) expect(el.hasAttribute('inert')).toBe(true)
   })
 
   it('已同意（localStorage=\'1\'）→ EulaDialog 不渲染（二次启动不弹窗，spec 场景）', () => {
     window.localStorage.setItem(EULA_STORAGE_KEY, '1')
     const w = mount(App)
     expect(w.find('[data-testid="eula-dialog"]').exists()).toBe(false)
+    // 不弹窗 → 不残留 inert（主界面正常可交互）
+    const siblings = Array.from(w.get('.app').element.children).filter((el) => el.nodeType === 1)
+    for (const el of siblings) expect(el.hasAttribute('inert')).toBe(false)
   })
 
   it('点「同意并继续」→ 写 localStorage + 遮罩消失（进入主界面）', async () => {
     const w = mount(App)
     expect(w.find('[data-testid="eula-dialog"]').exists()).toBe(true)
+    const siblings = mainSiblingsOf(w)
+    expect(siblings[0].hasAttribute('inert')).toBe(true)
 
     const acceptBtn = w.findAll('button').find((b) => b.text() === '同意并继续')!
     await acceptBtn.trigger('click')
 
     expect(window.localStorage.getItem(EULA_STORAGE_KEY)).toBe('1')
     expect(w.find('[data-testid="eula-dialog"]').exists()).toBe(false)
+    // 关闭后 inert 移除——主界面恢复可交互
+    for (const el of siblings) expect(el.hasAttribute('inert')).toBe(false)
   })
 })
