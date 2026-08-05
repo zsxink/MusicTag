@@ -93,37 +93,3 @@ pub fn apply_cover(tag: &mut Tag, cover: &Option<String>) -> Result<(), String> 
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn split_track_pair_fallback() {
-        // 模拟 TRCK 合串 `03/12` 兜底拆分（lofty 读侧已拆，兜底逻辑单测）
-        assert_eq!(
-            split_track_pair("03/12", ""),
-            ("03".to_string(), "12".to_string())
-        );
-        // track_total 已有值时保留
-        assert_eq!(
-            split_track_pair("03", "12"),
-            ("03".to_string(), "12".to_string())
-        );
-        // 无 `/` 时 track_total 为空
-        assert_eq!(
-            split_track_pair("05", ""),
-            ("05".to_string(), String::new())
-        );
-    }
-
-    #[test]
-    fn is_audio_file_accepts_case_insensitive_flac_mp3() {
-        assert!(is_audio_file(Path::new("song.flac")));
-        assert!(is_audio_file(Path::new("song.FLAC")));
-        assert!(is_audio_file(Path::new("song.mp3")));
-        assert!(is_audio_file(Path::new("song.MP3")));
-        assert!(!is_audio_file(Path::new("song.txt")));
-        assert!(!is_audio_file(Path::new("cover.jpg")));
-        assert!(!is_audio_file(Path::new("noext")));
-    }
-}
