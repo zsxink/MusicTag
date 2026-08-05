@@ -28,8 +28,8 @@
       "issue": 89,
       "domain": "frontend",
       "dependsOn": ["ui-editor-layout"],
-      "status": "todo",
-      "implementationCommit": null,
+      "status": "done",
+      "implementationCommit": "2829a2d",
       "slice": "设计文档 §二 2.3；Plan A Task 3"
     },
     {
@@ -60,7 +60,7 @@
       "slice": "总复核门禁：全部子项合并后对最终仓库状态做只读独立复核"
     }
   ],
-  "cursor": 2,
+  "cursor": 3,
   "error": null,
   "sourceRevision": "21f74f1214b3cff2a27b0fded30c9975a8de68a5"
 }
