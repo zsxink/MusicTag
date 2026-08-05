@@ -309,7 +309,7 @@ enum SearchError {
 > - **惰性拉取**：候选列表秒出——封面 URL 随搜索结果带出，点选封面才 `download_cover`（单独 5s 超时 + 响应限流）；歌词文本点选候选行才 `fetch_lyric`。
 > - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1`；归一化 = trim + 全角半角 + 小写折叠（V1 不做简繁转换）；按归一化 `(title, artist)` 去重保留最高分。
 > - **Tauri command 全量**（前端一律 `invoke` 调用；TS 类型与 `design/design.md` §10.3 对齐）：
->   - 文件：`pick_folder() -> Option<String>`（rfd 文件夹选择器）、`list_songs(dir) -> Vec<SongSummary>`、`open_song(path) -> Result<Song, String>`、`save_song(song, exportLrc) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`、`get_last_dir(dir) -> Option<String>`（读上次打开目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 记住本次目录，失败静默）
+>   - 文件：`pick_folder() -> Option<String>`（rfd 文件夹选择器）、`list_songs(dir) -> Vec<SongSummary>`、`open_song(path) -> Result<Song, String>`、`save_song(song, exportLrc) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`、`get_last_dir() -> Option<String>`（读上次打开目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 记住本次目录，失败静默）
 >   - 封面：`pick_cover_file() -> Option<CoverInput>`（rfd 文件对话框，jpg/png/webp）、`read_cover_path(path) -> Result<CoverInput, String>`（拖拽路径读 bytes）；两者返回 `CoverInput`（`data_url` 压缩小图 + `mime`），封面跨 IPC 用 base64 data URL
 >   - 搜索：`search_song(title, artist) -> SearchResult`、`search_source(source, title, artist) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过聚合去重）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）
 >   - 前端只管展示，文件 I/O 与网络请求全走 Rust command。

@@ -35,6 +35,28 @@ const uniqSort = (cmds: string[]) => [...new Set(cmds)].sort()
 const lib = read('../../src-tauri/src/lib.rs')
 const libCommands = uniqSort([...lib.matchAll(/commands::([a-z_]+)::([a-z_]+)/g)].map((m) => m[2]))
 
+// 真值签名：commands/*.rs 定义文件 `pub fn name(` / `pub async fn name(`。
+// 13 个 command 中无参者恰为 pick_folder / pick_cover_file / get_last_dir。
+// 从定义文件提取（lib.rs 只注册不定义 download_cover 等，签名不在 lib.rs）。
+const sigSource = ['folder.rs', 'song.rs', 'cover.rs', 'search.rs']
+  .map((f) => read(`../../src-tauri/src/commands/${f}`))
+  .join('\n')
+const libSignature = (name: string): string => {
+  const m = sigSource.match(new RegExp(`pub (?:async )?fn ${name}\\(([^)]*)\\)`))
+  if (!m) throw new Error(`[command-contract] commands/*.rs 未找到签名: pub fn ${name}(`)
+  return m[1].trim()
+}
+const libParamless = libCommands.filter((c) => libSignature(c) === '').sort()
+const assertParamless = (name: string, cmds: string[], cmdText: string) => {
+  const wrong = libParamless.filter(
+    (c) => !new RegExp(`\`${c}\\(\\)`).test(cmdText),
+  )
+  expect(
+    wrong,
+    `${name} 无参 command 签名错误（真值 lib.rs 无参）: [${wrong.join(', ')}]`,
+  ).toEqual([])
+}
+
 // ---- design.md §10.3：切片「### 10.3」→「### 10.4」，表行 `name(` 形态 ----
 // §10.3 前置 TS 类型表行（`source`/`lyrics_source`/`cover`…）无 `name(` 形态不误中。
 const design = read('../../docs/design/design.md')
@@ -81,5 +103,15 @@ describe('Tauri command 契约一致性守卫（真值 = lib.rs generate_handler
   it.each(sources)('%s 契约清单去重后恰为 13 个（防正则漏匹配）', (_name, cmds) => {
     expect(cmds, `${_name} 提取到 ${cmds.length} 个: [${cmds.join(', ')}]`).toHaveLength(13)
     expect(new Set(cmds).size).toBe(13)
+  })
+
+  // 签名层 spot-check：lib.rs 无参 command 在三源契约表中必须写成 `name()`（无参）。
+  // 防「仅名称一致、签名漂移」漏检——tester 抓到的 PRD §7 get_last_dir(dir) 即此类。
+  it('design §10.3 无参 command 签名一致（pick_folder/pick_cover_file/get_last_dir 为 `name()`）', () => {
+    assertParamless('design §10.3', designCommands, designSlice)
+  })
+
+  it('PRD §7 无参 command 签名一致（pick_folder/pick_cover_file/get_last_dir 为 `name()`）', () => {
+    assertParamless('PRD §7', prdCommands, prdSlice)
   })
 })
