@@ -41,7 +41,7 @@
 
 ## G6 searcher/mod（依赖 G5，最大 994 行 + test_util 删除收尾）
 
-- [x] 6.1 列全被测私有项（`search_song_with_sources`、`search_source_with`、`download_cover_with_timeout`、`to_halfwidth`、`title_match`、`artist_match`、`source_rank`）→ 提 `pub`（另 `TOP_N`；`aggregate`/`norm` 已 `pub`）；`pub` 项 rustc 不报 dead_code，实测 clippy 零警告，无需 allow
+- [x] 6.1 列全被测私有项（`search_song_with_sources`、`search_source_with`、`download_cover_with_timeout`、`title_match`、`artist_match`）→ 提 `pub`（另 `TOP_N`；`aggregate`/`norm` 已 `pub`）；`pub` 项 rustc 不报 dead_code，实测 clippy 零警告，无需 allow
 - [x] 6.2 新建 `tests/searcher_mod_tests.rs`：`use super::*` 展开为具体 `use app_lib::service::searcher::{...}`；`MusicSource` trait 用 `use app_lib::service::searcher::MusicSource;`（已是 `pub trait`）；fake 源/cand helper 复制进文件；`mod common;` + `use common::mock_http_once;`
 - [x] 6.3 删除生产文件 `test_util`（含 `json_string` 已是 `pub(crate)`，保留不动）+ 整个 `#[cfg(test)] mod tests` → `cargo test` 保绿 → 提交
 
@@ -52,3 +52,4 @@
 - [x] 7.3 `docs/design/design.md` §10.4 升级为「一律外置 tests/，src/ 零 #[cfg(test)]，共用工具收 tests/common/」
 - [x] 7.4 `src/styles/design-layering.test.ts` 守卫同步：第 33–37 行断言 `/inline|内联/` 在 §10.4 改写后**必然失败**——把测试标题「文件 I/O 集成测试外置 + 纯逻辑单测 inline」改为「Rust 测试一律外置 tests/」，断言 `/inline|内联/` 改为新文案（如 `/外置/`）；`npx vitest run src/styles/design-layering.test.ts` 保绿
 - [x] 7.5 提交：`refactor(90): Rust 生产/测试彻底分离——13 文件内嵌单测拆到 tests/ + §10.4 升级 + 守卫同步`（分支 rust-tests-separation，PR Closes #90）
+- [x] 7.6 可见性收缩（tester 断言补修，design.md 清单已同步）：无测试引用的 4 个误提项恢复私有——kugou `now_millis`/`random_md5_hex`、mod `to_halfwidth`/`source_rank`（测试零引用、仅有生产调用方，恢复后无 dead_code、clippy 全绿）→ `cargo test --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml` 保绿 → 提交 `fix(90): 4 个无测试引用的私有项恢复私有`

@@ -51,14 +51,16 @@ tests/*_tests.rs ──use app_lib──▶ commands/*（薄壳，pub fn，直�
 | `service/cover.rs` | — | `MAX_DIM`（测试断言压缩边界） |
 | `service/rename.rs` | `is_illegal_name`（测试直接引用） | — |
 | `service/searcher/crypto.rs` | `aes_ecb_encrypt` | —（`aes_cbc_encrypt` 测试仅经 `weapi` 间接调用，保持私有） |
-| `service/searcher/mod.rs` | `search_song_with_sources`、`search_source_with`、`download_cover_with_timeout`、`to_halfwidth`、`title_match`、`artist_match`、`source_rank` | `TOP_N` |
+| `service/searcher/mod.rs` | `search_song_with_sources`、`search_source_with`、`download_cover_with_timeout`、`title_match`、`artist_match` | `TOP_N` |
 | `service/searcher/netease.rs` | `search_payload`、`lyric_payload`、`is_error_response`、`parse_search_response`、`parse_lyric_response` | `CLOUDSEARCH_URL`、`forward_url` |
 | `service/searcher/qqmusic.rs` | `is_error_response`、`parse_search_response`、`parse_lyric_response` | `search_url`、`lyric_url_base` |
-| `service/searcher/kugou.rs` | `now_millis`、`random_md5_hex`、`signature`、`search_params`、`is_error_response`、`parse_search_response`、`parse_lyric_search`、`parse_lyric_download` | `search_url`、`lyric_search_url`、`lyric_download_url` |
+| `service/searcher/kugou.rs` | `signature`、`search_params`、`is_error_response`、`parse_search_response`、`parse_lyric_search`、`parse_lyric_download` | `search_url`、`lyric_search_url`、`lyric_download_url` |
 | `service/searcher/itunes.rs` | `parse_search_response` | `search_url` |
 | `service/searcher/lrclib.rs` | `parse_search_response`、`parse_lyric_response` | `search_url`、`lyric_url_base` |
 
 > 不做全量提权：仅「被测试直接引用」的私有项提升，其余保持私有。`commands/cover.rs`/`model.rs`/`service/{lyrics,meta}.rs` 函数与类型本就全 `pub`，无提权。
+>
+> **可见性收缩（tester 断言，G7 后补修）**：初版提权曾误提 `now_millis`/`random_md5_hex`（kugou）、`to_halfwidth`/`source_rank`（mod.rs）——这四项测试**零引用**（`source_rank` 仅出现在测试函数名 `aggregate_tie_keeps_full_five_source_rank_order`，非代码引用），无提权必要，已恢复私有。四项均有生产调用方（`signature`/`search_params`/`norm`/`aggregate`），恢复私有不产生 dead_code，clippy 仍全绿。**最终提权面 = 上表，恰好等于「被测试引用」集合**，与 spec 可见性最小化场景一致。
 
 ### mock_http_once 落位
 
