@@ -1809,4 +1809,31 @@ describe('songStore — dir-memory 记住上次目录（design.md dir-memory：i
     expect(songStore.folderPath).toBeNull() // 保持未打开（beforeEach 空态）
     expect(mockInvoke).not.toHaveBeenCalledWith('save_last_dir', expect.anything())
   })
+
+  it('并发切换目录：慢的旧目录响应后到 → 不得覆盖新目录的 last_dir（竞态守卫）', async () => {
+    // 竞态（tester 审计）：activateFolder 在 `await loadSongs(dir)` **之后**才 rememberLastDir——
+    // 连续两次换目录时，慢的旧目录响应后到会覆盖新的 last_dir（下次启动错误打开旧目录），
+    // 且 raw.songs 也被旧目录列表污染（folderPath 却已是新目录，列表错位）。
+    // 期望：持久化只反映当前激活目录（换目录即持久化，spec 语义以最新一次成功切换为准）。
+    mockInvoke.mockClear()
+    let resolveA!: (v: SongSummary[]) => void
+    let resolveB!: (v: SongSummary[]) => void
+    const loadA = vi.fn(() => new Promise<SongSummary[]>((r) => (resolveA = r)))
+    const loadB = vi.fn(() => new Promise<SongSummary[]>((r) => (resolveB = r)))
+
+    const pA = activateFolder('/a', loadA) // 慢：先发起，后到
+    const pB = activateFolder('/b', loadB) // 快：后发起，先到
+    expect(songStore.folderPath).toBe('/b')
+
+    resolveB([{ path: '/b/x.flac', title: 'B', artist: 'BB' }])
+    await pB
+    expect(songStore.folderPath).toBe('/b')
+    expect(mockInvoke).toHaveBeenLastCalledWith('save_last_dir', { dir: '/b' }) // 新目录已持久化
+
+    resolveA([{ path: '/a/x.flac', title: 'A', artist: 'AA' }])
+    await pA
+    expect(songStore.folderPath).toBe('/b') // 当前仍是新目录
+    expect(songStore.songs).toEqual([{ path: '/b/x.flac', title: 'B', artist: 'BB' }]) // 不被旧目录列表污染
+    expect(mockInvoke).toHaveBeenLastCalledWith('save_last_dir', { dir: '/b' }) // 旧目录不得覆盖 last_dir
+  })
 })

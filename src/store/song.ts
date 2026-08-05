@@ -159,7 +159,12 @@ export async function activateFolder(
   raw.pendingRename = null // design.md D8：换目录弃置改名草稿
   raw.renameRejected = false
   resetSearchState() // D5：换目录候选生命周期 = 当前歌曲，作废在途搜索（isOffline 会话级不清）
-  raw.songs = await loadSongs(dir)
+  const songs = await loadSongs(dir)
+  // 竞态守卫（tester 审计）：await 期间用户可能已切到新目录（folderPath 已变）——
+  // 慢的旧目录响应后到不得覆盖新目录的 songs / last_dir（换目录即持久化以最新成功切换为准）。
+  // 守卫在写 songs 之前：本次结果若已 stale（folderPath ≠ dir），整段作废，不覆盖列表、不持久化。
+  if (raw.folderPath !== dir) return
+  raw.songs = songs
   // dir-memory：持久化点唯一收敛于此——手动路径（requestFolder → dirty 拦截 → resolvePending 后）
   // 与启动路径（initLastDir → activateFolder）都汇到这里，保证「成功切换才持久化」且不重复。
   // fire-and-forget：不阻塞列表加载（rememberLastDir 内部吞失败，不 panic）。

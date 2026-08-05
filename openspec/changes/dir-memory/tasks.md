@@ -31,8 +31,8 @@
 
 ## G4 启动自动加载（前端）
 
-- [ ] 4.1 `src/components/SongList.vue`：onMounted 调 `getLastDir()` → 非空 → `initLastDir(dir, (d) => listSongs(d))`（保留既有 keydown 监听）
-- [ ] 4.2 `npx vitest run src/components/songlist.test.ts` 保绿（mock `get_last_dir` 返回 null → 无自动加载、保持空态）
+- [ ] 4.1 `src/components/SongList.vue`：onMounted 调 `getLastDir()` → 非空 → `initLastDir(dir, (d) => listSongs(d))`（保留既有 keydown 监听）；失败路径兜底——`getLastDir` IPC 异常 → `.catch` no-op；`initLastDir`（list_songs IPC）失败 → `.catch` 复位 `folderPath=null`/`songs=[]`（防半打开态误显「文件夹中没有音乐」）
+- [ ] 4.2 `npx vitest run src/components/songlist.test.ts` 保绿（4 用例：get_last_dir null → 空态；有效目录 → 自动加载列表；get_last_dir IPC 异常 → 静默空态；list_songs IPC 失败 → 复位空态不 unhandled）
 
 ## G5 文档 + 全量验证 + 提交
 

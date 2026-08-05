@@ -75,7 +75,7 @@ pub fn save_last_dir(dir: String) {
   - `rememberLastDir(dir, saveDir = saveLastDir)`：`saveDir(dir)` 包 try/catch，失败静默（可注入，仿 `saveFn` 先例，store 单测可传 spy 桩）。
   - `activateFolder` 末尾 `void rememberLastDir(dir)`（fire-and-forget，不阻塞列表加载）。**持久化点唯一收敛于 `activateFolder`**：手动路径（`requestFolder` → dirty 拦截 → `resolvePending` 后）与启动路径（`initLastDir` → `activateFolder`）都汇到这里，保证「成功切换才持久化」且不重复。
   - `initLastDir(dir, loadSongs)`：dir 非空 → `activateFolder(dir, loadSongs)`（复用激活链路，含列表加载、搜索重置语义；启动时无 dirty，不经 `requestFolder` 弹窗）；dir 空 / undefined（`getLastDir` 返回 None，含目录已删）→ no-op，保持「未打开文件夹」空态。dir 由调用方（SongList onMounted）从 `getLastDir()` 获取后传入，store 不依赖 IPC 类型。
-- `SongList.vue` onMounted：`getLastDir()` → 非空 → `initLastDir(dir, (d) => listSongs(d))`；保留既有 keydown 监听。onMounted 内异步调用不阻塞渲染；启动期用户手点打开与 `getLastDir` 竞态窗口极小（onMounted 立即触发、响应先于用户交互），不额外处理。
+- `SongList.vue` onMounted：`getLastDir()` → 非空 → `initLastDir(dir, (d) => listSongs(d))`；保留既有 keydown 监听。onMounted 内异步调用不阻塞渲染；启动期用户手点打开与 `getLastDir` 竞态窗口极小（onMounted 立即触发、响应先于用户交互），不额外处理。**失败路径静默降级**（spec「不 panic、不污染启动」）：`getLastDir` IPC 异常 → `.catch` no-op 保持空态；`getLastDir` 返回目录但 `initLastDir` 内 `list_songs` IPC 失败 → 组件边界 `.catch` 复位 `folderPath=null`、`songs=[]`——`activateFolder` 已先设 `folderPath`（半打开态 + 空列表会误显「文件夹中没有音乐」），须复位为「未打开文件夹」空态、与无记忆同语义、不产生 unhandled rejection（songlist.test.ts 两条失败路径用例锚定）。
 
 ### 4. 文档同步
 
