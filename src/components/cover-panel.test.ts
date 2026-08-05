@@ -555,6 +555,17 @@ describe('CoverPanel — 候选区折叠（candidate-collapse：默认展开、�
     expect(w.find('.cand-toggle').text()).toContain('展开候选')
   })
 
+  it('重新展开 → .cand-wrap 恢复显示、按钮文案「隐藏候选 ▲」', async () => {
+    songStore.coverSearchState = 'done'
+    songStore.coverCandidates = [cand()]
+    const w = mount(CoverPanel)
+    await w.find('.cand-toggle').trigger('click') // 收起
+    expect(candWrapDisplay(w)).toBe('none')
+    await w.find('.cand-toggle').trigger('click') // 再点展开
+    expect(candWrapDisplay(w)).not.toBe('none')
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
+  })
+
   it('跨切歌保持：收起后新歌候选到来 → 仍折叠', async () => {
     songStore.coverSearchState = 'done'
     songStore.coverCandidates = [cand()]
@@ -572,5 +583,13 @@ describe('CoverPanel — 候选区折叠（candidate-collapse：默认展开、�
   it('候选区无内容（idle 且无候选/非离线）→ 不显示折叠按钮、无占位', () => {
     const w = mount(CoverPanel)
     expect(w.find('.cand-toggle').exists()).toBe(false)
+  })
+
+  it('空态分支（done + 候选空）也算有内容 → 显示折叠按钮（spec「空态」属有内容）', () => {
+    songStore.coverSearchState = 'done'
+    songStore.coverCandidates = []
+    const w = mount(CoverPanel)
+    expect(w.find('.cand-empty').exists()).toBe(true) // 空态渲染
+    expect(w.find('.cand-toggle').exists()).toBe(true) // 有内容 → 显示按钮
   })
 })
