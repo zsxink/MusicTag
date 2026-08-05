@@ -38,9 +38,13 @@ onMounted(() => {
       // rejection 兜底复位空态——list_songs IPC 失败时 activateFolder 已先设 folderPath
       // （半打开态 + 空列表，UI 会误显「文件夹中没有音乐」），此处复位为「未打开文件夹」
       // 空态，与无记忆空态同语义，且不产生 unhandled rejection（tester 审计）。
+      // 竞态守卫（tester 审计）：仅当仍处于启动目录时才复位——用户已手动切到新目录
+      // （启动 loadSongs 慢、晚于手动切换才失败）时，不得清掉手动切换的目录。
       return initLastDir(dir, (d) => listSongs(d)).catch(() => {
-        songStore.folderPath = null
-        songStore.songs = []
+        if (songStore.folderPath === dir) {
+          songStore.folderPath = null
+          songStore.songs = []
+        }
       })
     })
     .catch(() => {
