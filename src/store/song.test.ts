@@ -1763,4 +1763,50 @@ describe('songStore — dir-memory 记住上次目录（design.md dir-memory：i
     await activateFolder('', loadSongs)
     expect(mockInvoke).not.toHaveBeenCalledWith('save_last_dir', expect.anything())
   })
+
+  it('initLastDir loadSongs reject → 不触发持久化（成功切换才持久化）、不 panic 不污染启动', async () => {
+    // 列表加载失败（list_songs IPC 异常/目录读不出）→ 未成功切换，不应把失败目录记为 last_dir。
+    mockInvoke.mockClear()
+    const loadSongs = vi.fn(async () => {
+      throw new Error('list_songs IPC failed')
+    })
+
+    await expect(initLastDir('/music', loadSongs)).rejects.toThrow('list_songs IPC failed')
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_last_dir', expect.anything())
+  })
+
+  it('换目录手动路径（requestFolder→resolvePending discard）→ 持久化 save_last_dir（换目录即更新记忆）', async () => {
+    // 「换目录即持久化」经真实用户路径收敛：dirty 弹窗 → 丢弃 → activateFolder → save_last_dir。
+    mockInvoke.mockClear()
+    songStore.current = makeSong()
+    songStore.original = makeSong() // 独立对象：改 current.title 才能把 dirty 置 true
+    songStore.current!.title = '改过'
+    expect(songStore.dirty).toBe(true)
+
+    requestFolder('/new/dir', vi.fn(async () => []))
+    expect(songStore.pendingAction).not.toBeNull()
+    await resolvePending('discard')
+
+    expect(songStore.folderPath).toBe('/new/dir')
+    expect(mockInvoke).toHaveBeenCalledWith('save_last_dir', { dir: '/new/dir' })
+  })
+
+  it('换目录手动路径保存失败 → 不切换、不持久化（save_failed 保持当前）', async () => {
+    // 保存失败（D3）→ 弹窗保持打开、不切换 → 不把未激活目录记入 last_dir。
+    mockInvoke.mockClear()
+    songStore.current = makeSong()
+    songStore.original = makeSong()
+    songStore.current!.title = '改过'
+    requestFolder('/new/dir', vi.fn(async () => []))
+    expect(songStore.pendingAction).not.toBeNull()
+
+    await resolvePending('save', vi.fn(async () => {
+      throw new Error('磁盘写入失败')
+    }))
+
+    expect(songStore.saveState).toBe('save_failed')
+    expect(songStore.pendingAction).not.toBeNull() // 弹窗保持打开、未切换
+    expect(songStore.folderPath).toBeNull() // 保持未打开（beforeEach 空态）
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_last_dir', expect.anything())
+  })
 })

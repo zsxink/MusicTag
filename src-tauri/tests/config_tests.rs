@@ -97,3 +97,32 @@ fn save_failure_reports_err() {
     let cfg = blocker.join("musictag").join("config.json");
     assert!(save_last_dir(&cfg, tmp.path().to_str().unwrap()).is_err());
 }
+
+#[test]
+fn empty_string_last_dir_returns_none() {
+    // 边界：last_dir 字段为 `""`（空串）→ 同缺失/损坏，load 返回 None。
+    // load_last_dir 以 `.filter(|d| !d.is_empty())` 过滤空串（防空路径打开当前目录）。
+    let tmp = tempdir().unwrap();
+    let cfg = cfg_path(tmp.path());
+    fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    fs::write(&cfg, r#"{"last_dir":""}"#).unwrap();
+    assert_eq!(load_last_dir(&cfg), None);
+}
+
+#[test]
+fn config_json_contains_only_last_dir_field() {
+    // spec「不保存编辑状态」场景「仅目录」：检查 config.json 内容——只含 `last_dir` 单字段，
+    // 不持久化选中歌曲/编辑草稿/搜索候选。
+    let tmp = tempdir().unwrap();
+    let dir = make_music_dir(tmp.path(), "music");
+    let cfg = cfg_path(tmp.path());
+
+    save_last_dir(&cfg, dir.to_str().unwrap()).unwrap();
+
+    let raw = fs::read_to_string(&cfg).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let obj = value.as_object().expect("config.json 应为 JSON 对象");
+    assert_eq!(obj.len(), 1, "config.json 应仅含 last_dir 单字段");
+    assert!(obj.contains_key("last_dir"));
+    assert_eq!(obj["last_dir"], dir.to_str().unwrap());
+}

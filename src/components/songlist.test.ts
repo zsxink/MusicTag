@@ -184,4 +184,21 @@ describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounte
     expect(w.findAll('.song-row').length).toBe(1)
     expect(w.text()).toContain('A')
   })
+
+  it('getLastDir IPC 异常 → 静默降级为无记忆空态（onMounted catch：不报错、不加载列表、不阻塞渲染）', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_last_dir') throw new Error('IPC failed')
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+
+    const w = mount(SongList)
+    await flushPromises()
+
+    expect(mockInvoke).toHaveBeenCalledWith('get_last_dir', undefined)
+    expect(songStore.folderPath).toBeNull() // 保持「未打开文件夹」空态
+    expect(songStore.songs).toEqual([])
+    expect(mockInvoke).not.toHaveBeenCalledWith('list_songs', expect.anything()) // 未触发列表加载
+    expect(w.text()).toContain('未打开文件夹')
+    expect(w.text()).not.toContain('文件夹中没有音乐')
+  })
 })
