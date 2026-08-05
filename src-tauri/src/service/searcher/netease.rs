@@ -8,6 +8,9 @@
 //   `/api/song/lyric`（`{method:"POST",url:...,params:{id,lv:-1,kv:-1,tv:-1}}`）→ `lrc.lyric`
 //   （linuxapi forward 透传原 API 响应，spec「网易云加密」）。
 // 单源失败一律降级为空列表 / None（不 panic、不影响其余源）。
+// `search_payload`/`lyric_payload`/`is_error_response`/`parse_*`/`CLOUDSEARCH_URL` 与结构体
+// 字段提 `pub`：rust-tests-separation 单测外置 `tests/searcher_netease_tests.rs`（集成测试是
+// 独立 crate，仅 `pub` 可见）。
 
 use crate::model::{MusicSourceId, SongCandidate};
 use crate::service::searcher::{crypto, MusicSource};
@@ -16,7 +19,7 @@ use rand::Rng;
 
 pub struct Netease {
     /// linuxapi 转发入口（搜索与取词共用 `/api/linux/forward`；Tester：HTTP 状态分支 mock 注入点）。
-    forward_url: String,
+    pub forward_url: String,
 }
 
 impl Default for Netease {
@@ -44,7 +47,10 @@ fn random_ua() -> &'static str {
 const FORWARD_URL: &str = "https://music.163.com/api/linux/forward";
 
 /// 网易云搜索 linuxapi 转发的目标接口（`/api/cloudsearch/pc`，响应结构与 weapi 相同）。
-const CLOUDSEARCH_URL: &str = "https://music.163.com/api/cloudsearch/pc";
+///
+/// `pub`：供 `src-tauri/tests/searcher_netease_tests.rs` 断言 payload url（rust-tests-separation
+/// 单测外置；集成测试是独立 crate，仅 `pub` 可见）。
+pub const CLOUDSEARCH_URL: &str = "https://music.163.com/api/cloudsearch/pc";
 
 /// 网易云 anti-bot（`code:50000005` 风控）所需标准头（design.md D2 伪装）：
 /// `Referer` 与 `Cookie` 缺一不可——仅随机 UA 会被风控拒绝。
@@ -115,7 +121,7 @@ impl MusicSource for Netease {
 /// 构建 linuxapi 转发搜索 payload（`{ method, url, params }`，search-sources-renewal D1）。
 ///
 /// `params.s` = title、`type:1`（单曲）、`limit/offset` 控制条数。响应结构 `result.songs[]`。
-fn search_payload(title: &str) -> String {
+pub fn search_payload(title: &str) -> String {
     serde_json::json!({
         "method": "POST",
         "url": CLOUDSEARCH_URL,
@@ -128,7 +134,7 @@ fn search_payload(title: &str) -> String {
 ///
 /// `params` 带 `id`/`lv`/`kv`/`tv`（-1 = 全取）。linuxapi forward 透传原 `/api/song/lyric`
 /// 响应，解析 `lrc.lyric` 与直接调用一致。
-fn lyric_payload(id: &str) -> String {
+pub fn lyric_payload(id: &str) -> String {
     serde_json::json!({
         "method": "POST",
         "url": "https://music.163.com/api/song/lyric",
@@ -140,7 +146,7 @@ fn lyric_payload(id: &str) -> String {
 /// 业务错误响应判定（CR v1-search-fixes）：HTTP 200 但 `code` 非 200（风控 50000005 等）→ 真。
 ///
 /// 成功/正常空结果都带 `code:200`；仅 `code` 缺失（malformed）不算错误（按成功空兜底）。
-fn is_error_response(json: &serde_json::Value) -> bool {
+pub fn is_error_response(json: &serde_json::Value) -> bool {
     json["code"].as_i64().is_some_and(|c| c != 200)
 }
 
@@ -148,7 +154,7 @@ fn is_error_response(json: &serde_json::Value) -> bool {
 ///
 /// 映射（design.md 任务 2.4）：`id` / `name` → title；`ar[].name` → artist（逗号连接）；
 /// `al.name` → album；`al.picUrl` → cover_url。空字段兜底为空串 / None（Rust 不 trim）。
-fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
+pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
     let songs = match json["result"]["songs"].as_array() {
         Some(a) => a,
         None => return Vec::new(),
@@ -175,7 +181,7 @@ fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
 }
 
 /// 解析 linuxapi 歌词响应 `lrc.lyric` → 歌词文本（无词/空 → None，供 C2 换源）。
-fn parse_lyric_response(json: &serde_json::Value) -> Option<String> {
+pub fn parse_lyric_response(json: &serde_json::Value) -> Option<String> {
     let lyric = json["lrc"]["lyric"].as_str()?;
     if lyric.trim().is_empty() {
         None
@@ -184,161 +190,3 @@ fn parse_lyric_response(json: &serde_json::Value) -> Option<String> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::service::searcher::test_util::mock_http_once;
-
-    #[test]
-    fn search_payload_forwards_to_cloudsearch_via_linuxapi() {
-        // search-sources-renewal D1：搜索 payload 走 linuxapi 转发 `/api/cloudsearch/pc`，
-        // method=POST、params 带 s/type/limit/offset；eparams 为 hex 大写（AES-ECB 形状）。
-        let payload: serde_json::Value = serde_json::from_str(&search_payload("晴天")).unwrap();
-        assert_eq!(payload["method"], "POST");
-        assert_eq!(payload["url"], CLOUDSEARCH_URL);
-        assert_eq!(payload["params"]["s"], "晴天");
-        assert_eq!(payload["params"]["type"], 1);
-        assert_eq!(payload["params"]["limit"], 10);
-        assert_eq!(payload["params"]["offset"], 0);
-        // linuxapi 加密产物形状：hex 大写、长度偶数（AES-ECB 密文 hex）
-        let eparams = crypto::linuxapi(&search_payload("晴天"));
-        assert!(eparams.len().is_multiple_of(2));
-        assert!(eparams.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn lyric_payload_forwards_to_song_lyric_via_linuxapi() {
-        // spec「网易云加密」：取词 payload 走 linuxapi 转发 `/api/song/lyric`——method=POST、
-        // url 指向 `/api/song/lyric`、params 带 id/lv/kv/tv（-1 = 全取）。
-        let payload: serde_json::Value = serde_json::from_str(&lyric_payload("33875191")).unwrap();
-        assert_eq!(payload["method"], "POST");
-        assert_eq!(payload["url"], "https://music.163.com/api/song/lyric");
-        assert_eq!(payload["params"]["id"], "33875191");
-        assert_eq!(payload["params"]["lv"], -1);
-        assert_eq!(payload["params"]["kv"], -1);
-        assert_eq!(payload["params"]["tv"], -1);
-        // linuxapi 加密产物形状：偶数长度 hex 大写（AES-ECB 密文 hex 大写）
-        let eparams = crypto::linuxapi(&lyric_payload("33875191"));
-        assert!(eparams.len().is_multiple_of(2));
-        assert!(
-            eparams
-                .chars()
-                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
-            "eparams 应为大写 hex，实际: {eparams}"
-        );
-    }
-
-    #[test]
-    fn parses_search_response_full_fields() {
-        let json = serde_json::json!({
-            "result": {
-                "songs": [{
-                    "id": 33875191,
-                    "name": "晴天",
-                    "ar": [{"name": "周杰伦"}],
-                    "al": {"name": "叶惠美", "picUrl": "https://p2.music.126.net/ab/cover.jpg"}
-                }]
-            }
-        });
-        let songs = parse_search_response(&json);
-        assert_eq!(songs.len(), 1);
-        let s = &songs[0];
-        assert_eq!(s.source, MusicSourceId::Netease);
-        assert_eq!(s.id, "33875191");
-        assert_eq!(s.title, "晴天");
-        assert_eq!(s.artist, "周杰伦");
-        assert_eq!(s.album, "叶惠美");
-        assert_eq!(
-            s.cover_url.as_deref(),
-            Some("https://p2.music.126.net/ab/cover.jpg")
-        );
-    }
-
-    #[test]
-    fn parses_search_response_multiple_artists_comma_joined() {
-        // 多艺人 `ar[].name` → 逗号连接
-        let json = serde_json::json!({
-            "result": {"songs": [{
-                "id": 1,
-                "name": "t",
-                "ar": [{"name": "A"}, {"name": "B"}],
-                "al": {"name": "al"}
-            }]}
-        });
-        let songs = parse_search_response(&json);
-        assert_eq!(songs[0].artist, "A, B");
-    }
-
-    #[test]
-    fn parses_search_response_empty_fields_fallback() {
-        // 空 name / 无 ar / 空 al → 空串 + cover_url None 兜底（不 trim）
-        let json = serde_json::json!({"result": {"songs": [{"id": 9, "name": "", "al": {}}]}});
-        let songs = parse_search_response(&json);
-        assert_eq!(songs.len(), 1);
-        assert_eq!(songs[0].title, "");
-        assert_eq!(songs[0].artist, "");
-        assert_eq!(songs[0].album, "");
-        assert_eq!(songs[0].cover_url, None);
-        assert_eq!(songs[0].id, "9");
-    }
-
-    #[test]
-    fn parses_search_response_missing_songs_returns_empty() {
-        // 无 songs / 整体错误结构 → 空列表（单源降级）
-        assert!(parse_search_response(&serde_json::json!({"result": {}})).is_empty());
-        assert!(parse_search_response(&serde_json::json!({"code": 400})).is_empty());
-    }
-
-    #[test]
-    fn is_error_response_detects_business_rejection() {
-        // CR v1-search-fixes：风控等业务拒绝是 HTTP 200 + code≠200，必须判为「源失败」而非「成功空」
-        assert!(
-            is_error_response(&serde_json::json!({"code": 50000005, "msg": "风控"})),
-            "风控 50000005 应判错误"
-        );
-        assert!(is_error_response(&serde_json::json!({"code": 400})));
-        assert!(
-            !is_error_response(&serde_json::json!({"code": 200, "result": {"songs": []}})),
-            "code 200 成功"
-        );
-        assert!(
-            !is_error_response(&serde_json::json!({"result": {}})),
-            "malformed 无 code → 按成功空"
-        );
-    }
-
-    #[test]
-    fn parses_lyric_response_returns_text() {
-        let json = serde_json::json!({"lrc": {"lyric": "[00:00.00]作词：方文山"}});
-        assert_eq!(
-            parse_lyric_response(&json).as_deref(),
-            Some("[00:00.00]作词：方文山")
-        );
-    }
-
-    #[test]
-    fn parses_lyric_response_nolyric_returns_none() {
-        // 无词（nolyric）或空 lyric → None（C2 换源触发点）
-        assert_eq!(
-            parse_lyric_response(&serde_json::json!({"nolyric": true})),
-            None
-        );
-        assert_eq!(
-            parse_lyric_response(&serde_json::json!({"lrc": {"lyric": ""}})),
-            None
-        );
-        assert_eq!(parse_lyric_response(&serde_json::json!({})), None);
-    }
-
-    #[tokio::test]
-    async fn http_error_status_returns_err() {
-        // Tester 回归：各源 HTTP 非 2xx → Err 分支（源失败降级），mock server 404。
-        // 构造源指向 mock URL（forward_url），search 返回 Err 且消息含 404。
-        let response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec();
-        let url = mock_http_once(response);
-        let netease = Netease { forward_url: url };
-        let client = reqwest::Client::new();
-        let err = netease.search(&client, "晴天", "周杰伦").await.unwrap_err();
-        assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
-    }
-}
