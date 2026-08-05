@@ -369,7 +369,7 @@ interface SearchResult {
 - **Rust 集成测试（文件 I/O）**：外置到 `src-tauri/tests/`（当前 `list_songs.rs` / `open_song.rs` / `save_song.rs`），经 `app_lib::` 访问生产代码，**不落 src/ 内**；共享 fixture（构造最小合法 FLAC/MP3、全字段标签、封面 data URL、`mock_http_once`）收 `tests/common/mod.rs`，各测试 crate 按需引用子集。
 - **Rust 单测（纯逻辑）**：**一律外置** `src-tauri/tests/`（与集成测试同目录，`*_tests.rs`），`src/` 生产代码**零 `#[cfg(test)]`**；共用测试工具收 `tests/common/`；被测试直接引用的私有项提 `pub`（集成测试是独立 crate，仅 `pub` 可见），测试专用 helper（fake 源、`png_of_size` 等）复制进测试文件。
 - **前端测试**：co-located `*.test.ts` 与被测文件同目录（`src/api/*.test.ts`、`src/store/*.test.ts`、`src/lib/*.test.ts`、`src/components/*.test.ts`）；`@tauri-apps/api/core` 的 mock 只依赖 `api/client.ts` 的 import 源。
-- **结构守卫测试**：`src/styles/design-layering.test.ts`（扫描本文件 §10 断言分层/测试放置/落位说明齐全）+ `src/components/layering.test.ts`（扫描 components/ 断言零 invoke 直呼）——分层规范改代码时须同步本文件，否则守卫失败。
+- **结构守卫测试**：`src/styles/design-layering.test.ts`（扫描本文件 §10 断言分层/测试放置/落位说明齐全）+ `src/styles/command-contract.test.ts`（扫描 `lib.rs` `generate_handler!` 实际注册集 vs 本文件 §10.3 / `V1-PRD.md §7` / `openspec/config.yaml` 契约清单，断言四源一致——新增 command 时须同步四处契约表，否则守卫失败）+ `src/components/layering.test.ts`（扫描 components/ 断言零 invoke 直呼）——分层规范改代码时须同步本文件，否则守卫失败。
 
 **子变更落位记录（service/api 落位，v1-cover-embed → v1-search-ui 均已实现并归档；本表为历史落位记录，供后续 Architect 参照分层惯例）**：
 
