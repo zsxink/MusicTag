@@ -1,3 +1,5 @@
+# dir-memory 技术设计
+
 ## Context
 
 每次启动需手动导航到音乐目录。需持久化 `last_dir` 并启动自动加载。项目已有 `localStorage` 存主题的先例，但目录是文件系统概念、且 `pick_folder`/`list_songs` 都在 Rust 侧——存 Rust 侧配置文件更贴近后端职责、跨端可靠（已拍板）。
@@ -30,7 +32,13 @@ pub fn load_last_dir(path: &Path) -> Option<String>   // 缺失/损坏/目录已
 pub fn save_last_dir(path: &Path, dir: &str) -> Result<(), String>  // 原子写（临时文件+rename）
 ```
 
-新增 `dirs` crate 依赖。
+新增 `dirs` crate 依赖（`dirs::config_dir()`）。
+
+**原子写细节**：`save_last_dir` 先 `fs::create_dir_all(parent)`（首次运行 `musictag/` 目录尚不存在，须先建目录再写文件），临时文件放**同一父目录**（保证同卷，`fs::rename` 原子替换）——复用 `fs_atomic.rs` 的 tempfile+persist 模式（`tempfile::NamedTempFile::new_in(parent)` 写 `serde_json::to_string` 后 `persist(path)`），写失败返回 `Err`，命令层静默吞掉（fire-and-forget），不 panic。
+
+**目录已删降级**：`load_last_dir` 解析出 `last_dir` 字符串后必须 `Path::new(&last_dir).is_dir()` 校验——目录不存在或非目录 → `None`（spec「目录已删降级」）。该校验同时保护 `get_last_dir` 与 `pick_folder` 的起始定位，二者都不会打开不存在的目录。
+
+**仅目录**：serde 结构体只含 `last_dir` 单字段（spec「不保存编辑状态」）：`#[derive(Serialize, Deserialize)] struct Config { last_dir: Option<String> }`——不持久化选中歌曲/编辑草稿/搜索候选；`load_last_dir` 用 `serde_json::from_str`，JSON 损坏或字段缺失 → `None`。
 
 ### 2. command 层（commands/folder.rs）
 
@@ -57,23 +65,34 @@ pub fn save_last_dir(dir: String) {
 
 `lib.rs` `generate_handler![...]` 追加 `get_last_dir` / `save_last_dir`。
 
+**返回类型**：`save_last_dir` 返回 `()`（fire-and-forget，不向外报错——spec 无错误呈现需求；失败静默，下次启动自然降级为无记忆）。`get_last_dir` / `save_last_dir` 命名经 Tauri camelCase↔snake_case 自动映射到前端 `getLastDir` / `saveLastDir`（既有 `open_song`↔`openSong` 同先例）。三个 command 均为薄壳，业务全在 `service/config.rs`，无 lofty/IO 逻辑漏进 command 层（§10.0 分层规范）。
+
 ### 3. 前端
 
-- `api/songs.ts`：`getLastDir()` / `saveLastDir(dir)` 封装。
+- `api/songs.ts`：`getLastDir()` / `saveLastDir(dir)` 封装（`invokeCommand` 透传，类型 `Promise<string | null>` / `Promise<void>`）。
 - `store/song.ts`：
-  - `initLastDir(dir, loadSongs)`：dir 非空 → `activateFolder(dir, loadSongs)`（复用激活链路，dirty 拦截不需要——启动时无 dirty）。dir 由调用方（SongList onMounted）从 `getLastDir()` 获取后传入，store 不依赖 IPC 类型。
-  - `rememberLastDir(dir, saveDir)`：调 `saveDir(dir)`，失败静默。
-  - `activateFolder` 末尾 `void rememberLastDir(dir, saveLastDir)`（fire-and-forget，不阻塞列表加载）。
-- `SongList.vue` onMounted：`getLastDir()` → 非空 → `initLastDir(dir, (d) => listSongs(d))`；保留既有 keydown 监听。
+  - 顶部 `import { saveLastDir } from '../api/songs'`（沿用 `defaultSave` / `defaultRename` 先例——store 依赖 api 是 §10.0 允许方向，组件零 invoke 直呼不变）。
+  - `rememberLastDir(dir, saveDir = saveLastDir)`：`saveDir(dir)` 包 try/catch，失败静默（可注入，仿 `saveFn` 先例，store 单测可传 spy 桩）。
+  - `activateFolder` 末尾 `void rememberLastDir(dir)`（fire-and-forget，不阻塞列表加载）。**持久化点唯一收敛于 `activateFolder`**：手动路径（`requestFolder` → dirty 拦截 → `resolvePending` 后）与启动路径（`initLastDir` → `activateFolder`）都汇到这里，保证「成功切换才持久化」且不重复。
+  - `initLastDir(dir, loadSongs)`：dir 非空 → `activateFolder(dir, loadSongs)`（复用激活链路，含列表加载、搜索重置语义；启动时无 dirty，不经 `requestFolder` 弹窗）；dir 空 / undefined（`getLastDir` 返回 None，含目录已删）→ no-op，保持「未打开文件夹」空态。dir 由调用方（SongList onMounted）从 `getLastDir()` 获取后传入，store 不依赖 IPC 类型。
+- `SongList.vue` onMounted：`getLastDir()` → 非空 → `initLastDir(dir, (d) => listSongs(d))`；保留既有 keydown 监听。onMounted 内异步调用不阻塞渲染；启动期用户手点打开与 `getLastDir` 竞态窗口极小（onMounted 立即触发、响应先于用户交互），不额外处理。
 
 ### 4. 文档同步
 
-- `design.md §10.3`：command 契约表追加 `get_last_dir` / `save_last_dir`，`pick_folder` 描述加起始目录。
-- `design.md §10.0`：Rust 表格 `service/` 行追加 `config.rs`。
-- `V1-PRD.md` FR-1：补「记住上次目录」。
+- `design.md §10.3`：command 契约表追加 `get_last_dir` / `save_last_dir` 两行；`pick_folder` 描述补「有上次目录 → 选择器默认定位到该目录」。
+- `design.md §10.0`：Rust 表格 `service/` 行追加 `config.rs`（纯配置读写，`dirs` 定位平台配置目录）。
+- `V1-PRD.md` FR-1：补「记住上次目录」条目。
 - §10.4 不重复编辑（已由 `rust-tests-separation` 先行完成）。
+
+### 5. 变更域与依赖序
+
+**变更域：both（跨前后端）**。Rust 定义 IPC 契约（command 名/参数/返回）→ 前端 `api/songs.ts` 封装 → store 动作 → 组件消费。
+
+**依赖序：Rust → Vue 串行**（未显式创建 worktree 时禁止并写）：
+- Rust 先（G1 `service/config.rs` → G2 `commands/folder.rs` + `lib.rs` 注册），产出 `get_last_dir` / `save_last_dir` 契约；
+- Vue 后（G3 `api/songs.ts` 封装 + store 动作 → G4 SongList 启动加载），TS 封装类型与 camelCase 映射以 Rust command 契约为准、store 持久化测试的 mock 依赖 `api/songs.ts` 新增函数存在。
 
 ## Risks
 
-- `activateFolder` 接入 `rememberLastDir` 后，既有 store 测试若未 mock `save_last_dir` IPC 会走真实 invoke——检查 song.test.ts 现有 mock（`vi.mock('@tauri-apps/api/core')`），补 `get_last_dir`/`save_last_dir` 分支。
+- `activateFolder` 接入 `rememberLastDir` 后，其既有 store 用例都会经 `api/songs.ts` 的 `invokeCommand` 调真实 `invoke`。song.test.ts **当前只 `vi.mock('../api/search')`，并未 mock `@tauri-apps/api/core`**（§10.2 的 mock 依赖仅适用于 editor/client 测试）——须在 song.test.ts **新增** `vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))`，使 `save_last_dir` 等 IPC 变 no-op（fire-and-forget 吞掉即可），否则激活路径用例报 unhandled rejection。
 - `dirs::config_dir()` 在测试环境返回系统真实配置目录——config.rs 函数接受 path 参数规避（测试传 temp dir），生产才用 `default_config_path()`。
