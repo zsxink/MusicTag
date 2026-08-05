@@ -4,9 +4,9 @@
 //   → store.folderPath = dir → invoke('list_songs', { dir }) → songs 整体替换、selectedPath 重置。
 import { onMounted, onUnmounted } from 'vue'
 
-import { listSongs, pickFolder } from '../api/songs'
+import { getLastDir, listSongs, pickFolder } from '../api/songs'
 import { filteredSongs } from '../store/selectors'
-import { requestFolder, songStore } from '../store/song'
+import { initLastDir, requestFolder, songStore } from '../store/song'
 import SongRow from './SongRow.vue'
 
 /** 打开文件夹：选择 + 遍历 + 整体替换列表。
@@ -25,7 +25,20 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  // dir-memory：启动自动加载上次目录——getLastDir() 无记忆/目录已删 → null → no-op 保持空态；
+  // 非空 → initLastDir 复用 activateFolder 激活链路（列表加载、搜索重置语义）。不阻塞渲染，
+  // 启动期用户手点打开与 getLastDir 竞态窗口极小（onMounted 立即触发、响应先于用户交互），不额外处理。
+  void getLastDir()
+    .then((dir) => {
+      // falsy 统一守卫（null/undefined/'' 均 no-op）：目录已删/无记忆 → 保持「未打开文件夹」空态
+      if (dir) void initLastDir(dir, (d) => listSongs(d))
+    })
+    .catch(() => {
+      // 启动自动加载 best-effort：getLastDir IPC 异常 → 静默降级为无记忆空态（不阻塞渲染、不报错）
+    })
+})
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 

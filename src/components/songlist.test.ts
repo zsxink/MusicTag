@@ -8,7 +8,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 // mock invoke：openFolder 经 api/songs.ts 的 pickFolder/listSongs 走 mock IPC（接线测试才发）。
-const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }))
+// 默认 async no-op：onMounted 启动自动加载调 getLastDir()（invokeCommand 需要返回 Promise）。
+const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn(async () => undefined) }))
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }))
@@ -83,6 +84,7 @@ describe('SongList — openFolder 走 dirty 拦截门（v1-ux-settings 2.3 补�
 
   it('干净态点「打开文件夹」→ 直接换目录并替换列表，不弹窗（spec 无修改直接换）', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_last_dir') return null // 启动自动加载：无记忆 → 不自动加载
       if (cmd === 'pick_folder') return '/new/dir'
       if (cmd === 'list_songs') return [{ path: '/new/dir/a.flac', title: 'A', artist: 'AA' }]
       throw new Error(`unexpected cmd: ${cmd}`)
@@ -99,6 +101,7 @@ describe('SongList — openFolder 走 dirty 拦截门（v1-ux-settings 2.3 补�
 
   it('dirty 态点「打开文件夹」→ 进入 pending folder（复用同一弹窗），不立即换目录、编辑保留', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_last_dir') return null // 启动自动加载：无记忆 → 不自动加载
       if (cmd === 'pick_folder') return '/new/dir'
       throw new Error(`unexpected cmd: ${cmd}`)
     })
@@ -121,6 +124,7 @@ describe('SongList — openFolder 走 dirty 拦截门（v1-ux-settings 2.3 补�
 
   it('dirty 态但用户取消原生选择器（pick_folder 返回 null）→ 无视，不弹窗不改状态', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_last_dir') return null // 启动自动加载：无记忆 → 不自动加载
       if (cmd === 'pick_folder') return null
       throw new Error(`unexpected cmd: ${cmd}`)
     })
@@ -137,5 +141,47 @@ describe('SongList — openFolder 走 dirty 拦截门（v1-ux-settings 2.3 补�
     expect(songStore.pendingAction).toBeNull() // 用户已明确取消，不弹窗
     expect(songStore.folderPath).toBe('/a')
     expect(songStore.current?.title).toBe('改过')
+  })
+})
+
+describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounted getLastDir → initLastDir）', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset()
+    songStore.folderPath = null
+    songStore.songs = []
+    songStore.searchQuery = ''
+    songStore.selectedPath = null
+  })
+
+  it('getLastDir 返回 null（无记忆/目录已删）→ 保持「未打开文件夹」空态、不加载列表', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_last_dir') return null
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+
+    const w = mount(SongList)
+    await flushPromises()
+
+    expect(mockInvoke).toHaveBeenCalledWith('get_last_dir', undefined) // 启动查询记忆
+    expect(songStore.folderPath).toBeNull() // 保持空态
+    expect(songStore.songs).toEqual([])
+    expect(mockInvoke).not.toHaveBeenCalledWith('list_songs', expect.anything()) // 未触发列表加载
+    expect(w.text()).toContain('未打开文件夹')
+  })
+
+  it('getLastDir 返回有效目录 → 启动自动加载并列出歌曲（等价自动点了打开文件夹）', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_last_dir') return '/music'
+      if (cmd === 'list_songs') return [{ path: '/music/a.flac', title: 'A', artist: 'AA' }]
+      throw new Error(`unexpected cmd: ${cmd}`)
+    })
+
+    const w = mount(SongList)
+    await flushPromises()
+
+    expect(songStore.folderPath).toBe('/music')
+    expect(songStore.songs).toEqual([{ path: '/music/a.flac', title: 'A', artist: 'AA' }])
+    expect(w.findAll('.song-row').length).toBe(1)
+    expect(w.text()).toContain('A')
   })
 })
