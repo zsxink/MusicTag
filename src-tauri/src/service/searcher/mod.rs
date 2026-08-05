@@ -258,7 +258,7 @@ pub fn norm(s: &str) -> String {
 }
 
 /// 全角转半角：`\u{FF01}..=\u{FF5E}` → 对应 ASCII；全角空格 `\u{3000}` → 半角空格。
-pub fn to_halfwidth(c: char) -> char {
+fn to_halfwidth(c: char) -> char {
     match c {
         '\u{3000}' => ' ',
         '\u{FF01}'..='\u{FF5E}' => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
@@ -363,7 +363,7 @@ pub fn aggregate(
 
 /// 来源顺序排名（Netease < QqMusic < Kugou < Lrclib < Itunes，search-sources-renewal D8：
 /// 中文源前置、公共源垫底，同分去重/排序天然偏好中文平台）。
-pub fn source_rank(source: MusicSourceId) -> usize {
+fn source_rank(source: MusicSourceId) -> usize {
     match source {
         MusicSourceId::Netease => 0,
         MusicSourceId::QqMusic => 1,

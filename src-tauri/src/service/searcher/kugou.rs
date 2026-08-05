@@ -46,7 +46,7 @@ const KUGOU_UA: &str =
 const KUGOU_REFERER: &str = "https://www.kugou.com/";
 
 /// 当前 epoch 毫秒（clienttime/mid/uuid 的形状，酷狗签名需毫秒级时间戳）。
-pub fn now_millis() -> u128 {
+fn now_millis() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -54,7 +54,7 @@ pub fn now_millis() -> u128 {
 }
 
 /// 生成 32 位小写 hex（mid/uuid：随机字节取 md5，酷狗 web 同款设备指纹形状，每次请求随机）。
-pub fn random_md5_hex() -> String {
+fn random_md5_hex() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 16];
     rand::rng().fill_bytes(&mut bytes);
