@@ -16,15 +16,17 @@ search_song, search_source, fetch_lyric, download_cover
 
 `dir-memory`（#91）只同步了 `design.md §10.3`（13 个已齐全）；`V1-PRD.md §7`（11 个，缺 `get_last_dir`/`save_last_dir`）、记忆 spec（10 个，缺 `pick_folder`/`get_last_dir`/`save_last_dir`）、`openspec/config.yaml`（11 个，缺 `get_last_dir`/`save_last_dir`）三处契约表未同步。规格四源（PRD/design/openspec/记忆）要求一致，故 GATE #92 维度 1（规格一致性）不通过。
 
-### D2. 三处同步内容（矩阵）
+### D2. 三处同步内容（矩阵，已实施 + 守卫验证）
 
-| 文档 | 现状 | 同步为 |
+> 下表「同步前」为缺陷态（GATE #92 挂起原因）：三源契约表缺 lib.rs 已注册的 command。本次同步已实施，现四源契约清单均在 13，且由 D3 守卫持续强制一致。
+
+| 文档 | 同步前（缺陷态） | 同步动作（已完成） |
 |---|---|---|
-| `docs/V1-PRD.md §7`（「Tauri command 全量」） | 11 个：文件组 pick_folder/list_songs/open_song/save_song/rename_song，封面组 pick_cover_file/read_cover_path，搜索组 search_song/search_source/fetch_lyric/download_cover | 文件组补 `get_last_dir(dir) -> Option<String>`（config.json 读上次目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 写 config.json）两行，13 个齐 |
+| `docs/V1-PRD.md §7`（「Tauri command 全量」） | 11 个：文件组 pick_folder/list_songs/open_song/save_song/rename_song，封面组 pick_cover_file/read_cover_path，搜索组 search_song/search_source/fetch_lyric/download_cover | 文件组末尾补 `get_last_dir() -> Option<String>`（**无参**，tester 实测真值 folder.rs:29；读 config.json 上次目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 写 config.json）两行，13 个齐 |
 | 记忆 `music-tag-v1-spec.md`（`~/.claude/projects/-Users-xian-Project-music-MusicTag/memory/`） | 10 个 command 契约清单 | 补 `pick_folder`/`get_last_dir`/`save_last_dir`，13 个齐 |
 | `openspec/config.yaml` context | 11 个 slash 连接清单 + 自述「与 lib.rs 实际注册一致」 | slash 清单补 `get_last_dir`/`save_last_dir`；修正「一致」表述为真实状态（13 个，详见 lib.rs `generate_handler!`） |
 
-同步口径：command 契约只写「前端 invoke 使用的入口名 + 签名用途」，不写实现细节；签名与 `design.md §10.3` 表对齐。
+同步口径：command 契约只写「前端 invoke 使用的入口名 + 签名用途」，不写实现细节；签名与 `design.md §10.3` 表对齐（无参 command 一律写 `` `name()` ``，由 D3.1 签名 spot-check 强制）。
 
 ### D3. 结构守卫（提取锚点逐源规定）
 
@@ -38,6 +40,8 @@ search_song, search_source, fetch_lyric, download_cover
 | `openspec/config.yaml` | 含「Tauri command 契约」的 context 行 | 正则 `/：([a-z_]+(?:\/[a-z_]+)+)/` 捕获 `：` 后 slash 连接清单 → split(`/`) |
 
 断言：归一化集合 `lib.rs === design === prd === config`；任一源缺 command（或 lib.rs 新增未同步）→ 测试红，失败消息列出该源相对 lib.rs 的缺/多余 command 名。各源另断言去重后 count === 13，防正则退化（漏匹配）。
+
+**签名层 spot-check（D3.1）**：名称一致不足以防签名漂移——tester 实测抓到 PRD §7 把 `get_last_dir()` 误写为带参 `get_last_dir(dir)` 即此类缺陷。守卫另从 `commands/{folder,song,cover,search}.rs` 定义文件提取真值签名（正则 `/pub (?:async )?fn name\(([^)]*)\)/`），求无参 command 集合（现恰为 `pick_folder`/`pick_cover_file`/`get_last_dir` 三个），断言其在 design §10.3 与 PRD §7 契约文本中均写成 `` `name()` ``（无参形态）。签名从 `commands/*.rs` 定义文件提取——lib.rs 只注册不定义（如 `download_cover`）。
 
 记忆 `music-tag-v1-spec.md` 在仓库外（`~/.claude/.../memory/`），CI 无法读取，**不纳入守卫**；其同步靠本次手动完成 + GATE #92 复核兜底。
 
@@ -54,6 +58,7 @@ search_song, search_source, fetch_lyric, download_cover
 - 唯一代码产物是前端 vitest 结构守卫（`src/styles/command-contract.test.ts`）——不触 Tauri 运行时、不编译 Rust，属前端测试基建。
 - 三处文档同步（PRD §7 / 记忆 / config.yaml）是规格文档编辑，非 Rust 生产代码，不产生后端域工作。
 - `lib.rs` 已正确注册 13 command，**不改**。无 Rust→Vue 依赖序问题，单 Vue-Dev 串行完成即可，无需并行/worktree。
+- **依赖顺序**：G1（守卫，frontend 自含，先红自证能抓本缺陷类别）→ G2（文档同步，依赖 G1 的缺省报错清单，同步后转绿）→ G3（提交收尾，依赖 G2 全绿）。纯前端单一串行流，无 Rust 前置、无跨端依赖。
 
 ## 关键技术决策
 
@@ -63,6 +68,7 @@ search_song, search_source, fetch_lyric, download_cover
 4. **提取锚点逐源规定 + count===13 防退化**。为什么：PRD/design/config 格式各异（bullet/表格/slash 清单），统一正则易误中正文；锚点切片 + 计数断言保证「正匹配」与「不漏匹配」双向可靠。
 5. **不改 lib.rs / 不改生产代码**。为什么：注册本身正确，缺口只在文档侧；改代码超出本变更需求且引入回归面。
 6. **`design.md §10.4` 结构守卫清单同步补 `command-contract.test.ts`**。为什么：§10.4 是测试放置约定文档，须如实列出现有结构守卫文件，保持设计文档内部一致（本变更守卫即覆盖设计文档，自身需先自洽）。
+7. **无参 command 签名 spot-check（D3.1）**。为什么：名称相等只证明「command 存在」，不证明「签名没漂移」——tester 实测抓到 PRD §7 把 `get_last_dir()` 写成带参 `get_last_dir(dir)` 即为此类缺陷；从 `commands/*.rs` 定义文件提取真值签名、断言无参 command 在三源契约表写成 `` `name()` ``，把「名称 + 签名形态」一并纳入结构断言。
 
 ## 任务拆分建议
 
@@ -71,7 +77,7 @@ search_song, search_source, fetch_lyric, download_cover
 - [ ] 1.2 `npm run test` 跑守卫：**预期红**，报 PRD §7/config.yaml 缺 `get_last_dir`/`save_last_dir`（自证守卫能抓本缺陷类别）；design §10.3 应已绿
 
 ### G2 三处契约同步（守卫转绿）
-- [ ] 2.1 `docs/V1-PRD.md §7`：文件组补 `get_last_dir(dir) -> Option<String>`、`save_last_dir(dir) -> ()` 两行（文件类 command 末尾）
+- [ ] 2.1 `docs/V1-PRD.md §7`：文件组补 `get_last_dir() -> Option<String>`（**无参**，tester 实测真值 folder.rs:29 无参）、`save_last_dir(dir) -> ()` 两行（文件类 command 末尾）
 - [ ] 2.2 记忆 `music-tag-v1-spec.md`：command 契约清单补 `pick_folder`/`get_last_dir`/`save_last_dir`（仓库外，守卫不覆盖，靠手动 + GATE 复核）
 - [ ] 2.3 `openspec/config.yaml`：slash 清单补 `get_last_dir`/`save_last_dir`；修正「与 lib.rs 实际注册一致」表述为 13 个真实注册
 - [ ] 2.4 `docs/design/design.md §10.4`：结构守卫清单补 `command-contract.test.ts`（设计文档内部一致，防 design-layering 守卫语义漂移）
