@@ -344,7 +344,9 @@ interface SearchResult {
 
 | command | 参数 → 返回 | 用途 |
 |---|---|---|
-| `pick_folder()` | `() → Option<String>` | 打开原生文件夹选择器（rfd）；取消返回 `None`，否则返回目录绝对路径 |
+| `pick_folder()` | `() → Option<String>` | 打开原生文件夹选择器（rfd）；有上次目录 → 默认定位到该目录；取消返回 `None`，否则返回目录绝对路径 |
+| `get_last_dir()` | `() → Option<String>` | 读取持久化的上次打开目录（config.json `last_dir`）；无记忆/目录已删 → `None`（启动自动加载用） |
+| `save_last_dir(dir)` | `String → ()` | 记住本次打开目录（config.json 原子写）；fire-and-forget，失败静默 |
 | `list_songs(dir)` | `String → Vec<SongSummary>` | 打开文件夹，深度遍历；**只读列表项**（`path`/`title`/`artist`，歌名/作者空时前端回退显示文件名） |
 | `open_song(path)` | `String → Result<Song, String>` | 读取一首的**完整**标签 + 封面 base64，放进编辑区（按需读取；坏标签 → `Err`，表单只读） |
 | `save_song(song, exportLrc)` | `Song, bool → Result<(), String>` | 写回原文件（cover 为 base64，Rust 侧解码）；`exportLrc` 勾选时同步写同目录同名 `.lrc`（空歌词忽略） |

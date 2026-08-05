@@ -11,6 +11,16 @@ export function pickFolder(): Promise<string | null> {
   return invokeCommand<string | null>('pick_folder')
 }
 
+/** 读取持久化的上次打开目录；无记忆/目录已删 → null（启动自动加载用）。 */
+export function getLastDir(): Promise<string | null> {
+  return invokeCommand<string | null>('get_last_dir')
+}
+
+/** 持久化上次打开目录（fire-and-forget：失败静默，下次启动自然降级为无记忆）。 */
+export function saveLastDir(dir: string): Promise<void> {
+  return invokeCommand<void>('save_last_dir', { dir })
+}
+
 /** 深度遍历 `dir` 收集全部 FLAC/MP3，返回只读列表项。 */
 export function listSongs(dir: string): Promise<SongSummary[]> {
   return invokeCommand<SongSummary[]>('list_songs', { dir })

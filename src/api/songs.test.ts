@@ -9,7 +9,17 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 import type { CoverInput, Song } from './types'
-import { listSongs, openSong, pickCoverFile, pickFolder, readCoverPath, renameSong, saveSong } from './songs'
+import {
+  getLastDir,
+  listSongs,
+  openSong,
+  pickCoverFile,
+  pickFolder,
+  readCoverPath,
+  renameSong,
+  saveLastDir,
+  saveSong,
+} from './songs'
 
 const makeSong = (over: Partial<Song> = {}): Song => ({
   path: '/a/song.flac',
@@ -40,6 +50,21 @@ describe('api/songs.ts — 类型化 command 封装（命令名/参数逐字对�
 
     mockInvoke.mockResolvedValue(null)
     await expect(pickFolder()).resolves.toBeNull()
+  })
+
+  it('getLastDir：透传 get_last_dir 无参数；有记忆返回目录、无记忆/目录已删返回 null', async () => {
+    mockInvoke.mockResolvedValue('/music')
+    await expect(getLastDir()).resolves.toBe('/music')
+    expect(mockInvoke).toHaveBeenCalledWith('get_last_dir', undefined)
+
+    mockInvoke.mockResolvedValue(null)
+    await expect(getLastDir()).resolves.toBeNull()
+  })
+
+  it('saveLastDir：透传 save_last_dir + { dir }（fire-and-forget，返回 void）', async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    await expect(saveLastDir('/music')).resolves.toBeUndefined()
+    expect(mockInvoke).toHaveBeenCalledWith('save_last_dir', { dir: '/music' })
   })
 
   it('listSongs：透传 list_songs + { dir }', async () => {
