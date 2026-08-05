@@ -12,7 +12,7 @@
 // - readonly（坏标签只读）：整个封面区禁用，不响应点击/drop。
 // 分层：组件不直呼 invoke（IPC 一律经 api/songs.ts）；`@tauri-apps/api/window` 事件订阅
 // 属窗口事件、非 IPC，符合 §10.0 分层（guard 只禁 IPC invoke 入口模块 import）。
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import { pickCoverFile, readCoverPath } from '../api/songs'
@@ -26,12 +26,21 @@ const readonly = computed(() => songStore.readonly)
 /** 「搜索封面」可用性：readonly（坏标签只读）/ 无歌禁用。 */
 const canSearch = computed(() => !songStore.readonly && songStore.current !== null)
 
-// 候选区折叠（candidate-collapse）：组件局部 ref，跨切歌保持（面板常驻不销毁，resetSearchState
-// 只清 store 候选内容、不动本 ref）；仅换目录/清空当前歌卸载面板才重置为默认展开。
+// 候选区折叠（candidate-collapse）：组件局部 ref，默认展开；点按钮折叠。
+// 切歌（current.path 变）时重置为默认展开——产品决策：折叠偏好不跨切歌保持（用户收起后
+// 切歌，新歌候选区默认展开，避免「新歌被搜索顶开」的困惑；原「跨切歌保持」实测不好用已改为重置）。
 const candidatesCollapsed = ref(false)
 function toggleCandidates(): void {
   candidatesCollapsed.value = !candidatesCollapsed.value
 }
+// 切歌重置：current 换歌（path 变化）→ 折叠态回默认展开。切歌只改 store 候选（resetSearchState），
+// 折叠 ref 在组件——watch current.path 显式重置（换目录/坏标签只读因面板卸载天然重置，本 watch 幂等覆盖）。
+watch(
+  () => songStore.current?.path,
+  () => {
+    candidatesCollapsed.value = false
+  },
+)
 /** 候选区有内容才显示折叠按钮——与模板 v-if 分支（searching / done+候选(含空态) / 离线）逐条对齐。 */
 const candidatesVisible = computed(
   () =>

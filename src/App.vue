@@ -45,6 +45,7 @@ import { songStore } from './store/song'
 
 /* 右侧编辑器占位（v1-song-read 起填充 SongEditor 形态） */
 .editor-slot {
+  display: flex; /* bug fix：缺 flex 容器 → .editor 的 flex:1 1 auto 失效、按内容撑高，overflow-y:auto 永不触发，歌词框被裁 */
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0; /* 保证内部 .editor-body 的 overflow-y:auto 生效 */

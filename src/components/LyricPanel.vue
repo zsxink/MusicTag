@@ -12,7 +12,7 @@
 //   pickLyricCandidate 全源失败置 lyricFetchEmpty 时 `lyricSearchState` 仍是 'done'、候选仍在，
 //   若空态分支排在 done 之后则永远不可达。manualSearch 清 lyricFetchEmpty，新搜索不残留旧空态。
 // 分层：组件不直呼 invoke（store 动作注入 api/search 默认），零 invoke 直呼（layering 守卫）。
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { sourceLabel } from '../store/selectors'
 import { manualSearch, songStore } from '../store/song'
@@ -36,12 +36,21 @@ const badgeText = computed(() => {
 /** 「搜索歌词」可用性：readonly（坏标签只读）/ 无歌禁用。 */
 const canSearch = computed(() => !songStore.readonly && songStore.current !== null)
 
-// 候选区折叠（candidate-collapse）：组件局部 ref，跨切歌保持（面板常驻不销毁，resetSearchState
-// 只清 store 候选内容、不动本 ref）；仅换目录/清空当前歌卸载面板才重置为默认展开。
+// 候选区折叠（candidate-collapse）：组件局部 ref，默认展开；点按钮折叠。
+// 切歌（current.path 变）时重置为默认展开——产品决策：折叠偏好不跨切歌保持（用户收起后
+// 切歌，新歌候选区默认展开，避免「新歌被搜索顶开」的困惑；原「跨切歌保持」实测不好用已改为重置）。
 const candidatesCollapsed = ref(false)
 function toggleCandidates(): void {
   candidatesCollapsed.value = !candidatesCollapsed.value
 }
+// 切歌重置：current 换歌（path 变化）→ 折叠态回默认展开。切歌只改 store 候选（resetSearchState），
+// 折叠 ref 在组件——watch current.path 显式重置（换目录/坏标签只读因面板卸载天然重置，本 watch 幂等覆盖）。
+watch(
+  () => songStore.current?.path,
+  () => {
+    candidatesCollapsed.value = false
+  },
+)
 /** 候选区有内容才显示折叠按钮——与模板 v-if 分支（searching / lyricFetchEmpty / done+候选(含空态) / 离线）逐条对齐。 */
 const candidatesVisible = computed(
   () =>
