@@ -30,10 +30,11 @@ describe('design.md §10 — 分层规范入定稿文档（spec: 目录分层 + 
     expect(design).toMatch(/components\//)
   })
 
-  it('包含测试放置约定（文件 I/O 集成测试外置 + 纯逻辑单测 inline）', () => {
+  it('包含测试放置约定（Rust 测试一律外置 tests/）', () => {
     expect(design).toMatch(/集成测试/)
     expect(design).toMatch(/tests\/common\//)
-    expect(design).toMatch(/inline|内联/)
+    expect(design).toMatch(/外置/)
+    expect(design).toMatch(/零 `#\[cfg\(test\)\]`/)
   })
 
   it('包含未来子变更的 service/api 落位说明', () => {

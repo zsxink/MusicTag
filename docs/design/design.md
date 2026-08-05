@@ -364,8 +364,8 @@ interface SearchResult {
 
 **测试放置约定（Rust / 前端统一）**：
 
-- **Rust 集成测试（文件 I/O）**：外置到 `src-tauri/tests/`（当前 `list_songs.rs` / `open_song.rs` / `save_song.rs`），经 `app_lib::` 访问生产代码，**不落 src/ 内**；共享 fixture（构造最小合法 FLAC/MP3、全字段标签、封面 data URL）收 `tests/common/mod.rs`，各测试 crate 按需引用子集。
-- **Rust 纯逻辑单测（无文件 I/O）**：`#[cfg(test)] mod tests` **内联**在 service / model 对应文件内（如 `cover.rs` 的 data URL 编解码、`meta.rs` 的字段映射），不进 `tests/`。
+- **Rust 集成测试（文件 I/O）**：外置到 `src-tauri/tests/`（当前 `list_songs.rs` / `open_song.rs` / `save_song.rs`），经 `app_lib::` 访问生产代码，**不落 src/ 内**；共享 fixture（构造最小合法 FLAC/MP3、全字段标签、封面 data URL、`mock_http_once`）收 `tests/common/mod.rs`，各测试 crate 按需引用子集。
+- **Rust 单测（纯逻辑）**：**一律外置** `src-tauri/tests/`（与集成测试同目录，`*_tests.rs`），`src/` 生产代码**零 `#[cfg(test)]`**；共用测试工具收 `tests/common/`；被测试直接引用的私有项提 `pub`（集成测试是独立 crate，仅 `pub` 可见），测试专用 helper（fake 源、`png_of_size` 等）复制进测试文件。
 - **前端测试**：co-located `*.test.ts` 与被测文件同目录（`src/api/*.test.ts`、`src/store/*.test.ts`、`src/lib/*.test.ts`、`src/components/*.test.ts`）；`@tauri-apps/api/core` 的 mock 只依赖 `api/client.ts` 的 import 源。
 - **结构守卫测试**：`src/styles/design-layering.test.ts`（扫描本文件 §10 断言分层/测试放置/落位说明齐全）+ `src/components/layering.test.ts`（扫描 components/ 断言零 invoke 直呼）——分层规范改代码时须同步本文件，否则守卫失败。
 
@@ -382,5 +382,5 @@ interface SearchResult {
 > 以上 5 个子变更均已实现并归档（`openspec/changes/archive/` 齐全），本表保留为架构落位参照，不再有「未来/后续」含义。
 
 - 新 command 一律：Rust `commands/` 加薄壳 → `service/` 落业务 → `lib.rs` `generate_handler!` 注册；前端 `api/` 加封装 → store 注入 → 组件消费。
-- `searcher` 的加密（aes/cbc/rsa）与五家 HTTP 聚合是纯逻辑，无 Tauri 依赖，放 service 层（单元测试内联）。
+- `searcher` 的加密（aes/cbc/rsa）与五家 HTTP 聚合是纯逻辑，无 Tauri 依赖，放 service 层（单测外置 `tests/searcher_*_tests.rs`）。
 - `api/search.ts` 只做 IPC 透传（同 `songs.ts` 模式），候选生命周期（选中即搜、切歌即弃）逻辑在 store，不在 api 层。
