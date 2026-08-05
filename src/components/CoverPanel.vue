@@ -26,6 +26,20 @@ const readonly = computed(() => songStore.readonly)
 /** 「搜索封面」可用性：readonly（坏标签只读）/ 无歌禁用。 */
 const canSearch = computed(() => !songStore.readonly && songStore.current !== null)
 
+// 候选区折叠（candidate-collapse）：组件局部 ref，跨切歌保持（面板常驻不销毁，resetSearchState
+// 只清 store 候选内容、不动本 ref）；仅换目录/清空当前歌卸载面板才重置为默认展开。
+const candidatesCollapsed = ref(false)
+function toggleCandidates(): void {
+  candidatesCollapsed.value = !candidatesCollapsed.value
+}
+/** 候选区有内容才显示折叠按钮——与模板 v-if 分支（searching / done+候选 / 离线）逐条对齐（封面无 fetch 空态）。 */
+const candidatesVisible = computed(
+  () =>
+    songStore.coverSearchState === 'searching'
+    || (songStore.coverSearchState === 'done' && songStore.coverCandidates.length > 0)
+    || songStore.isOffline,
+)
+
 /** 拖拽中高亮（dragging class：虚线框 hover 琥珀，design §6.1 封面区）。 */
 const dragging = ref(false)
 /** 一行 dim 错误提示（非图片/读失败，不弹窗）。 */
@@ -159,22 +173,32 @@ onBeforeUnmount(() => {
       @click="manualSearch('cover')"
     >🔍 搜索封面</button>
 
-    <!-- 封面候选区（D8）：searching / done 有 → 3×N 网格 / done 无 / 离线 -->
-    <div v-if="songStore.coverSearchState === 'searching'" class="cand-status">
-      搜索中…<span class="spinner" aria-hidden="true"></span>
-    </div>
-    <template v-else-if="songStore.coverSearchState === 'done'">
-      <div v-if="songStore.coverCandidates.length" class="cand-grid">
-        <CoverCandidate
-          v-for="c in songStore.coverCandidates"
-          :key="`${c.source}:${c.id}`"
-          :cand="c"
-        />
+    <!-- 候选区折叠按钮（candidate-collapse）：候选区有内容才显示；折叠只做 v-show 包装，不动候选 DOM/搜索状态 -->
+    <button
+      v-if="candidatesVisible"
+      class="cand-toggle"
+      type="button"
+      @click="toggleCandidates"
+    >{{ candidatesCollapsed ? '展开候选 ▼' : '隐藏候选 ▲' }}</button>
+
+    <!-- 封面候选区（D8），cand-collapse 外层 v-show 容器（仅显示/隐藏，不改内部 v-if/v-else 结构） -->
+    <div class="cand-wrap" v-show="!candidatesCollapsed">
+      <div v-if="songStore.coverSearchState === 'searching'" class="cand-status">
+        搜索中…<span class="spinner" aria-hidden="true"></span>
       </div>
-      <div v-else class="cand-empty">未找到匹配的封面</div>
-      <div v-if="songStore.coverCandidates.length" class="cand-hint">点选一张填入预览</div>
-    </template>
-    <div v-else-if="songStore.isOffline" class="cand-empty">离线：仅手动填写</div>
+      <template v-else-if="songStore.coverSearchState === 'done'">
+        <div v-if="songStore.coverCandidates.length" class="cand-grid">
+          <CoverCandidate
+            v-for="c in songStore.coverCandidates"
+            :key="`${c.source}:${c.id}`"
+            :cand="c"
+          />
+        </div>
+        <div v-else class="cand-empty">未找到匹配的封面</div>
+        <div v-if="songStore.coverCandidates.length" class="cand-hint">点选一张填入预览</div>
+      </template>
+      <div v-else-if="songStore.isOffline" class="cand-empty">离线：仅手动填写</div>
+    </div>
   </div>
 </template>
 
@@ -312,6 +336,24 @@ onBeforeUnmount(() => {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+}
+
+/* 候选区折叠按钮（candidate-collapse）：对齐 .search-trigger 克制风格，尺寸更小；
+   封面搜索按钮下方，margin-top: 10px */
+.cand-toggle {
+  margin: 10px 0 0;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cand-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* design §6.3：搜索中状态（居中 dim 文字 + 10×10 转圈） */

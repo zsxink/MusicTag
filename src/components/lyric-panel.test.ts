@@ -302,3 +302,64 @@ describe('LyricPanel — 歌词候选区（v1-search-ui D8：status/列表/空�
     expect(mockSearchSongs).not.toHaveBeenCalled()
   })
 })
+
+describe('LyricPanel — 候选区折叠（candidate-collapse：默认展开、点击折叠、跨切歌保持）', () => {
+  beforeEach(() => {
+    mockSearchSongs.mockReset()
+    mockFetchLyric.mockReset()
+    mockFetchLyric.mockResolvedValue(null)
+    mockSearchSongs.mockResolvedValue({
+      songs: [],
+      source_stats: [
+        ['netease', 0],
+        ['qqmusic', 0],
+        ['kugou', 0],
+        ['lrclib', 0],
+        ['itunes', 0],
+      ],
+    })
+    openSong()
+  })
+
+  /** v-show 折叠只改 .cand-wrap 的内联 display（happy-dom 不计算样式，直接断言内联属性）。 */
+  function candWrapDisplay(w: ReturnType<typeof mount>): string {
+    return (w.find('.cand-wrap').element as HTMLElement).style.display
+  }
+
+  it('默认展开：done + 候选非空 → .cand-list 存在、.cand-wrap 无 display:none、按钮文案「隐藏候选 ▲」', () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-list').exists()).toBe(true)
+    expect(candWrapDisplay(w)).not.toBe('none') // v-show 未折叠（内联 display 无值）
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
+  })
+
+  it('点击折叠 → .cand-wrap display:none、按钮文案「展开候选 ▼」', async () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    const w = mount(LyricPanel)
+    await w.find('.cand-toggle').trigger('click')
+    expect(candWrapDisplay(w)).toBe('none')
+    expect(w.find('.cand-toggle').text()).toContain('展开候选')
+  })
+
+  it('跨切歌保持：收起后（面板未销毁）新歌候选到来 → 仍折叠', async () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    const w = mount(LyricPanel)
+    await w.find('.cand-toggle').trigger('click') // 收起
+
+    // 模拟切歌：resetSearchState 清候选归 idle → 新歌又出候选（面板常驻不销毁，ref 保留）
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand({ id: 'n2', title: '另一首' })]
+
+    expect(candWrapDisplay(w)).toBe('none') // 折叠偏好未丢失
+    expect(w.find('.cand-toggle').text()).toContain('展开候选')
+  })
+
+  it('候选区无内容（idle 且无候选/非离线）→ 不显示折叠按钮、无占位', () => {
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-toggle').exists()).toBe(false)
+  })
+})
