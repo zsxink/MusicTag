@@ -40,12 +40,14 @@ import { songStore } from './store/song'
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
+  overflow: hidden; /* 锁定高度边界：右栏超高仅内部滚动，不撑高顶起左栏 */
 }
 
 /* 右侧编辑器占位（v1-song-read 起填充 SongEditor 形态） */
 .editor-slot {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0; /* 保证内部 .editor-body 的 overflow-y:auto 生效 */
   background: var(--bg);
 }
 </style>
