@@ -415,4 +415,31 @@ describe('LyricPanel — 候选区折叠（candidate-collapse：默认展开、�
     expect(w.find('.cand-empty').exists()).toBe(true)
     expect(w.find('.cand-toggle').exists()).toBe(true)
   })
+
+  it('默认展开（searching 未折叠）→ 候选区可见 + 按钮「隐藏候选 ▲」（spec Req 1：搜索中属「有内容」）', () => {
+    songStore.lyricSearchState = 'searching'
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-status').exists()).toBe(true)
+    expect(candWrapDisplay(w)).not.toBe('none') // v-show 未折叠
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
+  })
+
+  it('离线（网络失败路径）也算有内容 → 显示折叠按钮（spec Req 1/4：离线提示属「有内容」）', () => {
+    songStore.isOffline = true
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-empty').text()).toBe('离线：仅手动填写')
+    expect(w.find('.cand-toggle').exists()).toBe(true) // 离线 → 按钮显示
+  })
+
+  it('折叠只翻转本地 ref：不触发 store 动作、不清候选、不重跑搜索（design 语义）', async () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    const w = mount(LyricPanel)
+    await w.find('.cand-toggle').trigger('click')
+    // store 状态未被折叠改动：候选仍在、搜索状态不变、无搜索调用
+    expect(songStore.lyricCandidates).toHaveLength(1)
+    expect(songStore.lyricSearchState).toBe('done')
+    expect(mockSearchSongs).not.toHaveBeenCalled()
+    expect(w.find('.cand-list').exists()).toBe(true) // v-show 保留 DOM，仅 display:none
+  })
 })

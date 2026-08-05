@@ -592,4 +592,31 @@ describe('CoverPanel — 候选区折叠（candidate-collapse：默认展开、�
     expect(w.find('.cand-empty').exists()).toBe(true) // 空态渲染
     expect(w.find('.cand-toggle').exists()).toBe(true) // 有内容 → 显示按钮
   })
+
+  it('searching 也算有内容 → 显示折叠按钮（spec「搜索中」属有内容）', () => {
+    songStore.coverSearchState = 'searching'
+    const w = mount(CoverPanel)
+    expect(w.find('.cand-status').exists()).toBe(true)
+    expect(candWrapDisplay(w)).not.toBe('none') // 默认展开
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
+  })
+
+  it('离线（网络失败路径）也算有内容 → 显示折叠按钮（spec「离线提示」属有内容）', () => {
+    songStore.isOffline = true
+    const w = mount(CoverPanel)
+    expect(w.find('.cand-empty').text()).toBe('离线：仅手动填写')
+    expect(w.find('.cand-toggle').exists()).toBe(true) // 离线 → 按钮显示
+  })
+
+  it('折叠只翻转本地 ref：不触发 store 动作、不清候选（design 语义）', async () => {
+    songStore.coverSearchState = 'done'
+    songStore.coverCandidates = [cand()]
+    const w = mount(CoverPanel)
+    await w.find('.cand-toggle').trigger('click')
+    // store 状态未被折叠改动：候选仍在、搜索状态不变、无搜索调用
+    expect(songStore.coverCandidates).toHaveLength(1)
+    expect(songStore.coverSearchState).toBe('done')
+    expect(mockSearchSongs).not.toHaveBeenCalled()
+    expect(w.find('.cand-grid').exists()).toBe(true) // v-show 保留 DOM，仅 display:none
+  })
 })
