@@ -4,14 +4,14 @@
 
 ## G1 歌词候选区折叠
 
-- [ ] 1.1 失败测试：`src/components/lyric-panel.test.ts` 追加「候选区折叠」describe——默认展开（`songStore.lyricSearchState='done'` + 候选非空 → `.cand-list` 可见 + 按钮「隐藏候选 ▲」）、点击折叠（`.cand-list` `isVisible()===false` + 「展开候选 ▼」）、跨切歌保持（收起后重新 `mount(LyricPanel)` 仍折叠）；跑 `npx vitest run src/components/lyric-panel.test.ts` 确认 FAIL（无 `.cand-toggle`）
-- [ ] 1.2 `src/components/LyricPanel.vue`：script 补 `ref` import + `candidatesCollapsed` ref + `toggleCandidates` + `candidatesVisible` computed（searching / lyricFetchEmpty / done+候选 / isOffline，与现有分支逐条对齐）；候选区分支包 `<div class="cand-wrap" v-show="!candidatesCollapsed">`（**不改分支内部 v-if/v-else 结构**，lyricFetchEmpty 先于 done 的 CR C2 顺序保持）；候选区上方加 `.cand-toggle` 按钮（`v-if="candidatesVisible"`）+ `.cand-toggle` 样式（对齐 `.search-trigger`，更小尺寸）
-- [ ] 1.3 跑 `npx vitest run src/components/lyric-panel.test.ts` 确认 PASS（新增 3 个 + 现有全部）
+- [ ] 1.1 失败测试：`src/components/lyric-panel.test.ts` 追加「候选区折叠」describe 8 条——默认展开（`lyricSearchState='done'`+候选非空 → `.cand-list` 存在 + `.cand-wrap` 内联 display 非 none + 按钮「隐藏候选 ▲」）、点击折叠（内联 display none + 「展开候选 ▼」）、重新展开、跨切歌保持（**同一挂载实例**改 store 模拟新歌候选 → 仍折叠）、切歌经过无内容中间态（归 idle → 按钮暂隐 + 折叠态保留 → 新歌 searching/done → 仍折叠）、无内容不显示按钮、空态（done+候选空）显示按钮、`lyricFetchEmpty` 显示按钮；跑 `npx vitest run src/components/lyric-panel.test.ts` 确认 FAIL（无 `.cand-toggle`）
+- [ ] 1.2 `src/components/LyricPanel.vue`：script 补 `ref` import + `candidatesCollapsed` ref + `toggleCandidates` + `candidatesVisible` computed（searching / lyricFetchEmpty / done+候选（含空态）/ isOffline，与现有分支逐条对齐）；候选区分支包 `<div class="cand-wrap" v-show="!candidatesCollapsed">`（**不改分支内部 v-if/v-else 结构**，lyricFetchEmpty 先于 done 的 CR C2 顺序保持）；候选区上方加 `.cand-toggle` 按钮（`v-if="candidatesVisible"`）+ 样式（对齐 `.search-trigger` 更小尺寸，`margin: 0 0 10px`）
+- [ ] 1.3 跑 `npx vitest run src/components/lyric-panel.test.ts` 确认 PASS（新增 8 条 + 现有全部）
 
 ## G2 封面候选区折叠
 
-- [ ] 2.1 失败测试：`src/components/cover-panel.test.ts` 追加「候选区折叠」describe（默认展开 `.cand-grid` 可见 + 按钮「隐藏候选 ▲」、点击折叠 → `isVisible()===false` + 「展开候选 ▼」）；确认 FAIL
-- [ ] 2.2 `src/components/CoverPanel.vue`：同 G1 实现（`coverSearchState`/`coverCandidates`/`isOffline` 对应 computed；候选区分支包 `.cand-wrap` v-show；按钮放搜索按钮下方，`margin-top: 10px`）
+- [ ] 2.1 失败测试：`src/components/cover-panel.test.ts` 追加「候选区折叠」describe 6 条——默认展开（`.cand-grid` + 内联 display 非 none + 「隐藏候选 ▲」）、点击折叠（display none + 「展开候选 ▼」）、重新展开、跨切歌保持（同一实例）、无内容不显示按钮、空态（done+候选空）显示按钮；确认 FAIL
+- [ ] 2.2 `src/components/CoverPanel.vue`：同 G1 实现（`coverSearchState`/`coverCandidates`/`isOffline` 对应 computed（含 done+空态分支）；候选区分支包 `.cand-wrap` v-show；按钮放搜索按钮下方，`margin: 10px 0 0`）
 - [ ] 2.3 跑 `npx vitest run src/components/cover-panel.test.ts` 确认 PASS
 
 ## G3 验证 + 文档 + 提交
