@@ -19,8 +19,8 @@
       "issue": 88,
       "domain": "frontend",
       "dependsOn": [],
-      "status": "todo",
-      "implementationCommit": null,
+      "status": "done",
+      "implementationCommit": "8944a49",
       "slice": "设计文档 §二 2.1+2.2+2.4；Plan A Task 2+4"
     },
     {
@@ -60,7 +60,7 @@
       "slice": "总复核门禁：全部子项合并后对最终仓库状态做只读独立复核"
     }
   ],
-  "cursor": 1,
+  "cursor": 2,
   "error": null,
   "sourceRevision": "21f74f1214b3cff2a27b0fded30c9975a8de68a5"
 }
