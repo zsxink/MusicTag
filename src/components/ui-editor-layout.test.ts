@@ -44,6 +44,14 @@ describe('ui-editor-layout — 左栏高度锁定窗口可用区（spec: 候选�
     expect(rule).toMatch(/min-height:\s*0/)
   })
 
+  it('.editor-slot 是 flex 容器（display:flex，放行 .editor 的 flex:1 1 auto 高度约束）', () => {
+    // bug：.editor-slot 缺 display:flex → .editor 的 flex:1 1 auto 失效，
+    // 按内容自然高度撑开 → .editor-body 的 overflow-y:auto 永不触发 →
+    // .workspace overflow:hidden 直接裁剪底部，歌词框被裁到视口外、无法下拉。
+    const rule = app.match(/\.editor-slot\s*{([^}]*)}/)?.[1] ?? ''
+    expect(rule).toMatch(/display:\s*flex/)
+  })
+
   it('.editor-body 保留 overflow-y:auto + min-height:0（右栏内部滚动通道不丢）', () => {
     const editor = read('Editor.vue')
     const rule = editor.match(/\.editor-body\s*{([^}]*)}/)?.[1] ?? ''

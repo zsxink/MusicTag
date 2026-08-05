@@ -2,6 +2,8 @@
 
 搜索歌词/封面后候选区常显，撑高右栏编辑区。需手动可折叠、且折叠偏好跨切歌保持。
 
+> **后续变更（2026-08-06，UX 决策调整）**：折叠偏好**不再跨切歌保持**——实测收起后切歌、新歌候选区保持折叠易让用户误以为搜索没出结果，改为**切歌即重置为默认展开**（LyricPanel/CoverPanel `watch(songStore.current?.path)` 重置 `candidatesCollapsed=false`）。本文档正文保留原「跨切歌保持」历史设计，实际行为以 `openspec/specs/candidate-collapse/spec.md`、`docs/V1-PRD.md` FR-15、`docs/design/design.md` 的更新为准。
+
 ## 技术方案（供实现者）
 
 本变更纯前端展示交互，不改任何 store 字段/动作、不改 IPC 契约、不新增依赖。

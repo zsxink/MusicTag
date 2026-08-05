@@ -303,7 +303,7 @@ describe('LyricPanel — 歌词候选区（v1-search-ui D8：status/列表/空�
   })
 })
 
-describe('LyricPanel — 候选区折叠（candidate-collapse：默认展开、点击折叠、跨切歌保持）', () => {
+describe('LyricPanel — 候选区折叠（candidate-collapse：默认展开、点击折叠、切歌后重置展开）', () => {
   beforeEach(() => {
     mockSearchSongs.mockReset()
     mockFetchLyric.mockReset()
@@ -355,45 +355,50 @@ describe('LyricPanel — 候选区折叠（candidate-collapse：默认展开、�
     expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
   })
 
-  it('跨切歌保持：收起后（面板未销毁）新歌候选到来 → 仍折叠', async () => {
+  it('切歌后重置展开：收起后切到另一首歌（current.path 变）→ 默认展开', async () => {
     songStore.lyricSearchState = 'done'
     songStore.lyricCandidates = [makeCand()]
     const w = mount(LyricPanel)
     await w.find('.cand-toggle').trigger('click') // 收起
+    expect(candWrapDisplay(w)).toBe('none')
+    expect(w.find('.cand-toggle').text()).toContain('展开候选')
 
-    // 模拟切歌：resetSearchState 清候选归 idle → 新歌又出候选（面板常驻不销毁，ref 保留）
+    // 真实切歌：current.path 变化（watch 重置折叠为默认展开）+ resetSearchState 清候选
+    songStore.current = { ...makeSong({ path: '/b/song.flac' }) }
     songStore.lyricSearchState = 'done'
     songStore.lyricCandidates = [makeCand({ id: 'n2', title: '另一首' })]
+    await w.vm.$nextTick()
 
-    expect(candWrapDisplay(w)).toBe('none') // 折叠偏好未丢失
-    expect(w.find('.cand-toggle').text()).toContain('展开候选')
+    expect(candWrapDisplay(w)).not.toBe('none') // 已重置为默认展开
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
   })
 
-  it('切歌经过无内容中间态（resetSearchState 归 idle）→ 按钮暂隐、候选再现仍保持折叠', async () => {
+  it('切歌经过无内容中间态（resetSearchState 归 idle）→ 按钮暂隐、新歌候选到来默认展开', async () => {
     songStore.lyricSearchState = 'done'
     songStore.lyricCandidates = [makeCand()]
     const w = mount(LyricPanel)
     await w.find('.cand-toggle').trigger('click') // 收起
 
-    // 切歌真实序列：resetSearchState 清候选归 idle（候选区无内容 → 按钮消失）
+    // 切歌：current.path 变 → watch 重置折叠为默认展开；resetSearchState 清候选归 idle
+    songStore.current = { ...makeSong({ path: '/b/song.flac' }) }
     songStore.lyricSearchState = 'idle'
     songStore.lyricCandidates = []
     await w.vm.$nextTick() // 等 DOM 更新再断言
     expect(w.find('.cand-toggle').exists()).toBe(false) // 无内容 → 按钮暂隐
-    expect(candWrapDisplay(w)).toBe('none') // v-show 折叠态仍保留
+    expect(candWrapDisplay(w)).not.toBe('none') // 折叠已重置为默认展开
 
-    // 新歌搜索中 → 按钮再现（仍在折叠，候选区不可见）
+    // 新歌搜索中 → 按钮再现（默认展开）
     songStore.lyricSearchState = 'searching'
     await w.vm.$nextTick()
     expect(w.find('.cand-toggle').exists()).toBe(true)
-    expect(w.find('.cand-toggle').text()).toContain('展开候选')
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
 
-    // 新歌候选到来 → 仍折叠
+    // 新歌候选到来 → 保持展开
     songStore.lyricSearchState = 'done'
     songStore.lyricCandidates = [makeCand({ id: 'n2', title: '另一首' })]
     await w.vm.$nextTick()
-    expect(candWrapDisplay(w)).toBe('none')
-    expect(w.find('.cand-toggle').text()).toContain('展开候选')
+    expect(candWrapDisplay(w)).not.toBe('none')
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
   })
 
   it('候选区无内容（idle 且无候选/非离线）→ 不显示折叠按钮、无占位', () => {

@@ -503,7 +503,7 @@ describe('CoverPanel — 封面候选区（v1-search-ui D8：status/网格/空�
   })
 })
 
-describe('CoverPanel — 候选区折叠（candidate-collapse：默认展开、点击折叠、跨切歌保持）', () => {
+describe('CoverPanel — 候选区折叠（candidate-collapse：默认展开、点击折叠、切歌后重置展开）', () => {
   const cand = (over: Partial<import('../api/types').SongCandidate> = {}): import('../api/types').SongCandidate => ({
     source: 'netease',
     id: 'n1',
@@ -566,18 +566,22 @@ describe('CoverPanel — 候选区折叠（candidate-collapse：默认展开、�
     expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
   })
 
-  it('跨切歌保持：收起后新歌候选到来 → 仍折叠', async () => {
+  it('切歌后重置展开：收起后切到另一首歌（current.path 变）→ 默认展开', async () => {
     songStore.coverSearchState = 'done'
     songStore.coverCandidates = [cand()]
     const w = mount(CoverPanel)
     await w.find('.cand-toggle').trigger('click') // 收起
+    expect(candWrapDisplay(w)).toBe('none')
+    expect(w.find('.cand-toggle').text()).toContain('展开候选')
 
-    // 模拟切歌：resetSearchState 清候选归 idle → 新歌又出候选（面板常驻不销毁，ref 保留）
+    // 真实切歌：current.path 变化（watch 重置折叠为默认展开）+ resetSearchState 清候选
+    songStore.current = { ...makeSong({ path: '/b/song.flac' }) }
     songStore.coverSearchState = 'done'
     songStore.coverCandidates = [cand({ id: 'q2', cover_url: 'https://q/2.jpg' })]
+    await w.vm.$nextTick() // watch 异步触发折叠重置
 
-    expect(candWrapDisplay(w)).toBe('none') // 折叠偏好未丢失
-    expect(w.find('.cand-toggle').text()).toContain('展开候选')
+    expect(candWrapDisplay(w)).not.toBe('none') // 已重置为默认展开
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
   })
 
   it('候选区无内容（idle 且无候选/非离线）→ 不显示折叠按钮、无占位', () => {
