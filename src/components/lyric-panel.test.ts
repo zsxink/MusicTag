@@ -302,3 +302,144 @@ describe('LyricPanel — 歌词候选区（v1-search-ui D8：status/列表/空�
     expect(mockSearchSongs).not.toHaveBeenCalled()
   })
 })
+
+describe('LyricPanel — 候选区折叠（candidate-collapse：默认展开、点击折叠、跨切歌保持）', () => {
+  beforeEach(() => {
+    mockSearchSongs.mockReset()
+    mockFetchLyric.mockReset()
+    mockFetchLyric.mockResolvedValue(null)
+    mockSearchSongs.mockResolvedValue({
+      songs: [],
+      source_stats: [
+        ['netease', 0],
+        ['qqmusic', 0],
+        ['kugou', 0],
+        ['lrclib', 0],
+        ['itunes', 0],
+      ],
+    })
+    openSong()
+  })
+
+  /** v-show 折叠只改 .cand-wrap 的内联 display（happy-dom 不计算样式，直接断言内联属性）。 */
+  function candWrapDisplay(w: ReturnType<typeof mount>): string {
+    return (w.find('.cand-wrap').element as HTMLElement).style.display
+  }
+
+  it('默认展开：done + 候选非空 → .cand-list 存在、.cand-wrap 无 display:none、按钮文案「隐藏候选 ▲」', () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-list').exists()).toBe(true)
+    expect(candWrapDisplay(w)).not.toBe('none') // v-show 未折叠（内联 display 无值）
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
+  })
+
+  it('点击折叠 → .cand-wrap display:none、按钮文案「展开候选 ▼」', async () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    const w = mount(LyricPanel)
+    await w.find('.cand-toggle').trigger('click')
+    expect(candWrapDisplay(w)).toBe('none')
+    expect(w.find('.cand-toggle').text()).toContain('展开候选')
+  })
+
+  it('重新展开 → .cand-wrap 恢复显示、按钮文案「隐藏候选 ▲」', async () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    const w = mount(LyricPanel)
+    await w.find('.cand-toggle').trigger('click') // 收起
+    expect(candWrapDisplay(w)).toBe('none')
+    await w.find('.cand-toggle').trigger('click') // 再点展开
+    expect(candWrapDisplay(w)).not.toBe('none')
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
+  })
+
+  it('跨切歌保持：收起后（面板未销毁）新歌候选到来 → 仍折叠', async () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    const w = mount(LyricPanel)
+    await w.find('.cand-toggle').trigger('click') // 收起
+
+    // 模拟切歌：resetSearchState 清候选归 idle → 新歌又出候选（面板常驻不销毁，ref 保留）
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand({ id: 'n2', title: '另一首' })]
+
+    expect(candWrapDisplay(w)).toBe('none') // 折叠偏好未丢失
+    expect(w.find('.cand-toggle').text()).toContain('展开候选')
+  })
+
+  it('切歌经过无内容中间态（resetSearchState 归 idle）→ 按钮暂隐、候选再现仍保持折叠', async () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    const w = mount(LyricPanel)
+    await w.find('.cand-toggle').trigger('click') // 收起
+
+    // 切歌真实序列：resetSearchState 清候选归 idle（候选区无内容 → 按钮消失）
+    songStore.lyricSearchState = 'idle'
+    songStore.lyricCandidates = []
+    await w.vm.$nextTick() // 等 DOM 更新再断言
+    expect(w.find('.cand-toggle').exists()).toBe(false) // 无内容 → 按钮暂隐
+    expect(candWrapDisplay(w)).toBe('none') // v-show 折叠态仍保留
+
+    // 新歌搜索中 → 按钮再现（仍在折叠，候选区不可见）
+    songStore.lyricSearchState = 'searching'
+    await w.vm.$nextTick()
+    expect(w.find('.cand-toggle').exists()).toBe(true)
+    expect(w.find('.cand-toggle').text()).toContain('展开候选')
+
+    // 新歌候选到来 → 仍折叠
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand({ id: 'n2', title: '另一首' })]
+    await w.vm.$nextTick()
+    expect(candWrapDisplay(w)).toBe('none')
+    expect(w.find('.cand-toggle').text()).toContain('展开候选')
+  })
+
+  it('候选区无内容（idle 且无候选/非离线）→ 不显示折叠按钮、无占位', () => {
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-toggle').exists()).toBe(false)
+  })
+
+  it('空态分支（done + 候选空）也算有内容 → 显示折叠按钮（spec「空态」属有内容）', () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = []
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-empty').exists()).toBe(true) // 空态渲染
+    expect(w.find('.cand-toggle').exists()).toBe(true) // 有内容 → 显示按钮
+  })
+
+  it('lyricFetchEmpty（C2 全源失败空态）→ 显示折叠按钮', () => {
+    songStore.lyricFetchEmpty = true
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-empty').exists()).toBe(true)
+    expect(w.find('.cand-toggle').exists()).toBe(true)
+  })
+
+  it('默认展开（searching 未折叠）→ 候选区可见 + 按钮「隐藏候选 ▲」（spec Req 1：搜索中属「有内容」）', () => {
+    songStore.lyricSearchState = 'searching'
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-status').exists()).toBe(true)
+    expect(candWrapDisplay(w)).not.toBe('none') // v-show 未折叠
+    expect(w.find('.cand-toggle').text()).toContain('隐藏候选')
+  })
+
+  it('离线（网络失败路径）也算有内容 → 显示折叠按钮（spec Req 1/4：离线提示属「有内容」）', () => {
+    songStore.isOffline = true
+    const w = mount(LyricPanel)
+    expect(w.find('.cand-empty').text()).toBe('离线：仅手动填写')
+    expect(w.find('.cand-toggle').exists()).toBe(true) // 离线 → 按钮显示
+  })
+
+  it('折叠只翻转本地 ref：不触发 store 动作、不清候选、不重跑搜索（design 语义）', async () => {
+    songStore.lyricSearchState = 'done'
+    songStore.lyricCandidates = [makeCand()]
+    const w = mount(LyricPanel)
+    await w.find('.cand-toggle').trigger('click')
+    // store 状态未被折叠改动：候选仍在、搜索状态不变、无搜索调用
+    expect(songStore.lyricCandidates).toHaveLength(1)
+    expect(songStore.lyricSearchState).toBe('done')
+    expect(mockSearchSongs).not.toHaveBeenCalled()
+    expect(w.find('.cand-list').exists()).toBe(true) // v-show 保留 DOM，仅 display:none
+  })
+})
