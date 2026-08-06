@@ -3,7 +3,8 @@
 // 原 `#[cfg(test)] mod tests` + `test_util` 内嵌块整体迁出（production `src/` 零 `#[cfg(test)]`）。
 // 覆盖 design.md D1–D8 / D2：
 // - `norm`/`title_match`/`artist_match` 归一化与打分权重（空串防退化命中、多艺人分段取 max）；
-// - `aggregate` 过滤零关联 → 打分 → 归一化去重 → score 降序 → 前 10 条（同分五源序仲裁）；
+// - `aggregate` 过滤零关联 → 打分 → 同源去重（保留该源最高分）、跨源不折叠 → 每源 TOP 3 →
+//   按来源分组（Netease→QqMusic→Kugou→Lrclib→Itunes）、组内分降序（多源候选展示）；
 // - `search_song_with_sources` 并发聚合 + 超时降级（FakeSource 注入 Hang/Fail/Return）；
 //   `search_source_with` 单源原始候选（TOP_N 截断，不做聚合去重折叠）；
 // - `download_cover*` 5s 超时 + 12MB 限流（Content-Length 预检 + 流式上限）。
@@ -13,7 +14,7 @@ mod common;
 
 use app_lib::model::{MusicSourceId, SongCandidate};
 use app_lib::service::searcher::{
-    MusicSource, TOP_N, aggregate, album_match, artist_match, download_cover,
+    MusicSource, PER_SOURCE_TOP, TOP_N, aggregate, album_match, artist_match, download_cover,
     download_cover_with_timeout, join_query_terms, norm, search_song_with_sources,
     search_source_with, title_match,
 };
@@ -143,8 +144,9 @@ fn aggregate_scores_and_sorts_desc() {
 }
 
 #[test]
-fn aggregate_dedup_keeps_earliest_source_on_tie() {
-    // 同一归一化 (title, artist) 多源都返回 → 同分保留来源序更早（Netease < QqMusic < Kugou）
+fn aggregate_keeps_each_source_on_same_song() {
+    // 同一归一化 (title, artist) 多源都返回 → 跨源不折叠，三源各自保留、按来源分组序
+    // （Netease → QqMusic → Kugou），不再同分只留来源序最早的一条。
     let songs = aggregate(
         "晴天",
         "周杰伦",
@@ -155,16 +157,19 @@ fn aggregate_dedup_keeps_earliest_source_on_tie() {
             cand(MusicSourceId::QqMusic, "q", "晴天", "周杰伦"),
         ],
     );
-    assert_eq!(songs.len(), 1);
+    assert_eq!(songs.len(), 3, "跨源不折叠：三源各自保留");
     assert_eq!(songs[0].id, "n");
     assert_eq!(songs[0].source, MusicSourceId::Netease);
+    assert_eq!(songs[1].id, "q");
+    assert_eq!(songs[1].source, MusicSourceId::QqMusic);
+    assert_eq!(songs[2].id, "k");
+    assert_eq!(songs[2].source, MusicSourceId::Kugou);
 }
 
 #[test]
-fn aggregate_tie_keeps_full_five_source_rank_order() {
-    // search-sources-renewal D8：同分平手按五源固定序 Netease(0)→QqMusic(1)→Kugou(2)→
-    // Lrclib(3)→Itunes(4) 仲裁——中文源前置、公共源垫底。五家全给同曲同分 → 只留 Netease；
-    // 且 Lrclib 同分必胜 Itunes（公共源内部也按注册序稳定）。
+fn aggregate_keeps_all_five_sources_on_same_score() {
+    // 跨源保留：五家全给同曲同分 → 不再按来源序只留 Netease，而是五条全部保留、
+    // 按来源分组序 Netease(0)→QqMusic(1)→Kugou(2)→Lrclib(3)→Itunes(4) 展示。
     let five = vec![
         cand(MusicSourceId::Netease, "n", "晴天", "周杰伦"),
         cand(MusicSourceId::QqMusic, "q", "晴天", "周杰伦"),
@@ -173,36 +178,51 @@ fn aggregate_tie_keeps_full_five_source_rank_order() {
         cand(MusicSourceId::Itunes, "i", "晴天", "周杰伦"),
     ];
     let songs = aggregate("晴天", "周杰伦", "", five);
-    assert_eq!(songs.len(), 1);
+    assert_eq!(songs.len(), 5, "跨源不折叠：五条全部保留");
     assert_eq!(songs[0].source, MusicSourceId::Netease);
     assert_eq!(songs[0].id, "n");
+    assert_eq!(songs[1].source, MusicSourceId::QqMusic);
+    assert_eq!(songs[1].id, "q");
+    assert_eq!(songs[2].source, MusicSourceId::Kugou);
+    assert_eq!(songs[2].id, "k");
+    assert_eq!(songs[3].source, MusicSourceId::Lrclib);
+    assert_eq!(songs[3].id, "l");
+    assert_eq!(songs[4].source, MusicSourceId::Itunes);
+    assert_eq!(songs[4].id, "i");
 
-    // 仅 Lrclib 与 Itunes 同分 → 保留 Lrclib（rank 3 < 4）
+    // 仅 Lrclib 与 Itunes 同曲 → 两条各自保留（不再按 rank 3<4 折叠成 Lrclib）
     let pub_only = vec![
         cand(MusicSourceId::Lrclib, "l", "晴天", "周杰伦"),
         cand(MusicSourceId::Itunes, "i", "晴天", "周杰伦"),
     ];
     let songs = aggregate("晴天", "周杰伦", "", pub_only);
-    assert_eq!(songs.len(), 1);
+    assert_eq!(songs.len(), 2, "跨源不折叠：两源各自保留");
     assert_eq!(songs[0].source, MusicSourceId::Lrclib);
     assert_eq!(songs[0].id, "l");
+    assert_eq!(songs[1].source, MusicSourceId::Itunes);
+    assert_eq!(songs[1].id, "i");
 }
 
 #[test]
-fn aggregate_limits_to_top_ten() {
-    // 15 个不同 title 的候选（title 均包含查询词）→ 前 N=10
+fn aggregate_limits_per_source_to_top_three() {
+    // 每源 TOP 3：单源 15 个不同 title 的候选（title 均包含查询词）→ 该源只保留 TOP 3，
+    // 不再全局截断到 TOP_N=10（aggregate 内已无全局截断；TOP_N 只服务单源 search_source）。
     let cands: Vec<SongCandidate> = (1..=15)
         .map(|i| {
             cand(
                 MusicSourceId::Netease,
                 &i.to_string(),
-                &format!("晴天{i}"),
+                &format!("晴天{i:02}"),
                 "周杰伦",
             )
         })
         .collect();
     let songs = aggregate("晴天", "周杰伦", "", cands);
-    assert_eq!(songs.len(), 10, "应只返回前 10 条");
+    assert_eq!(songs.len(), PER_SOURCE_TOP, "每源只保留 TOP 3");
+    // 组内同分按归一化 title 稳定序（零填充保证 01 < 02 < 03）：晴天01 → 晴天02 → 晴天03
+    assert_eq!(songs[0].id, "1");
+    assert_eq!(songs[1].id, "2");
+    assert_eq!(songs[2].id, "3");
 }
 
 #[test]
@@ -216,6 +236,112 @@ fn aggregate_normalizes_fullwidth_query() {
     );
     assert_eq!(songs.len(), 1);
     assert_eq!(songs[0].id, "1");
+}
+
+#[test]
+fn aggregate_dedups_same_source_keeps_highest_score() {
+    // 同源去重：同一来源、同一归一化 (title, artist) 的两个版本（album 不同 → 分不同）
+    // → 只保留该源得分最高一条；另一来源返回同曲 → 跨源不折叠、各自保留。
+    let songs = aggregate(
+        "晴天",
+        "周杰伦",
+        "叶惠美",
+        vec![
+            cand_album(MusicSourceId::Netease, "1", "晴天", "周杰伦", "依然范特西"), // 0.9
+            cand_album(MusicSourceId::Netease, "2", "晴天", "周杰伦", "叶惠美"), // 1.2（album 匹配）
+            cand(MusicSourceId::QqMusic, "q", "晴天", "周杰伦"), // 0.9，跨源保留
+        ],
+    );
+    assert_eq!(songs.len(), 2, "同源折叠为 1 条 + 跨源 QQ 1 条 = 2 条");
+    assert_eq!(songs[0].id, "2", "同源同曲保留得分最高（album 匹配）那条");
+    assert_eq!(songs[0].source, MusicSourceId::Netease);
+    assert_eq!(songs[1].id, "q", "跨源不折叠，QQ 各自保留");
+    assert_eq!(songs[1].source, MusicSourceId::QqMusic);
+}
+
+#[test]
+fn aggregate_limits_each_source_to_top_three() {
+    // 每源 TOP 3 + 来源分组：两源各 5 条不同 title → 每源只留 3 条、共 6 条，
+    // 全部 Netease 组在前、QqMusic 组在后（跨源不折叠、来源分组拼接）。
+    let netease: Vec<SongCandidate> = (1..=5)
+        .map(|i| {
+            cand(
+                MusicSourceId::Netease,
+                &format!("n{i}"),
+                &format!("晴天{i}"),
+                "周杰伦",
+            )
+        })
+        .collect();
+    let qq: Vec<SongCandidate> = (1..=5)
+        .map(|i| {
+            cand(
+                MusicSourceId::QqMusic,
+                &format!("q{i}"),
+                &format!("晴天{i}"),
+                "周杰伦",
+            )
+        })
+        .collect();
+    let mut all = netease;
+    all.extend(qq);
+    let songs = aggregate("晴天", "周杰伦", "", all);
+    assert_eq!(songs.len(), PER_SOURCE_TOP * 2, "两源各 TOP 3，共 6 条");
+    let sources: Vec<MusicSourceId> = songs.iter().map(|s| s.source).collect();
+    assert_eq!(
+        sources,
+        vec![
+            MusicSourceId::Netease,
+            MusicSourceId::Netease,
+            MusicSourceId::Netease,
+            MusicSourceId::QqMusic,
+            MusicSourceId::QqMusic,
+            MusicSourceId::QqMusic,
+        ],
+        "按来源分组：Netease 3 条在前、QqMusic 3 条在后"
+    );
+}
+
+#[test]
+fn aggregate_groups_by_source_then_score_desc() {
+    // 来源分组 + 组内分降序：Netease 组在前（0.9），QqMusic 组内 0.9 在 0.6 前，
+    // Itunes 组垫底——跨源不按 score 混排，先按来源分组、组内再分降序。
+    let songs = aggregate(
+        "晴天",
+        "周杰伦",
+        "",
+        vec![
+            cand(MusicSourceId::QqMusic, "q2", "晴天娃娃", "周杰伦"), // 0.6
+            cand(MusicSourceId::Netease, "n1", "晴天", "周杰伦"), // 0.9
+            cand(MusicSourceId::QqMusic, "q1", "晴天", "周杰伦"), // 0.9
+            cand(MusicSourceId::Itunes, "i1", "晴天", "周杰伦"), // 0.9
+        ],
+    );
+    assert_eq!(songs.len(), 4);
+    assert_eq!(songs[0].id, "n1", "Netease 组在前");
+    assert_eq!(songs[1].id, "q1", "QqMusic 组内 0.9 在 0.6 前");
+    assert_eq!(songs[2].id, "q2", "QqMusic 组内 0.6 在后");
+    assert_eq!(songs[3].id, "i1", "Itunes 组在最后");
+}
+
+#[test]
+fn aggregate_stable_within_group_by_norm_title_artist() {
+    // 同分组同分 → 按归一化 title/artist 稳定序（可复现，不依赖 HashMap 迭代序）。
+    // 同 QqMusic 组：0.9（晴天）在前；两个 0.6（"晴天mv" < "晴天娃娃"）按归一化 title 排。
+    let songs = aggregate(
+        "晴天",
+        "周杰伦",
+        "",
+        vec![
+            cand(MusicSourceId::QqMusic, "q3", "晴天娃娃", "周杰伦"), // 0.2+0.4=0.6
+            cand(MusicSourceId::QqMusic, "q1", "晴天", "周杰伦"), // 0.5+0.4=0.9
+            cand(MusicSourceId::QqMusic, "q2", "晴天mv", "周杰伦"), // 0.2+0.4=0.6
+        ],
+    );
+    assert_eq!(songs.len(), 3);
+    assert_eq!(songs[0].id, "q1", "组内分降序 0.9 在最前");
+    assert_eq!(songs[1].id, "q2", "同分按归一化 title 稳定序（晴天mv < 晴天娃娃）");
+    assert_eq!(songs[2].id, "q3");
 }
 
 // ---- 查询关键词拼接（search-cover-album D2）----
@@ -427,14 +553,28 @@ async fn search_aggregates_five_sources_and_stats() {
             (MusicSourceId::Itunes, 1),
         ]
     );
-    // 去重：「晴天/周杰伦」五家各一条 → 只留来源序最早的 Netease；「晴天娃娃」另算
-    assert_eq!(result.songs.len(), 2);
+    // 跨源保留：「晴天/周杰伦」五家各一条全部保留（不再折叠成 Netease 一条），
+    // 按来源分组 Netease → QqMusic → Kugou → Lrclib → Itunes；QQ 的「晴天娃娃」0.6 在其组内次位。
+    assert_eq!(result.songs.len(), 6, "五家「晴天」各保留 + QQ「晴天娃娃」= 6 条");
     assert_eq!(result.songs[0].id, "1");
-    assert_eq!(result.songs[1].id, "3");
-    assert!(!result
-        .songs
-        .iter()
-        .any(|s| s.source == MusicSourceId::Kugou));
+    assert_eq!(result.songs[1].id, "2");
+    assert_eq!(result.songs[2].id, "3");
+    assert_eq!(result.songs[3].id, "4");
+    assert_eq!(result.songs[4].id, "5");
+    assert_eq!(result.songs[5].id, "6");
+    let sources: Vec<MusicSourceId> = result.songs.iter().map(|s| s.source).collect();
+    assert_eq!(
+        sources,
+        vec![
+            MusicSourceId::Netease,
+            MusicSourceId::QqMusic,
+            MusicSourceId::QqMusic,
+            MusicSourceId::Kugou,
+            MusicSourceId::Lrclib,
+            MusicSourceId::Itunes,
+        ],
+        "各源候选按来源分组并排展示"
+    );
     assert!(!result.all_failed, "五源均成功 → 非离线");
 }
 

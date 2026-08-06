@@ -4,13 +4,14 @@
 // 纯业务层无 Tauri 依赖（service 分层不变量 §10.0）：函数接受 `&reqwest::Client` 参数，
 // 可脱离 Tauri 直接单测；命令薄壳在 `commands/search.rs` 只做参数接收 + 委托。
 // `search_song_with_sources`/`search_source_with`/`download_cover_with_timeout`/`to_halfwidth`/
-// `title_match`/`artist_match`/`source_rank`/`TOP_N` 提 `pub`：rust-tests-separation 单测外置
+// `title_match`/`artist_match`/`PER_SOURCE_TOP`/`TOP_N` 提 `pub`：rust-tests-separation 单测外置
 // `tests/searcher_mod_tests.rs`（集成测试是独立 crate，仅 `pub` 可见；design.md 原 `pub(crate)`
 // 方案经实测 E0603 不可行，改为 `pub`）。原 mock HTTP 工具迁 `tests/common/`。
 //
 // 数据流（design.md）：
 // - `search_song(title, artist, album)`：`tokio::join_all`（JoinSet）五源并发 + 单源 6s 超时 →
-//   失败降级空列表 + `source_stats`（该源记 0）→ `aggregate` 打分去重排序 → 前 10 条；
+//   失败降级空列表 + `source_stats`（该源记 0）→ `aggregate` 打分 → **同源去重、跨源不折叠** →
+//   每源 TOP 3 → 按来源分组（最多 5×3=15 条）；
 //   album（search-cover-album）综合进各源查询关键词与打分，空 → 回退现行为；
 // - `fetch_lyric(source, id)`：点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源；
 //   iTunes 恒 None，不参与 C2 取词链）；
@@ -35,11 +36,22 @@ const SEARCH_TIMEOUT: Duration = Duration::from_secs(6);
 const COVER_TIMEOUT: Duration = Duration::from_secs(5);
 /// 封面响应体限流上限（12MB，design.md D2：Content-Length 预检 + 流式读取上限）。
 const COVER_LIMIT: usize = 12 * 1024 * 1024;
-/// 聚合返回候选上限（design.md D3：前 N = 10，控制 IPC 载荷）。
+/// 单源搜索原始候选的 IPC 载荷上限（design.md D3：前 N = 10）。
+///
+/// **语义收窄（multi-source-candidates）**：只服务**单源路径** `search_source_with`（C2 换源），
+/// 截该源原始候选的前 N 条控制 IPC 载荷。`aggregate()`（多源聚合）**不再使用/截断**此常量——
+/// 多源候选上限由 `PER_SOURCE_TOP`（每源 TOP 3 + 来源分组，最多 5×3=15 条）取代。
+/// 勿把「全局截断 TOP_N」加回 `aggregate()`。
 ///
 /// `pub`：供 `src-tauri/tests/searcher_mod_tests.rs` 断言 `search_source_with` 的 TOP_N 截断
 /// （rust-tests-separation 单测外置；集成测试是独立 crate，仅 `pub` 可见）。
 pub const TOP_N: usize = 10;
+
+/// 每源候选上限（design.md multi-source-candidates D2：每源保留 TOP 3）。
+///
+/// 多源聚合 `aggregate()` 按来源分组，每组截前 `PER_SOURCE_TOP` 条，最多 5×3=15 条。
+/// `pub`：供 `src-tauri/tests/searcher_mod_tests.rs` 断言每源截断（同 `TOP_N` 提 `pub` 惯例）。
+pub const PER_SOURCE_TOP: usize = 3;
 
 /// 统一搜索源接口（design.md D1：每家一个客户端，统一双接口）。
 ///
@@ -357,11 +369,13 @@ pub fn album_match(q: &str, a: &str) -> f32 {
     }
 }
 
-/// 打分聚合（design.md D3 + search-cover-album D3）：过滤 title 零关联 → 打分
-/// （title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3，
-/// 上限 1.2）→ 归一化 `(title, artist)` 去重保留最高分（同分按
-/// Netease→QqMusic→Kugou→Lrclib→Itunes 来源序）→ score 降序（同分来源序 + 归一化
-/// title/artist 稳定）→ 前 10 条。album 维度仅对非空 album 计分（空 → 完全回退现行为）。
+/// 打分聚合（design.md D3 + search-cover-album D3 + multi-source-candidates）：过滤 title 零关联 →
+/// 打分（title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3，
+/// 上限 1.2）→ 归一化 `(source, title, artist)` **同源去重**（同源同曲保留该源得分最高一条，
+/// 同分保留先到/HashMap 首插）→ 按来源分组、组内 score 降序（同分按归一化 title/artist 稳定）
+/// 每源截 `PER_SOURCE_TOP` → 按 `source_rank` 分组拼接（Netease→QqMusic→Kugou→Lrclib→Itunes，
+/// 最多 5×3=15 条）。**跨源不折叠**：不同来源的候选各自保留、多源并排展示（用户拍板，供
+/// 歌词/封面候选多源点选）。album 维度仅对非空 album 计分（空 → 完全回退现行为）。
 pub fn aggregate(
     query_title: &str,
     query_artist: &str,
@@ -387,46 +401,50 @@ pub fn aggregate(
         })
         .collect();
 
-    // 去重：归一化 (title, artist) 分组，保留最高分；同分保留来源序更早的一条。
-    let mut best: HashMap<(String, String), (f32, usize, SongCandidate)> = HashMap::new();
+    // 同源去重：key = (source, norm(title), norm(artist))——同源同曲折叠（保留最高分，
+    // 同分首插/HashMap 先到者赢），**跨源 key 不同 → 各自保留、互不折叠**。
+    let mut best: HashMap<(MusicSourceId, String, String), (f32, SongCandidate)> = HashMap::new();
     for (score, c) in scored {
-        let key = (norm(&c.title), norm(&c.artist));
-        let rank = source_rank(c.source);
+        let key = (c.source, norm(&c.title), norm(&c.artist));
         match best.get_mut(&key) {
             Some(entry) => {
-                if score > entry.0 || (score == entry.0 && rank < entry.1) {
-                    *entry = (score, rank, c);
+                if score > entry.0 {
+                    *entry = (score, c);
                 }
             }
             None => {
-                best.insert(key, (score, rank, c));
+                best.insert(key, (score, c));
             }
         }
     }
 
-    // score 降序；同分按来源序 → 归一化 title/artist（可复现稳定序）。
-    let mut songs: Vec<(f32, SongCandidate)> = best.into_values().map(|(s, _, c)| (s, c)).collect();
-    songs.sort_by(|a, b| {
-        b.0.partial_cmp(&a.0)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| source_rank(a.1.source).cmp(&source_rank(b.1.source)))
-            .then_with(|| norm(&a.1.title).cmp(&norm(&b.1.title)))
-            .then_with(|| norm(&a.1.artist).cmp(&norm(&b.1.artist)))
-    });
-    songs.truncate(TOP_N);
-    songs.into_iter().map(|(_, c)| c).collect()
-}
-
-/// 来源顺序排名（Netease < QqMusic < Kugou < Lrclib < Itunes，search-sources-renewal D8：
-/// 中文源前置、公共源垫底，同分去重/排序天然偏好中文平台）。
-fn source_rank(source: MusicSourceId) -> usize {
-    match source {
-        MusicSourceId::Netease => 0,
-        MusicSourceId::QqMusic => 1,
-        MusicSourceId::Kugou => 2,
-        MusicSourceId::Lrclib => 3,
-        MusicSourceId::Itunes => 4,
+    // 按源分组 → 组内 score 降序（同分按归一化 title/artist 稳定，可复现）→ 每源截 PER_SOURCE_TOP。
+    let mut by_source: HashMap<MusicSourceId, Vec<(f32, SongCandidate)>> = HashMap::new();
+    for (score, c) in best.into_values() {
+        by_source.entry(c.source).or_default().push((score, c));
     }
+
+    // 按来源分组拼接：source_rank 升序（Netease→QqMusic→Kugou→Lrclib→Itunes），组内已分降序。
+    let mut songs: Vec<SongCandidate> = Vec::new();
+    for source in [
+        MusicSourceId::Netease,
+        MusicSourceId::QqMusic,
+        MusicSourceId::Kugou,
+        MusicSourceId::Lrclib,
+        MusicSourceId::Itunes,
+    ] {
+        if let Some(mut group) = by_source.remove(&source) {
+            group.sort_by(|a, b| {
+                b.0.partial_cmp(&a.0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| norm(&a.1.title).cmp(&norm(&b.1.title)))
+                    .then_with(|| norm(&a.1.artist).cmp(&norm(&b.1.artist)))
+            });
+            group.truncate(PER_SOURCE_TOP);
+            songs.extend(group.into_iter().map(|(_, c)| c));
+        }
+    }
+    songs
 }
 
 /// JSON 值转字符串（string / int / uint 兜底；酷狗 `FileHash`/取词候选 `id` 可能是数字）。
