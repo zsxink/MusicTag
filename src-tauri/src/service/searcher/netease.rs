@@ -157,7 +157,10 @@ pub fn is_error_response(json: &serde_json::Value) -> bool {
 /// 解析搜索响应 `result.songs[]`（linuxapi 转发 `/api/cloudsearch/pc`，结构与 weapi 相同）→ 候选。
 ///
 /// 映射（design.md 任务 2.4）：`id` / `name` → title；`ar[].name` → artist（逗号连接）；
-/// `al.name` → album；`al.picUrl` → cover_url。空字段兜底为空串 / None（Rust 不 trim）。
+/// `al.name` → album；`al.picUrl` → cover_url，且 `http://` 前缀升级 `https://`——网易云返回的
+/// picUrl 为 http，Tauri WKWebView 安全上下文渲染 http 图片被混合内容拦截，封面候选破图隐藏、
+/// 表现为「搜索不出封面」（Issue #113）；`p*.music.126.net` 同主机 https 可用，替换安全。
+/// 空字段兜底为空串 / None（Rust 不 trim）。
 pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
     let songs = match json["result"]["songs"].as_array() {
         Some(a) => a,
@@ -179,7 +182,7 @@ pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
                 })
                 .unwrap_or_default(),
             album: s["al"]["name"].as_str().unwrap_or_default().to_string(),
-            cover_url: s["al"]["picUrl"].as_str().map(String::from),
+            cover_url: s["al"]["picUrl"].as_str().map(|u| u.replace("http://", "https://")),
         })
         .collect()
 }
