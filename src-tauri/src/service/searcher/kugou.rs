@@ -119,6 +119,7 @@ impl MusicSource for Kugou {
         client: &reqwest::Client,
         title: &str,
         _artist: &str,
+        _album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
         let mut params = search_params(title);
         let sig = signature(&params);

@@ -43,6 +43,7 @@ impl MusicSource for Lrclib {
         client: &reqwest::Client,
         title: &str,
         artist: &str,
+        _album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
         let url = reqwest::Url::parse_with_params(
             &self.search_url,

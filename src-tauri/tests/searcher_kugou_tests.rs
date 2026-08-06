@@ -234,6 +234,6 @@ async fn http_error_status_returns_err() {
         lyric_download_url: String::new(),
     };
     let client = reqwest::Client::new();
-    let err = kugou.search(&client, "晴天", "周杰伦").await.unwrap_err();
+    let err = kugou.search(&client, "晴天", "周杰伦", "").await.unwrap_err();
     assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
 }

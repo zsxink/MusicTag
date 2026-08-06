@@ -166,6 +166,6 @@ async fn http_error_status_returns_err() {
     let url = mock_http_once(response);
     let netease = Netease { forward_url: url };
     let client = reqwest::Client::new();
-    let err = netease.search(&client, "晴天", "周杰伦").await.unwrap_err();
+    let err = netease.search(&client, "晴天", "周杰伦", "").await.unwrap_err();
     assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
 }

@@ -68,6 +68,7 @@ impl MusicSource for Netease {
         client: &reqwest::Client,
         title: &str,
         _artist: &str,
+        _album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
         // linuxapi 转发：`eparams` = AES-ECB 加密 `{ method, url, params }`（复用取词链路，
         // 与 `crypto::linuxapi` 已知向量单测锁定，search-sources-renewal D1）。

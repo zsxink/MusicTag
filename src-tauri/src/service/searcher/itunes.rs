@@ -36,6 +36,7 @@ impl MusicSource for Itunes {
         client: &reqwest::Client,
         title: &str,
         artist: &str,
+        _album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
         // term = "<title> <artist>"；country=CN（中文曲库优先）、media=music&entity=song（只搜单曲）。
         // Url::parse_with_params 保证中文 term 正确 URL 编码。

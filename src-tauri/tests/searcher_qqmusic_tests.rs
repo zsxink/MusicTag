@@ -145,6 +145,6 @@ async fn http_error_status_returns_err() {
         lyric_url_base: String::new(),
     };
     let client = reqwest::Client::new();
-    let err = qq.search(&client, "晴天", "周杰伦").await.unwrap_err();
+    let err = qq.search(&client, "晴天", "周杰伦", "").await.unwrap_err();
     assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
 }

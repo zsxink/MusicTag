@@ -45,6 +45,7 @@ impl MusicSource for QqMusic {
         client: &reqwest::Client,
         title: &str,
         _artist: &str,
+        _album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
         // client_search_cp：公开 GET，`w` 关键词、`p/n` 分页、`format=json`（零加密零签名）。
         // 用 Url::parse_with_params 保证中文 keyword 正确 URL 编码。
