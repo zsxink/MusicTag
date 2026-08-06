@@ -76,6 +76,35 @@ test('epic: 崩溃恢复——已 done 项不重跑；失败项等主会话决�
   });
 });
 
+test('epic: 崩溃恢复——中断时 running 的子项续跑重置为 pending（可重新调度，不永久卡死）', async () => {
+  const main = tmpMainRepo();
+  const def = { name: 'e', items: [{ name: 'A', dependsOn: [], status: 'pending' }] };
+  fs.mkdirSync(path.join(main, 'openspec', 'epics', 'e'), { recursive: true });
+  fs.writeFileSync(path.join(main, 'openspec', 'epics', 'e', 'epic.json'), JSON.stringify(def));
+  execSync('git add openspec && git commit -qm "add epic.json"', { cwd: main });
+  // 模拟中断瞬间：A 已置 running（批次开始即落盘），但子进程尚未收尾 → epic-state.json 永久停留 running
+  process.env.PIPE_CORE_REPO_ROOT = main;
+  epic.saveEpicState('e', { schemaVersion: epic.EPIC_SCHEMA_VERSION, epic: 'e', items: { A: { status: 'running', worktree: null } } });
+  assert.deepEqual(epic.readyItems(def, epic.loadEpicState('e')).map((i) => i.name), [], 'running 不进就绪集（readyItems 语义保持）');
+  // 续跑：run() 内部把 running → pending 重新调度 → 就绪集恢复 → A 完整跑通
+  process.env.PIPE_CLAUDE_BIN = FAKE_CLAUDE;
+  process.env.CLAUDECODE = '1';
+  delete process.env.AI_AGENT;
+  try {
+    const code = await epic.run('e', 'claude');
+    assert.equal(code, 0, 'running 子项续跑后应可恢复并完成（退出 0）');
+    assert.equal(epic.loadEpicState('e').items.A.status, 'done', 'A 续跑后应 done');
+    assert.ok(!fs.existsSync(path.join(main, '.worktrees', 'A')), 'worktree A 应被清理');
+  } finally {
+    delete process.env.PIPE_CORE_REPO_ROOT;
+    delete process.env.PIPE_CLAUDE_BIN;
+    delete process.env.CLAUDECODE;
+    execSync('git worktree prune', { cwd: main, stdio: 'ignore' });
+    fs.rmSync(path.join(main, '.worktrees'), { recursive: true, force: true });
+    fs.rmSync(main, { recursive: true, force: true });
+  }
+});
+
 test('epic: epic-state 读写 + schemaVersion 不兼容拒绝', () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-epic-'));
   withRoot(repo, () => {

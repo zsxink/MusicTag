@@ -4,7 +4,8 @@
 // 派生时以 PIPE_CORE_REPO_ROOT 环境变量注入主仓库绝对路径（D1：worktree 内 .git 是文件指向主仓库，
 // git rev-parse --show-toplevel 会解析成 worktree 自身路径，不能直接用作状态根）。
 // epic 并行状态写 .agents/runs/<epic>/epic-state.json（版本控制外）；cursor 字段废弃（D4），
-// 推进判定按就绪集/批次。崩溃恢复：读 epic-state 恢复未完成子项、不重跑已合并项。
+// 推进判定按就绪集/批次。崩溃恢复：读 epic-state 恢复未完成子项（中断时 running → pending 重新调度）、
+// 不重跑已合并项（done 保留）。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -85,6 +86,22 @@ async function run(epicName, driverName) {
       };
     }
   }
+
+  // 崩溃恢复（D4）：本进程中断/被杀时，批次子项可能正停在 running（状态已落盘但子进程未收尾）。
+  // 续跑把 running → pending 重新调度，使其可恢复；已合并项 done 保留不重跑。父进程死后残留的
+  // 孤儿子进程可能仍在 worktree 内自行跑 pipe，runItemAsync 的 ensureBranch + rebaseMain 会
+  // 与残留 worktree 上的进行中操作以 git 锁互相暴露冲突，保证不并写（见 runItemAsync 注释）。
+  const resumed = [];
+  for (const it of epic.items || []) {
+    const rec = st.items[it.name];
+    if (rec && rec.status === 'running') {
+      rec.status = 'pending';
+      resumed.push(it.name);
+    }
+  }
+  if (resumed.length) {
+    console.error(`[epic] 恢复中断批次：${resumed.join(', ')} running → pending（重新调度）`);
+  }
   saveEpicState(epicName, st);
 
   const main = stateApi.repoRoot();
@@ -135,9 +152,11 @@ async function run(epicName, driverName) {
   return allDone ? 0 : 1;
 }
 
-// 单个子项：worktree 准备 → 子进程完整 pipe → 成功后清理 worktree。
-// 异步 child_process.spawn + Promise 收尾（B2：批次内并发，替代旧 spawnSync 串行 for-loop）。
-// 批次内多个子项并发执行，完成时间互不阻塞；状态写入在 run() 的回调里串行化，无并发写竞态。
+// 单个子项：worktree 准备（此间同步写 st.items[item.name].worktree 并落盘）→ 子进程完整 pipe
+// → 成功后清理 worktree。异步 child_process.spawn + Promise 收尾（B2：批次内并发，替代旧 spawnSync 串行 for-loop）。
+// 批次内多个子项并发执行，完成时间互不阻塞；run() 中每个子进程完成后单独串行写回该子项状态（独占 st），无并发写竞态。
+// 崩溃恢复场景（running → pending 后重跑）：残留 worktree 存在时走 ensureBranch + rebaseMain 复用；
+// 若中断时孤儿子进程仍在 worktree 内自行跑 pipe，rebase 与它的 git 写操作会经 git 锁冲突暴露，确保不并写。
 function runItemAsync(epicName, item, driverName, st, main) {
   const wtPath = path.resolve(main, '.worktrees', item.name);
   try {
@@ -161,7 +180,9 @@ function runItemAsync(epicName, item, driverName, st, main) {
       env: { ...process.env, PIPE_CORE_REPO_ROOT: main },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    // 输出只留尾部窗口（每流最多 64KB），防话痨子进程无界增长（原 spawnSync maxBuffer 128MB 的兜底）
+    // 输出只留尾部窗口（每流约 64K 字符——JS 字符串 slice 按 UTF-16 码元计，多字节 UTF-8 内容
+    // 实际内存可达标称 3 倍，仅影响诊断日志观感，不做逐字节截断），防话痨子进程无界增长
+    // （原 spawnSync maxBuffer 128MB 的兜底）；超大单行（>64K）时 tail 从行中截断，最后一行可能残缺。
     const TAIL_BYTES = 64 * 1024;
     const tails = { stdout: '', stderr: '' };
     const pushTail = (key, d) => {

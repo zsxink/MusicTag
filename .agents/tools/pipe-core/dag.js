@@ -43,6 +43,9 @@ function topoSort(defs) {
 }
 
 // 就绪集：依赖全部 succeeded 且自身未完成（非 succeeded/running/suspended）。
+// 注意：本函数（及 batches）是纯「拓扑批次」工具，供测试/分析用，排除 running 是「进行中不作为就绪」；
+// core.js 的调度循环不消费它，而是用内联就绪集（任何非 succeeded 状态都视为可重跑——崩溃恢复时
+// running 快照会被重跑，语义与 dag.js 不同）。两处语义刻意不一致，勿混用。
 function readySet(defs, state) {
   return defs.filter((d) => {
     const s = state.nodes[d.id];
