@@ -146,7 +146,7 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 **逐首**补全�
 | 4 | **删除不再触发**：删除当前歌词/封面后，**不**自动重新搜索 |
 | 4a | **离线降级（失败首响）**：本会话中第一次自动搜索**五源全部网络失败**（断网/超时，`all_failed=true`）→ 标记会话离线，后续选中**不再自动搜**、候选区不出现（省去每次 6s 等待），界面提示「离线：仅手动填写」，只留手动搜索按钮。**五源正常但无匹配结果（冷门歌）不触发离线**，仅显示空态 |
 | 5 | **搜索源**：网易云 + QQ 音乐 + 酷狗 + LRCLIB + iTunes **五家并发** |
-| 6 | **聚合**：多源结果合并、**按歌曲相似度去重排序**，统一展示 |
+| 6 | **聚合**：五源结果**各家内部聚合去重、跨源不折叠**——同一来源内同曲（归一化 title/artist 相同）保留该源得分最高一条；**不同来源的候选各自保留、并排展示**（各带来源 badge），按来源分组排序、每源 TOP 3（最多 15 条），供用户手动点选 |
 | 7 | **结果不自动写盘**：一律以候选列表展示，用户**手动点选**后才填入 |
 | 8 | **歌词候选**：点选一条 → 歌词填入歌词区（仍可继续编辑），badge 显示来源平台 |
 | 8a | **取词失败自动换源（C2）**：点选候选取词失败（`None`）→ 自动换**另一家来源**重试同一首歌（按歌名+作者），不自动降级到低分候选；全源失败才显示空态。避免填进"同名不同歌"的歌词 |
@@ -263,7 +263,7 @@ struct SongCandidate {
 }
 
 struct SearchResult {
-    songs: Vec<SongCandidate>,     // 按打分排序去重后的候选
+    songs: Vec<SongCandidate>,     // 同源去重、跨源保留的候选（来源分组 + 组内分降序，每源 TOP 3）
     source_stats: Vec<(MusicSourceId, usize)>, // 各家返回条数，便于展示/兜底
     all_failed: bool,              // 五源全部网络失败（断网/超时）→ true；至少一源成功（含正常空结果）→ false
 }
@@ -305,13 +305,13 @@ enum SearchError {
 
 > **多源搜索架构（对标 music-tag-web 的 `MusicResource` 工厂 + `smart_tag`）**：
 > - **模块**：`commands/` 目录薄壳（`folder.rs`/`song.rs`/`cover.rs`/`search.rs`）+ `service/searcher/` 子模块（`mod.rs`/`netease.rs`/`qqmusic.rs`/`kugou.rs`/`lrclib.rs`/`itunes.rs`/`crypto.rs`）。统一 Trait `MusicSource`：`search(title, artist, album) -> Result<Vec<SongCandidate>, String>` + `fetch_lyric(song_id) -> Option<String>`。
-> - **流程**：选中歌曲 → `search_song(title, artist, album)`（综合 title/artist/album 拼查询词）→ 五源并发（每家 6s 超时，失败降级为空列表并记入 `source_stats`）→ 打分去重 → 前 N 条候选返回。`SearchResult.all_failed` 区分「五源全网络失败」（标记会话离线）与「正常空结果」（冷门歌不标离线）。
+> - **流程**：选中歌曲 → `search_song(title, artist, album)`（综合 title/artist/album 拼查询词）→ 五源并发（每家 6s 超时，失败降级为空列表并记入 `source_stats`）→ 同源去重（跨源不折叠）→ 来源分组 + 每源 TOP 3（最多 15 条）返回。`SearchResult.all_failed` 区分「五源全网络失败」（标记会话离线）与「正常空结果」（冷门歌不标离线）。
 > - **惰性拉取**：候选列表秒出——封面 URL 随搜索结果带出，点选封面才 `download_cover`（单独 5s 超时 + 响应限流）；歌词文本点选候选行才 `fetch_lyric`。
-> - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3`；归一化 = trim + 全角半角 + 小写折叠（V1 不做简繁转换）；按归一化 `(title, artist)` 去重保留最高分。
+> - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3`；归一化 = trim + 全角半角 + 小写折叠（V1 不做简繁转换）；按归一化 `(source, title, artist)` 去重——**同源内**同曲保留该源最高分一条、**跨源不折叠**（各源候选各自保留）；排序按来源分组（Netease→QqMusic→Kugou→Lrclib→Itunes）、组内分降序，每源 TOP 3（最多 15 条）。
 > - **Tauri command 全量**（前端一律 `invoke` 调用；TS 类型与 `design/design.md` §10.3 对齐）：
 >   - 文件：`pick_folder() -> Option<String>`（rfd 文件夹选择器）、`list_songs(dir) -> Vec<SongSummary>`、`open_song(path) -> Result<Song, String>`、`save_song(song, exportLrc) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`、`get_last_dir() -> Option<String>`（读上次打开目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 记住本次目录，失败静默）
 >   - 封面：`pick_cover_file() -> Option<CoverInput>`（rfd 文件对话框，jpg/png/webp）、`read_cover_path(path) -> Result<CoverInput, String>`（拖拽路径读 bytes）；两者返回 `CoverInput`（`data_url` 压缩小图 + `mime`），封面跨 IPC 用 base64 data URL
->   - 搜索：`search_song(title, artist, album) -> SearchResult`、`search_source(source, title, artist, album) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过聚合去重）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）
+>   - 搜索：`search_song(title, artist, album) -> SearchResult`、`search_source(source, title, artist, album) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过跨源聚合——逐源拿该源全部原始候选，不受每源 TOP 3 截断）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）
 >   - 前端只管展示，文件 I/O 与网络请求全走 Rust command。
 > - **「无第三方依赖」说明**：指**无 JS 引擎**（不用 PyExecJS 类跑加密）；Rust 侧加密算法自实现，仅引入 `aes`/`cbc`/`rsa`/`rand` 等 crate。
 
@@ -330,7 +330,7 @@ enum SearchError {
 7. 切歌未保存 → 三按钮弹窗各自行为正确
 8. 双主题渲染正确，手动切换 + 重启记忆生效
 9. 空文件夹 / 无匹配搜索 → 空状态提示
-10. 选中歌曲时，仅对缺失的歌词/封面自动并发搜 5 家 → 聚合去重排序、候选展示；点选歌词/封面正确填入（不自动覆盖）；已有歌词/封面的歌曲不触发搜索，删除后也不自动重新触发，手动搜索按钮可随时发起
+10. 选中歌曲时，仅对缺失的歌词/封面自动并发搜 5 家 → 同源去重、跨源保留、来源分组排序、候选展示；点选歌词/封面正确填入（不自动覆盖）；已有歌词/封面的歌曲不触发搜索，删除后也不自动重新触发，手动搜索按钮可随时发起
 11. 无结果 / 断网 → 明确空态 + 仍可手动填写
 12. 搜索结果点选的歌词/封面随「保存」写回正确；**封面下载失败 / 图片损坏 / 压缩失败 → 静默忽略该张候选**（不报错、不标红，网格中其他候选不受影响）
 13. **按需读取**：打开约 300–500 首的文件夹，**列表（歌名/作者）秒级显示**；选中一首后详情 + 封面**即时**加载进编辑区（`open_song`）
