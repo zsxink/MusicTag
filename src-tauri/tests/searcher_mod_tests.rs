@@ -303,6 +303,77 @@ fn aggregate_limits_each_source_to_top_three() {
 }
 
 #[test]
+fn aggregate_caps_total_at_fifteen_across_five_sources() {
+    // 边界：五源各自返回 >3 条 → 每源只保留该源得分最高 TOP 3、共 5×3=15 条，
+    // 按来源分组 Netease→QqMusic→Kugou→Lrclib→Itunes、组内分降序（spec「最多 15 条」）。
+    let all: Vec<SongCandidate> = [
+        (MusicSourceId::Netease, "n"),
+        (MusicSourceId::QqMusic, "q"),
+        (MusicSourceId::Kugou, "k"),
+        (MusicSourceId::Lrclib, "l"),
+        (MusicSourceId::Itunes, "i"),
+    ]
+    .into_iter()
+    .flat_map(|(source, prefix)| {
+        (1..=5).map(move |i| cand(source, &format!("{prefix}{i}"), &format!("晴天{i}"), "周杰伦"))
+    })
+    .collect();
+    let songs = aggregate("晴天", "周杰伦", "", all);
+    assert_eq!(songs.len(), PER_SOURCE_TOP * 5, "五源各 TOP 3，总 15 条");
+    assert_eq!(songs[0].id, "n1", "Netease 组排最前");
+    assert_eq!(songs[2].id, "n3", "Netease 组内 TOP 3");
+    assert_eq!(songs[3].id, "q1", "QqMusic 组在 Netease 之后");
+    assert_eq!(songs[5].id, "q3");
+    assert_eq!(songs[6].id, "k1", "Kugou 组第三");
+    assert_eq!(songs[9].id, "l1", "Lrclib 组第四");
+    assert_eq!(songs[12].id, "i1", "Itunes 组垫底");
+    assert_eq!(songs[14].id, "i3", "末位是 Itunes 组第 3 条");
+}
+
+#[test]
+fn aggregate_dedups_same_source_on_normalized_equal_title_artist() {
+    // 同源去重的归一化语义：同源候选原始 (title, artist) 不同但**归一化后相等**
+    // （全角/半角 + 大小写 + trim）→ 视为同曲、只保留该源得分最高一条（spec「归一化去重」）。
+    let songs = aggregate(
+        "abc",
+        "jay",
+        "",
+        vec![
+            cand(MusicSourceId::Netease, "1", "ＡＢＣ", "JAY"), // 归一化 (abc, jay)
+            cand(MusicSourceId::Netease, "2", "abc", "jay"),   // 归一化 (abc, jay) 同 key
+            cand(MusicSourceId::Netease, "3", "  abc  ", "  jay  "), // trim 后同 key
+        ],
+    );
+    assert_eq!(songs.len(), 1, "同源归一化相等的三版折叠为一条");
+    assert_eq!(songs[0].id, "1", "同分首插（HashMap 先到者）保留");
+}
+
+#[test]
+fn aggregate_dedups_normalized_equal_keeps_highest_score() {
+    // 同源归一化相等但原始不同 → 保留该源得分最高一条（score > 首插才替换）。
+    // 归一化 key = (source, norm(title), norm(artist))，同 key 内 title/artist 分恒等，
+    // 唯一分差来自 album（album 不在 key）——候选 "2" 归一化同曲但 album 精确命中 → 更高分替换。
+    let songs = aggregate(
+        "ＡＢＣ",
+        "jay",
+        "叶惠美",
+        vec![
+            cand_album(MusicSourceId::Netease, "1", "abc", "jay", "依然范特西"), // 0.5+0.4+0=0.9
+            cand_album(MusicSourceId::Netease, "2", "ＡＢＣ", "jay", "叶惠美"), // 0.5+0.4+0.3=1.2
+        ],
+    );
+    assert_eq!(songs.len(), 1, "同源归一化相等 → 折叠为一条");
+    assert_eq!(songs[0].id, "2", "保留该源得分最高的（album 命中）一条");
+}
+
+#[test]
+fn aggregate_empty_candidates_returns_empty() {
+    // 边界：无任何源返回候选（全源空/失败）→ aggregate 返回空、不 panic。
+    let songs = aggregate("晴天", "周杰伦", "", vec![]);
+    assert!(songs.is_empty());
+}
+
+#[test]
 fn aggregate_groups_by_source_then_score_desc() {
     // 来源分组 + 组内分降序：Netease 组在前（0.9），QqMusic 组内 0.9 在 0.6 前，
     // Itunes 组垫底——跨源不按 score 混排，先按来源分组、组内再分降序。
