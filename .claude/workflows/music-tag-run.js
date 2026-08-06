@@ -30,7 +30,7 @@ const PREFLIGHT_SCHEMA = {
 const ARCHITECT_SCHEMA = {
   type: 'object',
   properties: {
-    domain: { type: 'string', enum: ['backend', 'frontend', 'both'] },
+    domain: { type: 'string', enum: ['backend', 'frontend', 'both', 'infra'] },
     designSummary: { type: 'string' },
     keyDecisions: { type: 'array', items: { type: 'string' } },
     taskGroups: { type: 'array', items: { type: 'string' } },
@@ -147,6 +147,16 @@ const runDev = (agentType, scope) =>
 const devResults = []
 if (domain === 'backend' || domain === 'both') devResults.push(await runDev('rust-backend', 'src-tauri/ 下 Rust 侧任务'))
 if (domain === 'frontend' || domain === 'both') devResults.push(await runDev('vue-frontend', 'src/ 下前端任务；跨端时先使用已落地的 Rust 契约'))
+if (['infra', 'docs', 'spec'].includes(domain)) {
+  devResults.push(
+    await agent(`你是流水线 Leader（流程维护）。你是 ${domain} 域开发。${devSpec}\n只负责 .agents/、.claude/、openspec/、AGENTS.md 等流程/文档资产，不碰 src/、src-tauri/。`, {
+      agentType: 'leader',
+      schema: DEV_SCHEMA,
+      phase: '开发',
+      label: `${domain}-dev`,
+    })
+  )
+}
 if (!devResults.length || devResults.some((result) => !result?.done)) {
   return { status: 'failed', stage: 'dev', dev: devResults, error: '开发角色未完成任务' }
 }
@@ -223,14 +233,20 @@ if (!crPassed) {
 
 // ---------- ⑥ 最终验证（Tester/CR 任何写入后重新执行） ----------
 phase('验证')
-const verify = await agent(
-  `你是验证(CI)角色。对变更「${CHANGE}」运行完整最终验证，统一基线按序短路：` +
+const verifyPrompt = ['infra', 'docs', 'spec'].includes(domain)
+  ? `你是验证(CI)角色。变更「${CHANGE}」域为 ${domain}，按自适应编排跳过业务编译（P4）：` +
+    `按序短路运行：node --test 编排核心单测 → node .agents/tools/pipe-core/run.js --self-check → ` +
+    `openspec validate ${CHANGE} --strict --no-interactive。任一 fail 即整体 verify_failed，只验证不修复，失败输出如实上报。` +
+    `全部通过才 pass=true，并逐项返回 steps（step + status + detail）。`
+  : `你是验证(CI)角色。对变更「${CHANGE}」运行完整最终验证，统一基线按序短路：` +
     `cargo check --manifest-path src-tauri/Cargo.toml → cargo test --manifest-path src-tauri/Cargo.toml → ` +
     `npm run test → npm run build → openspec validate ${CHANGE} --strict --no-interactive。` +
     `任一 fail 即整体 verify_failed，只验证不修复，失败输出如实上报。` +
     `若变更触及搜索取词/单源换源/并发/离线降级路径，追加复盘回归清单并逐项入 steps：` +
     `单源换源不被聚合去重破坏、歌词/封面跨 kind 不串扰（无永久搜索中）、离线判定区分全源网络失败 vs 正常空结果；` +
-    `否则 steps 中注明「不适用」。全部通过才 pass=true，并逐项返回 steps（step + status + detail）。`,
+    `否则 steps 中注明「不适用」。全部通过才 pass=true，并逐项返回 steps（step + status + detail）。`
+const verify = await agent(
+  verifyPrompt,
   { agentType: 'verify-agent', schema: VERIFY_SCHEMA, phase: '验证', label: 'verify' }
 )
 if (!verify?.pass || verify.steps.some((step) => step.status !== 'pass')) {
