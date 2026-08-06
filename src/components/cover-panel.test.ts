@@ -414,11 +414,11 @@ describe('CoverPanel — 封面候选区（v1-search-ui D8：status/网格/空�
     expect((w3.find('.search-trigger').element as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('点击「搜索封面」→ manualSearch 以 current 的 title/artist 发起', async () => {
+  it('点击「搜索封面」→ manualSearch 以 current 的 title/artist/album 发起', async () => {
     const w = mount(CoverPanel)
     await w.find('.search-trigger').trigger('click')
     await flushPromises()
-    expect(mockSearchSongs).toHaveBeenCalledWith('歌名', '作者')
+    expect(mockSearchSongs).toHaveBeenCalledWith('歌名', '作者', '') // makeSong 默认空专辑
   })
 
   it('searching → 显示「搜索中…」+ 转圈', () => {

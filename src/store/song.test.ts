@@ -1039,7 +1039,7 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       )
       await autoSearchOnSelect(searchSongs)
 
-      expect(searchSongs).toHaveBeenCalledWith('歌名', '作者')
+      expect(searchSongs).toHaveBeenCalledWith('歌名', '作者', '') // album 透传（makeSong 默认空专辑）
       expect(songStore.lyricSearchState).toBe('done')
       expect(songStore.lyricCandidates).toHaveLength(2) // 全部候选
       expect(songStore.coverSearchState).toBe('done')
@@ -1265,7 +1265,7 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       await selectSong('/a/s.flac', loadSong)
       await flushPromises()
 
-      expect(mockedSearchSongs).toHaveBeenCalledWith('T', '作者') // 用 open 读到的 title/artist
+      expect(mockedSearchSongs).toHaveBeenCalledWith('T', '作者', '') // 用 open 读到的 title/artist + album
       expect(songStore.lyricSearchState).toBe('done')
       expect(songStore.lyricCandidates).toEqual([cand])
     })
@@ -1291,7 +1291,7 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       await flushPromises()
 
       expect(songStore.selectedPath).toBe('/a/two.flac')
-      expect(mockedSearchSongs).toHaveBeenCalledWith('Two', '作者') // 新歌触发
+      expect(mockedSearchSongs).toHaveBeenCalledWith('Two', '作者', '') // 新歌触发
     })
   })
 
@@ -1373,7 +1373,7 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
 
       await manualSearch('lyrics', searchSongs)
 
-      expect(searchSongs).toHaveBeenCalledWith('歌名', '作者')
+      expect(searchSongs).toHaveBeenCalledWith('歌名', '作者', '') // album 透传（makeSong 默认空专辑）
       expect(songStore.lyricSearchState).toBe('done')
       expect(songStore.lyricCandidates).toHaveLength(2)
       expect(songStore.coverSearchState).toBe('idle') // 只刷歌词
@@ -1474,8 +1474,8 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
 
       await pickLyricCandidate(cand, fetchLyric, searchSource)
 
-      // 重搜以候选自身 title/artist 为身份（非可能被编辑的 current）
-      expect(searchSource).toHaveBeenCalledWith('qqmusic', '歌名', '作者')
+      // 重搜以候选自身 title/artist/album 为身份（非可能被编辑的 current；makeCand 默认 album='专辑'）
+      expect(searchSource).toHaveBeenCalledWith('qqmusic', '歌名', '作者', '专辑')
       expect(songStore.current!.lyrics).toBe('[00:00.00] QQ词')
       expect(songStore.lyricSourcePlatform).toBe('qqmusic') // badge = 换源成功的源
       expect(songStore.lyricFetchEmpty).toBe(false)

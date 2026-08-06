@@ -8,8 +8,8 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
 
-import type { SearchResult } from './types'
-import { downloadCover, fetchLyric, searchSongs } from './search'
+import type { SearchResult, SongCandidate } from './types'
+import { downloadCover, fetchLyric, searchSongs, searchSource } from './search'
 
 const searchResult: SearchResult = {
   songs: [
@@ -36,13 +36,13 @@ describe('api/search.ts — 类型化 command 封装（命令名/参数逐字对
     mockInvoke.mockReset()
   })
 
-  it('searchSongs：透传 search_song + { title, artist }，返回 SearchResult（五源聚合）', async () => {
+  it('searchSongs：透传 search_song + { title, artist, album }，返回 SearchResult（五源聚合）', async () => {
     mockInvoke.mockResolvedValue(searchResult)
-    await expect(searchSongs('歌名', '作者')).resolves.toEqual(searchResult)
-    expect(mockInvoke).toHaveBeenCalledWith('search_song', { title: '歌名', artist: '作者' })
+    await expect(searchSongs('歌名', '作者', '专辑')).resolves.toEqual(searchResult)
+    expect(mockInvoke).toHaveBeenCalledWith('search_song', { title: '歌名', artist: '作者', album: '专辑' })
   })
 
-  it('searchSongs：空 title/artist 同样透传（后端 D3 空 title 守卫在 Rust 侧过滤）', async () => {
+  it('searchSongs：空 title/artist/album 同样透传（后端 D3 空 title 守卫在 Rust 侧过滤）', async () => {
     mockInvoke.mockResolvedValue({
       songs: [],
       source_stats: [
@@ -53,8 +53,22 @@ describe('api/search.ts — 类型化 command 封装（命令名/参数逐字对
         ['itunes', 0],
       ],
     })
-    await searchSongs('', '')
-    expect(mockInvoke).toHaveBeenCalledWith('search_song', { title: '', artist: '' })
+    await searchSongs('', '', '')
+    expect(mockInvoke).toHaveBeenCalledWith('search_song', { title: '', artist: '', album: '' })
+  })
+
+  it('searchSource：透传 search_source + { source, title, artist, album }，返回该源原始候选（C2 换源用）', async () => {
+    const raw: SongCandidate[] = [
+      { source: 'qqmusic', id: 'q1', title: '歌名', artist: '作者', album: '专辑', cover_url: null },
+    ]
+    mockInvoke.mockResolvedValue(raw)
+    await expect(searchSource('qqmusic', '歌名', '作者', '专辑')).resolves.toEqual(raw)
+    expect(mockInvoke).toHaveBeenCalledWith('search_source', {
+      source: 'qqmusic',
+      title: '歌名',
+      artist: '作者',
+      album: '专辑',
+    })
   })
 
   it('fetchLyric：透传 fetch_lyric + { source, id }；取词成功返回文本、None 返回 null（C2 换源判定依据）', async () => {
