@@ -521,8 +521,9 @@ function findSameSong(list: SongCandidate[], cand: SongCandidate): SongCandidate
  * 点选歌词候选（D4）：`fetchLyric(cand.source, cand.id)` 成功 → `current.lyrics` 填入 +
  * `lyricSourcePlatform = cand.source`（badge 显示平台，dirty 翻转，仍可编辑）。
  * None → C2 换源：以 **cand 自身 title/artist**（点选那首歌的身份，非可能被编辑的 current）
- * 对每家剩余源走单源 `searchSource`（v1-search-fixes：绕过聚合去重——聚合会把同曲多源候选
- * 折叠成一条，导致换源找不到其他源），并按归一化 title/artist **身份校验**（防 FR-8.8a 明令
+ * 对每家剩余源走单源 `searchSource`（v1-search-fixes：绕过聚合——multi-source-candidates 后
+ * 聚合为「同源去重 + 每源 TOP 3 截断」，C2 需逐源完整原始候选做身份校验），并按归一化
+ * title/artist **身份校验**（防 FR-8.8a 明令
  * 禁止的「同名不同歌」）后 `fetchLyric`；成功填 + badge=该源；全源失败 → `lyricFetchEmpty=true`
  * （空态，不降级到低分候选）。已切歌（lyricSearchSeq 变化）→ 结果丢弃不应用。
  * IPC 依赖以 `fetchLyric` / `searchSource` 注入。
