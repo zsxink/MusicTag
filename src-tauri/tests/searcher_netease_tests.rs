@@ -170,6 +170,51 @@ fn parses_search_response_full_fields() {
 }
 
 #[test]
+fn parses_search_response_upgrades_http_cover_to_https() {
+    // Issue #113：网易云 `al.picUrl` 返回 http 前缀（实测 `http://p4.music.126.net/...`），
+    // Tauri WKWebView 安全上下文渲染 http 图片被混合内容拦截 → 封面候选破图隐藏、表现为
+    // 「搜索不出封面」（安泊猜想整张专辑复现）。cover_url 必须升级 https（同主机 https 可用）。
+    let json = serde_json::json!({
+        "result": {
+            "songs": [{
+                "id": 1,
+                "name": "粗糙",
+                "ar": [{"name": "许嵩"}],
+                "al": {"name": "安泊猜想", "picUrl": "http://p4.music.126.net/K23SLth_R-gbroAN51_XIQ==/109951173390154569.jpg"}
+            }]
+        }
+    });
+    let songs = parse_search_response(&json);
+    let s = &songs[0];
+    assert_eq!(
+        s.cover_url.as_deref(),
+        Some("https://p4.music.126.net/K23SLth_R-gbroAN51_XIQ==/109951173390154569.jpg"),
+        "http 封面 URL 必须升级为 https（WKWebView 渲染）"
+    );
+    assert!(!s.cover_url.as_deref().unwrap().starts_with("http://"));
+}
+
+#[test]
+fn parses_search_response_keeps_https_cover_unchanged() {
+    // 已是 https 的 picUrl 不做改动（幂等）
+    let json = serde_json::json!({
+        "result": {
+            "songs": [{
+                "id": 2,
+                "name": "晴天",
+                "ar": [{"name": "周杰伦"}],
+                "al": {"name": "叶惠美", "picUrl": "https://p2.music.126.net/ab/cover.jpg"}
+            }]
+        }
+    });
+    let songs = parse_search_response(&json);
+    assert_eq!(
+        songs[0].cover_url.as_deref(),
+        Some("https://p2.music.126.net/ab/cover.jpg")
+    );
+}
+
+#[test]
 fn parses_search_response_multiple_artists_comma_joined() {
     // 多艺人 `ar[].name` → 逗号连接
     let json = serde_json::json!({
