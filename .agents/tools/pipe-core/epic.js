@@ -156,7 +156,9 @@ async function run(epicName, driverName) {
 // → 成功后清理 worktree。异步 child_process.spawn + Promise 收尾（B2：批次内并发，替代旧 spawnSync 串行 for-loop）。
 // 批次内多个子项并发执行，完成时间互不阻塞；run() 中每个子进程完成后单独串行写回该子项状态（独占 st），无并发写竞态。
 // 崩溃恢复场景（running → pending 后重跑）：残留 worktree 存在时走 ensureBranch + rebaseMain 复用；
-// 若中断时孤儿子进程仍在 worktree 内自行跑 pipe，rebase 与它的 git 写操作会经 git 锁冲突暴露，确保不并写。
+// 若中断时孤儿子进程仍在 worktree 内自行跑 pipe，与其 git 写操作时间重叠的 rebase 会经 git 锁冲突暴露
+// 为可检测错误（rebase 失败 → 该项置 failed 交主会话），不会静默损坏；孤儿在长时模型调用（无写）窗口
+// 时新 run 可无冲突通过，随后两进程写操作交错执行，失败模式仍是可检测错误而非静默损坏。
 function runItemAsync(epicName, item, driverName, st, main) {
   const wtPath = path.resolve(main, '.worktrees', item.name);
   try {
