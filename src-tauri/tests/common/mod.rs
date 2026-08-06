@@ -17,6 +17,7 @@ use lofty::tag::{items::ENGLISH, ItemValue, TagItem};
 use std::fs;
 use std::io::Cursor;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 /// 启动极简 HTTP 服务器（一次请求后关闭），返回 mock URL。
 ///
@@ -38,6 +39,34 @@ pub fn mock_http_once(response: Vec<u8>) -> String {
         }
     });
     format!("http://{addr}")
+}
+
+/// 启动极简 HTTP 服务器：读入请求头后写回 `response`，返回 `(mock_url, 捕获的请求目标)`。
+///
+/// 捕获值为请求行第 2 段（如 `/?p=1&n=10&w=...&format=json`，不含 scheme/host），供各源
+/// 「查询参数构造透传 album」断言（search-cover-album：QQ `w` / iTunes `term` / LRCLIB
+/// `album_name` 有/无）。处理一个请求后关闭；返回的 URL 前缀 + 捕获目标拼回完整 URL 后
+/// 可用 `reqwest::Url::query_pairs()` 解码断言。
+pub fn mock_http_capture(response: Vec<u8>) -> (String, Arc<Mutex<String>>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
+    let addr = listener.local_addr().expect("取本地端口");
+    let captured = Arc::new(Mutex::new(String::new()));
+    let captured_for_thread = captured.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 8192];
+            let _ = s.read(&mut buf);
+            let text = String::from_utf8_lossy(&buf);
+            let target = text.split_whitespace().nth(1).unwrap_or_default().to_string();
+            *captured_for_thread.lock().unwrap() = target;
+            let _ = s.write_all(&response);
+            let _ = s.flush();
+            break;
+        }
+    });
+    (format!("http://{addr}"), captured)
 }
 
 /// 生成一张 2x2 红色 PNG 的字节（`image` crate 编码）。

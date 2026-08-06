@@ -12,7 +12,7 @@ mod common;
 use app_lib::service::searcher::itunes::{Itunes, parse_search_response};
 use app_lib::service::searcher::MusicSource;
 use app_lib::model::MusicSourceId;
-use common::mock_http_once;
+use common::{mock_http_capture, mock_http_once};
 
 #[test]
 fn parses_search_response_full_fields_and_upgrades_cover() {
@@ -73,6 +73,46 @@ fn parses_search_response_cover_url_unmodified_when_no_bb_pattern() {
     assert_eq!(
         songs[0].cover_url.as_deref(),
         Some("https://example.com/cover.jpg")
+    );
+}
+
+#[tokio::test]
+async fn search_uses_joined_keyword_in_term_param() {
+    // search-cover-album：`term` = title + artist + album 拼接（综合三段，段间单空格）。
+    // mock 服务器捕获请求目标，`Url::query_pairs()` 解码断言 `term` 值。
+    let response =
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"resultCount\":0,\"results\":[]}"
+            .to_vec();
+    let (url, captured) = mock_http_capture(response);
+    let itunes = Itunes { search_url: url };
+    let client = reqwest::Client::new();
+    itunes.search(&client, "晴天", "周杰伦", "叶惠美").await.unwrap();
+    let target = captured.lock().unwrap().clone();
+    let full = format!("{}{}", &itunes.search_url, target);
+    let parsed = reqwest::Url::parse(&full).expect("捕获请求目标应为合法 URL");
+    let params: std::collections::HashMap<String, String> =
+        parsed.query_pairs().into_owned().collect();
+    assert_eq!(
+        params.get("term").map(String::as_str),
+        Some("晴天 周杰伦 叶惠美")
+    );
+    assert_eq!(params.get("country").map(String::as_str), Some("CN"));
+
+    // album 为空 → term 回退 title + artist（与现行为一致）
+    let (url2, captured2) = mock_http_capture(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"resultCount\":0,\"results\":[]}"
+            .to_vec(),
+    );
+    let itunes2 = Itunes { search_url: url2 };
+    itunes2.search(&client, "晴天", "周杰伦", "").await.unwrap();
+    let target2 = captured2.lock().unwrap().clone();
+    let full2 = format!("{}{}", &itunes2.search_url, target2);
+    let parsed2 = reqwest::Url::parse(&full2).expect("捕获请求目标应为合法 URL");
+    let params2: std::collections::HashMap<String, String> =
+        parsed2.query_pairs().into_owned().collect();
+    assert_eq!(
+        params2.get("term").map(String::as_str),
+        Some("晴天 周杰伦")
     );
 }
 

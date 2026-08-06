@@ -82,6 +82,18 @@ fn signature_wraps_secret_around_sorted_kv() {
 }
 
 #[test]
+fn search_params_accepts_joined_query_keyword() {
+    // search-cover-album：查询关键词综合 title + artist + album，经 `join_query_terms` 拼接后
+    // 传入 `search_params`（构造函数签名 keyword 不变，锚点不漂移）→ `keyword` 为拼接串。
+    let params = search_params("晴天 周杰伦 叶惠美");
+    let map: std::collections::HashMap<_, _> = params
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    assert_eq!(map.get("keyword"), Some(&"晴天 周杰伦 叶惠美"));
+}
+
+#[test]
 fn search_params_are_sorted_by_key() {
     // 签名要求参数按 key 字母序拼接——守卫 search_params 恒产出已排序列表
     let params = search_params("晴天");

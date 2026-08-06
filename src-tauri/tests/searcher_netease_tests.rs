@@ -35,6 +35,18 @@ fn search_payload_forwards_to_cloudsearch_via_linuxapi() {
 }
 
 #[test]
+fn search_payload_accepts_joined_query_keyword() {
+    // search-cover-album：查询关键词综合 title + artist + album，经 `join_query_terms` 拼接后
+    // 传入 `search_payload`（构造函数签名 keyword 不变，锚点不漂移）→ `params.s` 为拼接串。
+    let payload: serde_json::Value =
+        serde_json::from_str(&search_payload("晴天 周杰伦 叶惠美")).unwrap();
+    assert_eq!(payload["params"]["s"], "晴天 周杰伦 叶惠美");
+    // album 为空 → 回退 title + artist（不改动无专辑文件搜索路径）
+    let payload2: serde_json::Value = serde_json::from_str(&search_payload("晴天 周杰伦")).unwrap();
+    assert_eq!(payload2["params"]["s"], "晴天 周杰伦");
+}
+
+#[test]
 fn lyric_payload_forwards_to_song_lyric_via_linuxapi() {
     // spec「网易云加密」：取词 payload 走 linuxapi 转发 `/api/song/lyric`——method=POST、
     // url 指向 `/api/song/lyric`、params 带 id/lv/kv/tv（-1 = 全取）。
