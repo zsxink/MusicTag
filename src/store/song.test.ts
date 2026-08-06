@@ -1049,6 +1049,16 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       expect(songStore.isOffline).toBe(false)
     })
 
+    it('歌曲带专辑（search-cover-album 三字段齐全）→ search_song 把 cur.album 透传', async () => {
+      songStore.current!.album = '叶惠美'
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+
+      await autoSearchOnSelect(searchSongs)
+
+      expect(searchSongs).toHaveBeenCalledWith('歌名', '作者', '叶惠美') // 非空 album 原样进 IPC
+      expect(songStore.lyricSearchState).toBe('done')
+    })
+
     it('已有封面只有歌词缺失 → 只搜歌词（coverSearchState 保持 idle，不干扰封面候选区）', async () => {
       songStore.current!.cover = 'data:image/jpeg;base64,AAA'
       songStore.current!.cover_mime = 'image/jpeg'

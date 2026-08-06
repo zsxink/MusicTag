@@ -240,6 +240,17 @@ fn join_query_terms_combines_non_empty_segments() {
     );
 }
 
+#[test]
+fn join_query_terms_artist_or_title_empty_keeps_remaining_terms() {
+    // spec「字段缺失回退」逐分支：仅歌手空 → 关键词退化为「歌名 专辑」；仅歌名空 →
+    // 退化为「歌手 专辑」（空 title 前端已守卫不发起搜索，join 仍须正确跳过缺失段）。
+    assert_eq!(join_query_terms("晴天", "", "叶惠美"), "晴天 叶惠美");
+    assert_eq!(join_query_terms("", "周杰伦", "叶惠美"), "周杰伦 叶惠美");
+    // 歌手 + 专辑缺失 → 仅 title；title + 专辑缺失 → 仅 artist
+    assert_eq!(join_query_terms("晴天", "", ""), "晴天");
+    assert_eq!(join_query_terms("", "周杰伦", ""), "周杰伦");
+}
+
 // ---- 专辑打分（search-cover-album D3）----
 
 #[test]
@@ -684,6 +695,27 @@ async fn search_source_returns_raw_candidates_and_empty_on_fail() {
         search_source_with(&client, hang, "x", "y", "", Duration::from_millis(50))
             .await
             .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn search_source_passes_album_to_source() {
+    // search-cover-album：`search_source_with`（C2 换源单源路径）必须把 album 透传给源 `search`
+    // ——与多源 `search_song_with_sources` 同契约（spec「单源返回」查询关键词综合 title+artist+album）。
+    let client = reqwest::Client::new();
+    let seen: Arc<Mutex<Vec<(String, String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    let source: Box<dyn MusicSource> = Box::new(FakeSource {
+        id: MusicSourceId::QqMusic,
+        behavior: FakeBehavior::Record(seen.clone()),
+    });
+    let got =
+        search_source_with(&client, source, "晴天", "周杰伦", "叶惠美", Duration::from_millis(50))
+            .await;
+    assert!(got.is_empty(), "Record 源返回空列表");
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        vec![("晴天".to_string(), "周杰伦".to_string(), "叶惠美".to_string())],
+        "单源 search_source 应把 album 原样透传给源 search"
     );
 }
 
