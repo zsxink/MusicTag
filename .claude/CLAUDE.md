@@ -60,14 +60,14 @@ cargo fmt            # 格式化
 
 ## 开发流水线（需求确认后自动完成）
 
-- **总入口**：`pipe` skill —— 需求确认后自动跑完「前置校验 → 架构设计 → 开发 → 测试 → CR → 最终验证 → 归档 → 提交 PR → 合并」。
-- **一键全自动（多 Agent 协作）**：`/pipe <name>` —— 由 Workflow 工具编排多 Agent（Leader 主导，7 角色分工），完整闭环。
+- **总入口**：`pipe` skill —— 需求确认后由**模型无关编排核心** `.agents/tools/pipe-core/`（`node run.js`）自动跑完「前置校验 → 架构设计 → 开发 → 测试 → CR → 最终验证 → 归档 → 提交 PR → 合并」。
+- **一键全自动（多 Agent 协作）**：`/pipe <name>` —— 薄壳转发 `node .agents/tools/pipe-core/run.js <name> --driver claude`，核心驱动多 Agent（Leader 主导，7 角色分工），节点状态机 + 断点续跑 + 决断链，完整闭环。
 - **兼容单 Agent 流程**：`/opsx:run <name>` —— 仅用于既有变更，且不得绕过 `pipe` 的前置校验、最终验证和 CI 门禁。
 - **Epic 大变更拆分**（如 V1 整个产品，通用可复用 V2）：
   - `/pipe:init <epic> [来源]` —— Architect 自动拆成多个子变更并生成/校验完整 OpenSpec artifacts，**用户只批一次总 PRD**；`openspec/epics/<epic>/epic.json` 受版本控制
-  - `/pipe:epic <epic>` —— 串行实施：逐个子变更跑完整 `/pipe`（前置校验→架构→开发→测试→CR→最终验证→归档→PR→合并），前一个合回 main 再开下一个；中断可续跑
-  - `/pipe:epic:status <epic>` —— 查看进度/断点
-  - 子变更内部 **100% 复用 `/pipe`**（一 change 一分支一 PR）；Epic 状态放 `openspec/epics/`，独立于 openspec 变更生命周期
+  - `/pipe:epic <epic>` —— **并行实施**：`node .agents/tools/pipe-core/run.js --epic <epic> --driver claude`，按 `dependsOn` DAG 就绪集 ≤3 并行（worktree + 独立分支隔离，合并顺序保证前置先合并），前驱合回 main 后续项 rebase 刷新基准；中断可续跑
+  - `/pipe:epic:status <epic>` —— 查看进度/断点（读 epic.json + `.agents/runs/<epic>/epic-state.json` 就绪集）
+  - 子变更内部 **100% 复用 `/pipe`**（一 change 一分支一 PR）；Epic 状态放 `openspec/epics/` + `.agents/runs/<epic>/epic-state.json`（运行态，gitignore），独立于 openspec 变更生命周期
 - **分步命令**：
   - `/cr <name>` —— 自动代码审查（只读 subagent 对照规格审查 diff；有问题打回 Leader 重派开发角色修复）
   - `/verify <name>` —— 自动验证（cargo check/test + npm run test + npm run build + openspec validate --strict --no-interactive）
@@ -76,12 +76,14 @@ cargo fmt            # 格式化
 
 ## 多 Agent 协作（pipe 流水线）
 
-- **7 角色**：Leader（编排）、Architect（设计+变更域判定）、Rust-Dev（`rust-backend`）、Vue-Dev（`vue-frontend`）、CR（`cr-agent`，只读）、Verify/CI（`verify-agent`）、Tester（`tester`）。
-- **编排**：Workflow 脚本 `.claude/workflows/music-tag-run.js`，`/pipe <name>` 调用，`args.name=<变更名>`。
-- **自适应组织**：Architect 判定变更域——纯后端仅 Rust-Dev、纯前端仅 Vue-Dev、跨前后端按 Rust→Vue 串行；未显式创建 worktree 时禁止并写。
+- **7 角色**：Leader（编排）、Architect（设计+变更域判定）、Rust-Dev（`rust-backend`）、Vue-Dev（`vue-frontend`）、CR（`cr-agent`，只读）、Verify/CI（`verify-agent`）、Tester（`tester`）。角色文案单一来源 `.agents/tools/pipe-core/roles/`（claude 经 `--append-system-prompt` 注入、codex 拼入 prompt，同一份）。
+- **编排**：模型无关核心 `.agents/tools/pipe-core/`，`/pipe <name>` 薄壳转发 `node run.js <name> --driver claude`；节点定义数据（`pipeline.js`）驱动 DAG，不硬编码节点顺序。
+- **断点续跑（P1）**：节点级状态落盘 `.agents/runs/<change>/state.json`（仓库根锚定，gitignore）；失败/挂起节点续跑只重跑、已通过复用；落地校验不信任自报。
+- **决断链（P2）**：节点失败 → leader 决断节点 `retry / reroute / escalate / abort`；技术失败自动重试、CR 内容问题按文件所有权 reroute、需人拍板一律 escalate 挂起回主会话。
+- **自适应编排（P4）**：Architect 判定变更域 `backend/frontend/both/docs/spec/infra`；纯后端仅 Rust-Dev、纯前端仅 Vue-Dev、跨前后端按 Rust→Vue 串行、docs/spec/infra 派 leader 流程维护角色（跳过业务编译门禁）。
 - **CR 只读、Leader 中转**：CR 只读审查（不 Edit/Write 代码），问题打回 Leader → Leader 重派对应开发角色修复 → 再复审。
 - **CR 三轮未通过 → 挂起**：不再自动重试，停下上报用户决策。
-- **Workflow 返回**：`success` 表示质量门通过，Leader 再执行归档→提交 PR→确认 CI→合并；`verify_failed`/`test_failed` 打回修复重跑；`suspended`/`failed` 停下上报。
+- **run.js 返回**：退出码 `0` success（质量门通过，integrate 节点执行归档→提交 PR→确认 CI→合并）；`1` failed 打回修复 `--resume` 续跑；`3` suspended 停下上报。
 
 ## GitHub（远程 + Issue 驱动）
 
