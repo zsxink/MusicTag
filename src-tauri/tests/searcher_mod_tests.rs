@@ -226,6 +226,32 @@ fn aggregate_limits_per_source_to_top_three() {
 }
 
 #[test]
+fn aggregate_per_source_top_three_is_by_score_not_arrival() {
+    // 每源 TOP 3 按「组内分降序」取前 3（spec「每源只保留该源得分最高 TOP 3」）——
+    // 低分候选先到也会被高分挤掉，不是保留前 3 条到达顺序。
+    let songs = aggregate(
+        "晴天",
+        "周杰伦",
+        "",
+        vec![
+            cand(MusicSourceId::Netease, "low1", "晴天X", "某人"), // 0.2 + 0 = 0.2
+            cand(MusicSourceId::Netease, "low2", "晴天Y", "某人"), // 0.2 + 0 = 0.2
+            cand(MusicSourceId::Netease, "mid", "晴天A", "周杰伦"), // 0.2 + 0.4 = 0.6
+            cand(MusicSourceId::Netease, "top", "晴天", "周杰伦"), // 0.5 + 0.4 = 0.9
+            cand(MusicSourceId::Netease, "mid2", "晴天B", "周杰伦"), // 0.2 + 0.4 = 0.6
+        ],
+    );
+    assert_eq!(songs.len(), PER_SOURCE_TOP, "低分先到的候选被高分 TOP 3 挤掉");
+    assert_eq!(songs[0].id, "top", "0.9 最高分居首");
+    assert_eq!(songs[1].id, "mid", "0.6 组内按归一化 title 稳定（晴天A < 晴天B）");
+    assert_eq!(songs[2].id, "mid2");
+    assert!(
+        !songs.iter().any(|s| s.id == "low1" || s.id == "low2"),
+        "0.2 低分候选即使先到也被截断淘汰"
+    );
+}
+
+#[test]
 fn aggregate_normalizes_fullwidth_query() {
     // 全角查询「ＡＢＣ」→ 归一化 "abc" 匹配候选 "abc"（全角转半角 + 小写）
     let songs = aggregate(
