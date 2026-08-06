@@ -9,7 +9,7 @@
 // 单源失败一律降级为空列表 / None。
 
 use crate::model::{MusicSourceId, SongCandidate};
-use crate::service::searcher::MusicSource;
+use crate::service::searcher::{join_query_terms, MusicSource};
 use async_trait::async_trait;
 
 pub struct Itunes {
@@ -36,10 +36,12 @@ impl MusicSource for Itunes {
         client: &reqwest::Client,
         title: &str,
         artist: &str,
+        album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
-        // term = "<title> <artist>"；country=CN（中文曲库优先）、media=music&entity=song（只搜单曲）。
+        // term = "<title> <artist> <album>"（search-cover-album：综合三段，空段跳过）；
+        // country=CN（中文曲库优先）、media=music&entity=song（只搜单曲）。
         // Url::parse_with_params 保证中文 term 正确 URL 编码。
-        let term = format!("{title} {artist}").trim().to_string();
+        let term = join_query_terms(title, artist, album);
         let url = reqwest::Url::parse_with_params(
             &self.search_url,
             &[

@@ -402,7 +402,7 @@ function resetSearchState(): void {
  * `searchedThisSong`（尚未「判定过」，与 null/readonly/offline 守卫同为前置守卫语义）。
  */
 export async function autoSearchOnSelect(
-  searchSongs: (title: string, artist: string) => Promise<SearchResult> = defaultSearchSongs,
+  searchSongs: (title: string, artist: string, album: string) => Promise<SearchResult> = defaultSearchSongs,
 ): Promise<void> {
   const cur = raw.current
   if (cur === null || raw.readonly || raw.searchedThisSong || raw.isOffline) return
@@ -416,7 +416,7 @@ export async function autoSearchOnSelect(
   if (needLyrics) raw.lyricSearchState = 'searching'
   if (needCover) raw.coverSearchState = 'searching'
   try {
-    const result = await searchSongs(cur.title, cur.artist) // 一次调用同时喂两类候选（惰性拉取）
+    const result = await searchSongs(cur.title, cur.artist, cur.album) // 一次调用同时喂两类候选（惰性拉取；album 综合进查询）
     // 每类独立校验过期：任一类被新搜索/切歌作废，只丢弃该类，不影响仍有效的那类。
     const lyricValid = lyricSeq !== null && raw.lyricSearchSeq === lyricSeq
     const coverValid = coverSeq !== null && raw.coverSearchSeq === coverSeq
@@ -454,7 +454,7 @@ export async function autoSearchOnSelect(
  */
 export async function manualSearch(
   kind: 'lyrics' | 'cover',
-  searchSongs: (title: string, artist: string) => Promise<SearchResult> = defaultSearchSongs,
+  searchSongs: (title: string, artist: string, album: string) => Promise<SearchResult> = defaultSearchSongs,
 ): Promise<void> {
   const cur = raw.current
   if (cur === null || raw.readonly) return
@@ -466,7 +466,7 @@ export async function manualSearch(
     raw.lyricFetchEmpty = false // 新搜索作废上次 C2 全源失败空态（避免残留旧空态遮蔽新候选）
   } else raw.coverSearchState = 'searching'
   try {
-    const result = await searchSongs(cur.title, cur.artist)
+    const result = await searchSongs(cur.title, cur.artist, cur.album) // album 综合进查询
     if (kind === 'lyrics' ? raw.lyricSearchSeq !== mySeq : raw.coverSearchSeq !== mySeq) return
     if (kind === 'lyrics') {
       raw.lyricCandidates = result.songs
@@ -530,7 +530,7 @@ function findSameSong(list: SongCandidate[], cand: SongCandidate): SongCandidate
 export async function pickLyricCandidate(
   cand: SongCandidate,
   fetchLyric: (source: MusicSourceId, id: string) => Promise<string | null> = defaultFetchLyric,
-  searchSource: (source: MusicSourceId, title: string, artist: string) => Promise<SongCandidate[]> = defaultSearchSource,
+  searchSource: (source: MusicSourceId, title: string, artist: string, album: string) => Promise<SongCandidate[]> = defaultSearchSource,
 ): Promise<void> {
   if (raw.readonly || raw.current === null) return
   const mySeq = raw.lyricSearchSeq // 当前歌曲身份（切歌 resetSearchState 自增 → 过期丢弃）
@@ -550,7 +550,8 @@ export async function pickLyricCandidate(
       remaining.map(async (source) => ({
         source,
         // 单源 reject（命令级异常）→ 该源按空列表跳过，不影响其余源（CR 第 2 轮 minor）
-        list: await searchSource(source, cand.title, cand.artist).catch(() => []),
+        // C2 换源以候选自身 title/artist/album 为身份（search-cover-album：cand.album 是点选那条的专辑）
+        list: await searchSource(source, cand.title, cand.artist, cand.album).catch(() => []),
       })),
     )
     if (raw.lyricSearchSeq !== mySeq) return

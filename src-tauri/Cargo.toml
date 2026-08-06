@@ -1,6 +1,6 @@
 [package]
 name = "music-tag"
-version = "0.1.0"
+version = "0.1.1"
 description = "MusicTag — 一次一首给本地裸 FLAC/MP3 补全元数据"
 authors = ["xian"]
 edition = "2021"

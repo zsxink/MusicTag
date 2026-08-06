@@ -13,7 +13,7 @@
 // 独立 crate，仅 `pub` 可见）。
 
 use crate::model::{MusicSourceId, SongCandidate};
-use crate::service::searcher::{crypto, MusicSource};
+use crate::service::searcher::{crypto, join_query_terms, MusicSource};
 use async_trait::async_trait;
 use rand::Rng;
 
@@ -67,11 +67,15 @@ impl MusicSource for Netease {
         &self,
         client: &reqwest::Client,
         title: &str,
-        _artist: &str,
+        artist: &str,
+        album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
         // linuxapi 转发：`eparams` = AES-ECB 加密 `{ method, url, params }`（复用取词链路，
         // 与 `crypto::linuxapi` 已知向量单测锁定，search-sources-renewal D1）。
-        let eparams = crypto::linuxapi(&search_payload(title));
+        // search-cover-album：查询关键词综合 title + artist + album（空段跳过）；构造函数
+        // `search_payload(keyword)` 签名不变，kw 拼好后传入（测试锚点不漂移）。
+        let kw = join_query_terms(title, artist, album);
+        let eparams = crypto::linuxapi(&search_payload(&kw));
         let resp = match client
             .post(&self.forward_url)
             .header("User-Agent", random_ua())

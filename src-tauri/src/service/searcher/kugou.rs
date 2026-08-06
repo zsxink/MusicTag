@@ -15,7 +15,7 @@
 // 独立 crate，仅 `pub` 可见；design.md 原 `pub(crate)` 方案经实测 E0603 不可行，改为 `pub`）。
 
 use crate::model::{MusicSourceId, SongCandidate};
-use crate::service::searcher::{crypto, json_string, MusicSource};
+use crate::service::searcher::{crypto, join_query_terms, json_string, MusicSource};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
@@ -118,9 +118,13 @@ impl MusicSource for Kugou {
         &self,
         client: &reqwest::Client,
         title: &str,
-        _artist: &str,
+        artist: &str,
+        album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
-        let mut params = search_params(title);
+        // search-cover-album：`keyword` = title + artist + album 拼接（空段跳过）；
+        // `search_params(keyword)` 签名不变，kw 拼好后传入（测试锚点不漂移）。
+        let kw = join_query_terms(title, artist, album);
+        let mut params = search_params(&kw);
         let sig = signature(&params);
         params.push(("signature".to_string(), sig));
         let url = reqwest::Url::parse_with_params(&self.search_url, &params)

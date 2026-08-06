@@ -304,14 +304,14 @@ enum SearchError {
 | iTunes | `itunes.apple.com/search`（country=CN） | 零鉴权，封面兜底 |
 
 > **多源搜索架构（对标 music-tag-web 的 `MusicResource` 工厂 + `smart_tag`）**：
-> - **模块**：`commands/` 目录薄壳（`folder.rs`/`song.rs`/`cover.rs`/`search.rs`）+ `service/searcher/` 子模块（`mod.rs`/`netease.rs`/`qqmusic.rs`/`kugou.rs`/`lrclib.rs`/`itunes.rs`/`crypto.rs`）。统一 Trait `MusicSource`：`search(title, artist) -> Result<Vec<SongCandidate>, String>` + `fetch_lyric(song_id) -> Option<String>`。
-> - **流程**：选中歌曲 → `search_song(title, artist)` → 五源并发（每家 6s 超时，失败降级为空列表并记入 `source_stats`）→ 打分去重 → 前 N 条候选返回。`SearchResult.all_failed` 区分「五源全网络失败」（标记会话离线）与「正常空结果」（冷门歌不标离线）。
+> - **模块**：`commands/` 目录薄壳（`folder.rs`/`song.rs`/`cover.rs`/`search.rs`）+ `service/searcher/` 子模块（`mod.rs`/`netease.rs`/`qqmusic.rs`/`kugou.rs`/`lrclib.rs`/`itunes.rs`/`crypto.rs`）。统一 Trait `MusicSource`：`search(title, artist, album) -> Result<Vec<SongCandidate>, String>` + `fetch_lyric(song_id) -> Option<String>`。
+> - **流程**：选中歌曲 → `search_song(title, artist, album)`（综合 title/artist/album 拼查询词）→ 五源并发（每家 6s 超时，失败降级为空列表并记入 `source_stats`）→ 打分去重 → 前 N 条候选返回。`SearchResult.all_failed` 区分「五源全网络失败」（标记会话离线）与「正常空结果」（冷门歌不标离线）。
 > - **惰性拉取**：候选列表秒出——封面 URL 随搜索结果带出，点选封面才 `download_cover`（单独 5s 超时 + 响应限流）；歌词文本点选候选行才 `fetch_lyric`。
-> - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1`；归一化 = trim + 全角半角 + 小写折叠（V1 不做简繁转换）；按归一化 `(title, artist)` 去重保留最高分。
+> - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3`；归一化 = trim + 全角半角 + 小写折叠（V1 不做简繁转换）；按归一化 `(title, artist)` 去重保留最高分。
 > - **Tauri command 全量**（前端一律 `invoke` 调用；TS 类型与 `design/design.md` §10.3 对齐）：
 >   - 文件：`pick_folder() -> Option<String>`（rfd 文件夹选择器）、`list_songs(dir) -> Vec<SongSummary>`、`open_song(path) -> Result<Song, String>`、`save_song(song, exportLrc) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`、`get_last_dir() -> Option<String>`（读上次打开目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 记住本次目录，失败静默）
 >   - 封面：`pick_cover_file() -> Option<CoverInput>`（rfd 文件对话框，jpg/png/webp）、`read_cover_path(path) -> Result<CoverInput, String>`（拖拽路径读 bytes）；两者返回 `CoverInput`（`data_url` 压缩小图 + `mime`），封面跨 IPC 用 base64 data URL
->   - 搜索：`search_song(title, artist) -> SearchResult`、`search_source(source, title, artist) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过聚合去重）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）
+>   - 搜索：`search_song(title, artist, album) -> SearchResult`、`search_source(source, title, artist, album) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过聚合去重）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）
 >   - 前端只管展示，文件 I/O 与网络请求全走 Rust command。
 > - **「无第三方依赖」说明**：指**无 JS 引擎**（不用 PyExecJS 类跑加密）；Rust 侧加密算法自实现，仅引入 `aes`/`cbc`/`rsa`/`rand` 等 crate。
 

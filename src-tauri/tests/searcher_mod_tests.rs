@@ -13,11 +13,13 @@ mod common;
 
 use app_lib::model::{MusicSourceId, SongCandidate};
 use app_lib::service::searcher::{
-    MusicSource, TOP_N, aggregate, artist_match, download_cover, download_cover_with_timeout, norm,
-    search_song_with_sources, search_source_with, title_match,
+    MusicSource, TOP_N, aggregate, album_match, artist_match, download_cover,
+    download_cover_with_timeout, join_query_terms, norm, search_song_with_sources,
+    search_source_with, title_match,
 };
 use async_trait::async_trait;
 use common::mock_http_once;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 fn cand(source: MusicSourceId, id: &str, title: &str, artist: &str) -> SongCandidate {
@@ -27,6 +29,24 @@ fn cand(source: MusicSourceId, id: &str, title: &str, artist: &str) -> SongCandi
         title: title.to_string(),
         artist: artist.to_string(),
         album: String::new(),
+        cover_url: None,
+    }
+}
+
+/// 带 album 的候选构造（search-cover-album：aggregate 专辑打分断言用）。
+fn cand_album(
+    source: MusicSourceId,
+    id: &str,
+    title: &str,
+    artist: &str,
+    album: &str,
+) -> SongCandidate {
+    SongCandidate {
+        source,
+        id: id.to_string(),
+        title: title.to_string(),
+        artist: artist.to_string(),
+        album: album.to_string(),
         cover_url: None,
     }
 }
@@ -63,6 +83,7 @@ fn aggregate_filters_everything_on_empty_title_query() {
     let songs = aggregate(
         "",
         "周杰伦",
+        "",
         vec![cand(MusicSourceId::Netease, "1", "晴天", "周杰伦")],
     );
     assert!(songs.is_empty(), "空 title 查询不得退化命中所有候选");
@@ -95,6 +116,7 @@ fn aggregate_filters_zero_title_match() {
     let songs = aggregate(
         "晴天",
         "周杰伦",
+        "",
         vec![cand(MusicSourceId::Netease, "1", "海阔天空", "Beyond")],
     );
     assert!(songs.is_empty(), "title_match==0 的候选应被过滤");
@@ -105,6 +127,7 @@ fn aggregate_scores_and_sorts_desc() {
     let songs = aggregate(
         "晴天",
         "周杰伦",
+        "",
         vec![
             cand(MusicSourceId::Netease, "1", "晴天", "周杰伦"), // 0.5 + 0.4 = 0.9
             cand(MusicSourceId::Netease, "2", "晴天娃娃", "周杰伦"), // 0.2 + 0.4 = 0.6
@@ -125,6 +148,7 @@ fn aggregate_dedup_keeps_earliest_source_on_tie() {
     let songs = aggregate(
         "晴天",
         "周杰伦",
+        "",
         vec![
             cand(MusicSourceId::Kugou, "k", "晴天", "周杰伦"),
             cand(MusicSourceId::Netease, "n", "晴天", "周杰伦"),
@@ -148,7 +172,7 @@ fn aggregate_tie_keeps_full_five_source_rank_order() {
         cand(MusicSourceId::Lrclib, "l", "晴天", "周杰伦"),
         cand(MusicSourceId::Itunes, "i", "晴天", "周杰伦"),
     ];
-    let songs = aggregate("晴天", "周杰伦", five);
+    let songs = aggregate("晴天", "周杰伦", "", five);
     assert_eq!(songs.len(), 1);
     assert_eq!(songs[0].source, MusicSourceId::Netease);
     assert_eq!(songs[0].id, "n");
@@ -158,7 +182,7 @@ fn aggregate_tie_keeps_full_five_source_rank_order() {
         cand(MusicSourceId::Lrclib, "l", "晴天", "周杰伦"),
         cand(MusicSourceId::Itunes, "i", "晴天", "周杰伦"),
     ];
-    let songs = aggregate("晴天", "周杰伦", pub_only);
+    let songs = aggregate("晴天", "周杰伦", "", pub_only);
     assert_eq!(songs.len(), 1);
     assert_eq!(songs[0].source, MusicSourceId::Lrclib);
     assert_eq!(songs[0].id, "l");
@@ -177,7 +201,7 @@ fn aggregate_limits_to_top_ten() {
             )
         })
         .collect();
-    let songs = aggregate("晴天", "周杰伦", cands);
+    let songs = aggregate("晴天", "周杰伦", "", cands);
     assert_eq!(songs.len(), 10, "应只返回前 10 条");
 }
 
@@ -187,20 +211,114 @@ fn aggregate_normalizes_fullwidth_query() {
     let songs = aggregate(
         "ＡＢＣ",
         "Ａ",
+        "",
         vec![cand(MusicSourceId::Netease, "1", "abc", "a")],
     );
     assert_eq!(songs.len(), 1);
     assert_eq!(songs[0].id, "1");
 }
 
+// ---- 查询关键词拼接（search-cover-album D2）----
+
+#[test]
+fn join_query_terms_combines_non_empty_segments() {
+    // 三字段齐全 → 段间单空格
+    assert_eq!(
+        join_query_terms("晴天", "周杰伦", "叶惠美"),
+        "晴天 周杰伦 叶惠美"
+    );
+    // album 为空 → 回退 title + artist（不改动无专辑文件搜索路径）
+    assert_eq!(join_query_terms("晴天", "周杰伦", ""), "晴天 周杰伦");
+    // artist 为空 → 仅 title
+    assert_eq!(join_query_terms("晴天", "", ""), "晴天");
+    // 全空 → 空串（后端过滤不搜，spec「字段缺失回退」）
+    assert_eq!(join_query_terms("", "", ""), "");
+    // 段内 trim（首尾空格不产生多余空格，段间仍单空格）
+    assert_eq!(
+        join_query_terms(" 晴天 ", " 周杰伦 ", " 叶惠美 "),
+        "晴天 周杰伦 叶惠美"
+    );
+}
+
+#[test]
+fn join_query_terms_artist_or_title_empty_keeps_remaining_terms() {
+    // spec「字段缺失回退」逐分支：仅歌手空 → 关键词退化为「歌名 专辑」；仅歌名空 →
+    // 退化为「歌手 专辑」（空 title 前端已守卫不发起搜索，join 仍须正确跳过缺失段）。
+    assert_eq!(join_query_terms("晴天", "", "叶惠美"), "晴天 叶惠美");
+    assert_eq!(join_query_terms("", "周杰伦", "叶惠美"), "周杰伦 叶惠美");
+    // 歌手 + 专辑缺失 → 仅 title；title + 专辑缺失 → 仅 artist
+    assert_eq!(join_query_terms("晴天", "", ""), "晴天");
+    assert_eq!(join_query_terms("", "周杰伦", ""), "周杰伦");
+}
+
+// ---- 专辑打分（search-cover-album D3）----
+
+#[test]
+fn album_match_weights() {
+    assert_eq!(album_match("叶惠美", "叶惠美"), 0.3, "album 相等 0.3");
+    assert_eq!(album_match("叶惠美", "依然范特西"), 0.0, "不相等 0");
+    // 空查询 / 空候选 album 不给分（防空串互相相等退化，与 title/artist 同套守卫）
+    assert_eq!(album_match("", "叶惠美"), 0.0);
+    assert_eq!(album_match("叶惠美", ""), 0.0);
+    assert_eq!(album_match("", ""), 0.0);
+    // 归一化由 norm 完成（album_match 收已归一化值，与 title/artist 同套语义）：
+    // 全角转半角 + 小写后相等 → 0.3
+    assert_eq!(album_match(&norm("ＹＥＨＵＩＭＥＩ"), &norm("yehuimei")), 0.3);
+}
+
+#[test]
+fn aggregate_album_match_prefers_same_album() {
+    // 同 title/artist 两候选：album 匹配的 0.9+0.3=1.2 > 不匹配的 0.9 → 去重后保留专辑匹配那条
+    let songs = aggregate(
+        "晴天",
+        "周杰伦",
+        "叶惠美",
+        vec![
+            cand_album(MusicSourceId::Netease, "1", "晴天", "周杰伦", "依然范特西"),
+            cand_album(MusicSourceId::Netease, "2", "晴天", "周杰伦", "叶惠美"),
+        ],
+    );
+    assert_eq!(songs.len(), 1);
+    assert_eq!(songs[0].id, "2", "同专辑候选应优先");
+    assert_eq!(songs[0].album, "叶惠美");
+}
+
+#[test]
+fn aggregate_album_not_scored_when_query_or_candidate_album_empty() {
+    // 查询 album 空 → album 维度不计分，排序仍由 title/artist 决定（spec「album 加分仅限非空」）
+    let songs = aggregate(
+        "晴天",
+        "周杰伦",
+        "",
+        vec![
+            cand_album(MusicSourceId::Netease, "1", "晴天", "周杰伦", "叶惠美"),
+            cand_album(MusicSourceId::Netease, "2", "晴天", "周杰伦", "依然范特西"),
+        ],
+    );
+    assert_eq!(songs.len(), 1, "同曲同分去重折叠（album 不计分）");
+    assert_eq!(songs[0].id, "1", "同分保留先到（HashMap 首插），album 不参与仲裁");
+
+    // 候选 album 空但查询 album 非空 → 候选不因 album 空被拉低（album_match=0，title/artist 主导）
+    let songs = aggregate(
+        "晴天",
+        "周杰伦",
+        "叶惠美",
+        vec![cand(MusicSourceId::Netease, "1", "晴天", "周杰伦")],
+    );
+    assert_eq!(songs.len(), 1);
+    assert_eq!(songs[0].id, "1", "album 空候选仍以 title/artist 分入选");
+}
+
 // ---- 并发聚合 + 超时降级 ----
 
-/// 测试用假源：可注入「立即返回」「挂起」（挂起由注入的短超时切断）或「失败」（Err）。
+/// 测试用假源：可注入「立即返回」「挂起」（挂起由注入的短超时切断）、「失败」（Err）或
+/// 「记录」（search-cover-album 管线测试：把收到的 title/artist/album 三元组记入共享 Vec）。
 #[derive(Clone)]
 enum FakeBehavior {
     Return(Vec<SongCandidate>),
     Hang,
     Fail,
+    Record(Arc<Mutex<Vec<(String, String, String)>>>),
 }
 
 #[derive(Clone)]
@@ -217,8 +335,9 @@ impl MusicSource for FakeSource {
     async fn search(
         &self,
         _client: &reqwest::Client,
-        _title: &str,
-        _artist: &str,
+        title: &str,
+        artist: &str,
+        album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
         match &self.behavior {
             FakeBehavior::Return(list) => Ok(list.clone()),
@@ -227,6 +346,12 @@ impl MusicSource for FakeSource {
                 Ok(Vec::new())
             }
             FakeBehavior::Fail => Err("fake 源失败".into()),
+            FakeBehavior::Record(seen) => {
+                seen.lock()
+                    .unwrap()
+                    .push((title.to_string(), artist.to_string(), album.to_string()));
+                Ok(Vec::new())
+            }
         }
     }
     async fn fetch_lyric(&self, _client: &reqwest::Client, _id: &str) -> Option<String> {
@@ -282,8 +407,15 @@ async fn search_aggregates_five_sources_and_stats() {
             )]),
         }),
     ];
-    let result =
-        search_song_with_sources(&client, "晴天", "周杰伦", sources, Duration::from_secs(1)).await;
+    let result = search_song_with_sources(
+        &client,
+        "晴天",
+        "周杰伦",
+        "",
+        sources,
+        Duration::from_secs(1),
+    )
+    .await;
     // source_stats：各家成功返回的候选条数（固定五源来源序，search-sources-renewal D8）
     assert_eq!(
         result.source_stats,
@@ -334,6 +466,7 @@ async fn search_timeout_degrades_hanging_source_to_zero() {
         &client,
         "晴天",
         "周杰伦",
+        "",
         sources,
         Duration::from_millis(50),
     )
@@ -382,6 +515,7 @@ async fn search_all_fail_returns_empty_and_zero_stats() {
         &client,
         "晴天",
         "周杰伦",
+        "",
         sources,
         Duration::from_millis(50),
     )
@@ -425,6 +559,7 @@ async fn search_all_succeed_empty_not_offline() {
         &client,
         "冷门曲",
         "某作者",
+        "",
         sources,
         Duration::from_millis(50),
     )
@@ -473,11 +608,50 @@ async fn search_mixed_fail_and_empty_not_offline() {
         &client,
         "晴天",
         "周杰伦",
+        "",
         sources,
         Duration::from_millis(50),
     )
     .await;
     assert!(!result.all_failed, "至少一源成功（qq/lrclib）→ 非离线");
+}
+
+#[tokio::test]
+async fn search_song_passes_album_to_sources() {
+    // search-cover-album 管线：`search_song_with_sources` 必须把 album 透传给各源 `search`。
+    // Record 行为把收到的三元组记入共享 Vec，断言 album 原样到达（空 album 也透传）。
+    let client = reqwest::Client::new();
+    let seen: Arc<Mutex<Vec<(String, String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    let sources: Vec<Box<dyn MusicSource>> = vec![
+        Box::new(FakeSource {
+            id: MusicSourceId::Netease,
+            behavior: FakeBehavior::Record(seen.clone()),
+        }),
+        Box::new(FakeSource {
+            id: MusicSourceId::QqMusic,
+            behavior: FakeBehavior::Record(seen.clone()),
+        }),
+    ];
+    let result = search_song_with_sources(
+        &client,
+        "晴天",
+        "周杰伦",
+        "叶惠美",
+        sources,
+        Duration::from_millis(50),
+    )
+    .await;
+    assert!(!result.all_failed, "Record 成功 → 非离线");
+    let mut recorded = seen.lock().unwrap().clone();
+    recorded.sort(); // JoinSet 完成序不确定，排序后断言
+    assert_eq!(
+        recorded,
+        vec![
+            ("晴天".to_string(), "周杰伦".to_string(), "叶惠美".to_string()),
+            ("晴天".to_string(), "周杰伦".to_string(), "叶惠美".to_string()),
+        ],
+        "album 应原样透传给各源 search"
+    );
 }
 
 #[tokio::test]
@@ -494,7 +668,7 @@ async fn search_source_returns_raw_candidates_and_empty_on_fail() {
         behavior: FakeBehavior::Return(many),
     });
     let got =
-        search_source_with(&client, ok, "晴天", "周杰伦", Duration::from_millis(50)).await;
+        search_source_with(&client, ok, "晴天", "周杰伦", "", Duration::from_millis(50)).await;
     assert_eq!(
         got.len(),
         TOP_N,
@@ -508,7 +682,7 @@ async fn search_source_returns_raw_candidates_and_empty_on_fail() {
         behavior: FakeBehavior::Fail,
     });
     assert!(
-        search_source_with(&client, fail, "x", "y", Duration::from_millis(50))
+        search_source_with(&client, fail, "x", "y", "", Duration::from_millis(50))
             .await
             .is_empty()
     );
@@ -518,9 +692,30 @@ async fn search_source_returns_raw_candidates_and_empty_on_fail() {
         behavior: FakeBehavior::Hang,
     });
     assert!(
-        search_source_with(&client, hang, "x", "y", Duration::from_millis(50))
+        search_source_with(&client, hang, "x", "y", "", Duration::from_millis(50))
             .await
             .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn search_source_passes_album_to_source() {
+    // search-cover-album：`search_source_with`（C2 换源单源路径）必须把 album 透传给源 `search`
+    // ——与多源 `search_song_with_sources` 同契约（spec「单源返回」查询关键词综合 title+artist+album）。
+    let client = reqwest::Client::new();
+    let seen: Arc<Mutex<Vec<(String, String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    let source: Box<dyn MusicSource> = Box::new(FakeSource {
+        id: MusicSourceId::QqMusic,
+        behavior: FakeBehavior::Record(seen.clone()),
+    });
+    let got =
+        search_source_with(&client, source, "晴天", "周杰伦", "叶惠美", Duration::from_millis(50))
+            .await;
+    assert!(got.is_empty(), "Record 源返回空列表");
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        vec![("晴天".to_string(), "周杰伦".to_string(), "叶惠美".to_string())],
+        "单源 search_source 应把 album 原样透传给源 search"
     );
 }
 

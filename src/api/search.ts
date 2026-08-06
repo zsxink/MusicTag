@@ -6,18 +6,20 @@
 import { invokeCommand } from './client'
 import type { MusicSourceId, SearchResult, SongCandidate } from './types'
 
-/** 五源并发搜索（标题 + 作者 → 打分去重候选；空 title 由后端守卫过滤 → 空态）。 */
-export function searchSongs(title: string, artist: string): Promise<SearchResult> {
-  return invokeCommand<SearchResult>('search_song', { title, artist })
+/** 五源并发搜索（标题 + 作者 + 专辑 → 打分去重候选；空 title 由后端守卫过滤 → 空态）。
+ *  album（search-cover-album）：综合进各源查询关键词与打分；空 → 回退 title(+artist) 现行为。 */
+export function searchSongs(title: string, artist: string, album: string): Promise<SearchResult> {
+  return invokeCommand<SearchResult>('search_song', { title, artist, album })
 }
 
-/** 单源搜索原始候选（`MusicSourceId, String, String → SongCandidate[]`；C2 换源用，绕过聚合去重）。 */
+/** 单源搜索原始候选（`MusicSourceId, String, String, String → SongCandidate[]`；C2 换源用，绕过聚合去重）。 */
 export function searchSource(
   source: MusicSourceId,
   title: string,
   artist: string,
+  album: string,
 ): Promise<SongCandidate[]> {
-  return invokeCommand<SongCandidate[]>('search_source', { source, title, artist })
+  return invokeCommand<SongCandidate[]>('search_source', { source, title, artist, album })
 }
 
 /** 点选歌词候选拉文本（`MusicSourceId, String → Option<String>`；None = 取词失败，供 C2 换源）。 */

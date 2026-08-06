@@ -9,8 +9,9 @@
 // 方案经实测 E0603 不可行，改为 `pub`）。原 mock HTTP 工具迁 `tests/common/`。
 //
 // 数据流（design.md）：
-// - `search_song(title, artist)`：`tokio::join_all`（JoinSet）五源并发 + 单源 6s 超时 →
+// - `search_song(title, artist, album)`：`tokio::join_all`（JoinSet）五源并发 + 单源 6s 超时 →
 //   失败降级空列表 + `source_stats`（该源记 0）→ `aggregate` 打分去重排序 → 前 10 条；
+//   album（search-cover-album）综合进各源查询关键词与打分，空 → 回退现行为；
 // - `fetch_lyric(source, id)`：点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源；
 //   iTunes 恒 None，不参与 C2 取词链）；
 // - `download_cover(url)`：点选封面下载（5s 超时 + 12MB 响应体限流）。
@@ -44,6 +45,8 @@ pub const TOP_N: usize = 10;
 ///
 /// `search` 返回 `Result<Vec<SongCandidate>, String>`（v1-search-fixes）：`Err` = 网络/解析失败，
 /// `Ok(vec)` = 成功（含空列表）。供聚合区分「全源失败」与「正常空结果」（`all_failed`）。
+/// `album` 参数（search-cover-album D1）：各源 `search()` 内用 `join_query_terms` 把
+/// title + artist + album 拼成查询关键词（LRCLIB 走 `album_name` 参数）。
 #[async_trait]
 pub trait MusicSource: Send + Sync {
     fn id(&self) -> MusicSourceId;
@@ -52,6 +55,7 @@ pub trait MusicSource: Send + Sync {
         client: &reqwest::Client,
         title: &str,
         artist: &str,
+        album: &str,
     ) -> Result<Vec<SongCandidate>, String>;
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String>;
 }
@@ -73,8 +77,15 @@ pub fn client() -> &'static reqwest::Client {
     })
 }
 
-/// `search_song(title, artist)`：五源并发搜索 + 打分去重（spec：单源 6s 超时，失败降级空列表）。
-pub async fn search_song(client: &reqwest::Client, title: &str, artist: &str) -> SearchResult {
+/// `search_song(title, artist, album)`：五源并发搜索 + 打分去重（spec：单源 6s 超时，失败降级空列表）。
+///
+/// `album`（search-cover-album）：综合进各源查询关键词与 `aggregate` 专辑打分；空 → 回退现行为。
+pub async fn search_song(
+    client: &reqwest::Client,
+    title: &str,
+    artist: &str,
+    album: &str,
+) -> SearchResult {
     let sources: Vec<Box<dyn MusicSource>> = vec![
         Box::new(netease::Netease::default()),
         Box::new(qqmusic::QqMusic::default()),
@@ -82,7 +93,7 @@ pub async fn search_song(client: &reqwest::Client, title: &str, artist: &str) ->
         Box::new(lrclib::Lrclib::default()),
         Box::new(itunes::Itunes::default()),
     ];
-    search_song_with_sources(client, title, artist, sources, SEARCH_TIMEOUT).await
+    search_song_with_sources(client, title, artist, album, sources, SEARCH_TIMEOUT).await
 }
 
 /// 并发聚合（可注入源列表与超时，供超时降级单测）。
@@ -94,6 +105,7 @@ pub async fn search_song_with_sources(
     client: &reqwest::Client,
     title: &str,
     artist: &str,
+    album: &str,
     sources: Vec<Box<dyn MusicSource>>,
     timeout: Duration,
 ) -> SearchResult {
@@ -109,8 +121,9 @@ pub async fn search_song_with_sources(
         let client = client.clone();
         let title = title.to_string();
         let artist = artist.to_string();
+        let album = album.to_string();
         set.spawn(async move {
-            let fut = source.search(&client, &title, &artist);
+            let fut = source.search(&client, &title, &artist, &album);
             match tokio::time::timeout(timeout, fut).await {
                 Ok(Ok(list)) => (source.id(), Some(list)),
                 _ => (source.id(), None), // 超时 / 网络 / 解析失败 → 失败
@@ -147,7 +160,7 @@ pub async fn search_song_with_sources(
         .flatten()
         .flat_map(|l| l.iter().cloned())
         .collect();
-    let songs = aggregate(title, artist, all);
+    let songs = aggregate(title, artist, album, all);
     SearchResult {
         songs,
         source_stats,
@@ -155,16 +168,18 @@ pub async fn search_song_with_sources(
     }
 }
 
-/// `search_source(source, title, artist) -> Vec<SongCandidate>`（v1-search-fixes）：单源搜索，C2 换源用。
+/// `search_source(source, title, artist, album) -> Vec<SongCandidate>`（v1-search-fixes）：单源搜索，C2 换源用。
 ///
 /// 与 `search_song` 不同：**不做跨源聚合去重**——C2 需要「其他来源对同一首歌的候选」，
 /// 聚合去重会把同曲多源候选折叠成一条（Netease 稳定胜出）导致换源找不到其他源。同一 6s
 /// 超时；失败/超时 → 空列表（前端跳过该源）。返回该源原始候选（截前 N 条控制 IPC 载荷）。
+/// `album`（search-cover-album）：综合进查询关键词；C2 换源用候选自身 `cand.album`。
 pub async fn search_source(
     client: &reqwest::Client,
     source: MusicSourceId,
     title: &str,
     artist: &str,
+    album: &str,
 ) -> Vec<SongCandidate> {
     let s: Box<dyn MusicSource> = match source {
         MusicSourceId::Netease => Box::new(netease::Netease::default()),
@@ -173,7 +188,7 @@ pub async fn search_source(
         MusicSourceId::Lrclib => Box::new(lrclib::Lrclib::default()),
         MusicSourceId::Itunes => Box::new(itunes::Itunes::default()),
     };
-    search_source_with(client, s, title, artist, SEARCH_TIMEOUT).await
+    search_source_with(client, s, title, artist, album, SEARCH_TIMEOUT).await
 }
 
 /// 单源搜索实现（可注入源与超时，供单测复用 FakeSource）。失败/超时 → 空列表。
@@ -182,9 +197,10 @@ pub async fn search_source_with(
     source: Box<dyn MusicSource>,
     title: &str,
     artist: &str,
+    album: &str,
     timeout: Duration,
 ) -> Vec<SongCandidate> {
-    match tokio::time::timeout(timeout, source.search(client, title, artist)).await {
+    match tokio::time::timeout(timeout, source.search(client, title, artist, album)).await {
         Ok(Ok(list)) => list.into_iter().take(TOP_N).collect(),
         _ => Vec::new(),
     }
@@ -306,16 +322,55 @@ pub fn artist_match(q: &str, a: &str) -> f32 {
         .fold(0.0_f32, f32::max)
 }
 
-/// 打分聚合（design.md D3）：过滤 title 零关联 → 打分（title + artist，上限 0.9）→
-/// 归一化 `(title, artist)` 去重保留最高分（同分按 Netease→QqMusic→Kugou→Lrclib→Itunes 来源序）→
-/// score 降序（同分来源序 + 归一化 title/artist 稳定）→ 前 10 条。
+/// 查询关键词拼接 `join_query_terms(title, artist, album)`（search-cover-album D2）。
+///
+/// 非空段用单空格 join，全空 → 空串（各段先 trim，避免段首尾空格产生多余空格）。
+/// 各源 `search()` 内先算 `kw` 再喂既有纯构造函数（netease `search_payload` / kugou
+/// `search_params` / QQ `w` / iTunes `term`）；LRCLIB 因 API 原生分参数走
+/// `track_name`/`artist_name`/`album_name` 各自传，不拼串。
+///
+/// `pub`：集成测试外置断言（同 `norm`/`title_match` 惯例）。
+pub fn join_query_terms(title: &str, artist: &str, album: &str) -> String {
+    [title, artist, album]
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `album_match(q, a)`（均已归一化）：相等 0.3 / 否则 0（search-cover-album D3）。
+///
+/// 仅当查询与候选 album 均非空时计分（防空串互相相等退化，与 `title_match`/`artist_match`
+/// 空串守卫同一套 `norm` 语义）；不做包含、不做 `/`/`,` 拆分（spec 只定义「相等 0.3」）。
+/// QQ 空值兜底「未分类专辑」天然不与真实专辑相等，不拉低排名。
+///
+/// `pub`：集成测试外置断言（同 `title_match` 惯例）。
+pub fn album_match(q: &str, a: &str) -> f32 {
+    if q.is_empty() || a.is_empty() {
+        return 0.0;
+    }
+    if q == a {
+        0.3
+    } else {
+        0.0
+    }
+}
+
+/// 打分聚合（design.md D3 + search-cover-album D3）：过滤 title 零关联 → 打分
+/// （title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3，
+/// 上限 1.2）→ 归一化 `(title, artist)` 去重保留最高分（同分按
+/// Netease→QqMusic→Kugou→Lrclib→Itunes 来源序）→ score 降序（同分来源序 + 归一化
+/// title/artist 稳定）→ 前 10 条。album 维度仅对非空 album 计分（空 → 完全回退现行为）。
 pub fn aggregate(
     query_title: &str,
     query_artist: &str,
+    query_album: &str,
     candidates: Vec<SongCandidate>,
 ) -> Vec<SongCandidate> {
     let qn = norm(query_title);
     let qa = norm(query_artist);
+    let qal = norm(query_album);
 
     // 打分 + 过滤 `title_match == 0`（与查询 title 零关联不进候选集，避免噪音）。
     let scored: Vec<(f32, SongCandidate)> = candidates
@@ -327,7 +382,8 @@ pub fn aggregate(
                 return None;
             }
             let am = artist_match(&qa, &norm(&c.artist));
-            Some((tm + am, c))
+            let alm = album_match(&qal, &norm(&c.album));
+            Some((tm + am + alm, c))
         })
         .collect();
 

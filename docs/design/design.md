@@ -353,8 +353,8 @@ interface SearchResult {
 | `rename_song(path, new_name)` | `String, String → Result<(), String>` | 音频 + `.lrc` 改名 |
 | `pick_cover_file()` | `() → Option<CoverInput>` | 原生封面文件选择器（jpg/png/webp）；取消返回 `None`，选中 → 压缩后 data URL + mime |
 | `read_cover_path(path)` | `String → Result<CoverInput, String>` | 拖拽封面路径 → 读文件 + 压缩 + data URL；读失败/非图片 → `Err(中文原因)` |
-| `search_song(title, artist)` | `String, String → SearchResult` | 五源并发搜索 + 打分去重（含 `all_failed`：五源全失败才 true，冷门歌空结果 false） |
-| `search_source(source, title, artist)` | `MusicSourceId, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（C2 换源用，绕过跨源聚合去重）：聚合会把同曲多源候选折叠成一条导致换源失效，换源时逐源各自拿原始候选；失败/超时 → 空列表，前端跳过该源 |
+| `search_song(title, artist, album)` | `String, String, String → SearchResult` | 五源并发搜索 + 打分去重（含 `all_failed`：五源全失败才 true，冷门歌空结果 false） |
+| `search_source(source, title, artist, album)` | `MusicSourceId, String, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（C2 换源用，绕过跨源聚合去重）：聚合会把同曲多源候选折叠成一条导致换源失效，换源时逐源各自拿原始候选；失败/超时 → 空列表，前端跳过该源 |
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |
 | `download_cover(url)` | `String → Result<Vec<u8>, String>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`；失败 → `Err` 前端静默忽略该张） |
 

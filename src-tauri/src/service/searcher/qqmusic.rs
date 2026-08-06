@@ -10,7 +10,7 @@
 // rust-tests-separation 单测外置 `tests/searcher_qqmusic_tests.rs`（集成测试是独立 crate，仅 `pub` 可见）。
 
 use crate::model::{MusicSourceId, SongCandidate};
-use crate::service::searcher::MusicSource;
+use crate::service::searcher::{join_query_terms, MusicSource};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
@@ -44,13 +44,16 @@ impl MusicSource for QqMusic {
         &self,
         client: &reqwest::Client,
         title: &str,
-        _artist: &str,
+        artist: &str,
+        album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
         // client_search_cp：公开 GET，`w` 关键词、`p/n` 分页、`format=json`（零加密零签名）。
+        // search-cover-album：`w` = title + artist + album 拼接（空段跳过）。
         // 用 Url::parse_with_params 保证中文 keyword 正确 URL 编码。
+        let kw = join_query_terms(title, artist, album);
         let url = reqwest::Url::parse_with_params(
             &self.search_url,
-            &[("p", "1"), ("n", "10"), ("w", title), ("format", "json")],
+            &[("p", "1"), ("n", "10"), ("w", kw.as_str()), ("format", "json")],
         )
         .expect("构造 QQ 搜索 URL 失败");
         let resp = match client

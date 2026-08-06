@@ -43,12 +43,16 @@ impl MusicSource for Lrclib {
         client: &reqwest::Client,
         title: &str,
         artist: &str,
+        album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
-        let url = reqwest::Url::parse_with_params(
-            &self.search_url,
-            &[("track_name", title), ("artist_name", artist)],
-        )
-        .expect("构造 LRCLIB 搜索 URL 失败");
+        // search-cover-album：LRCLIB API 原生分参数——track_name/artist_name 原样传，
+        // album 非空追加 `album_name`（空则省略该参数，回退现行为）。
+        let mut params = vec![("track_name", title), ("artist_name", artist)];
+        if !album.trim().is_empty() {
+            params.push(("album_name", album));
+        }
+        let url = reqwest::Url::parse_with_params(&self.search_url, &params)
+            .expect("构造 LRCLIB 搜索 URL 失败");
         let resp = match client.get(url).header("User-Agent", LRCLIB_UA).send().await {
             Ok(r) => r,
             Err(e) => return Err(format!("LRCLIB 搜索请求失败: {e}")),
