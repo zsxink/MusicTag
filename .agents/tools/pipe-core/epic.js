@@ -136,47 +136,7 @@ async function run(epicName, driverName) {
 }
 
 // 单个子项：worktree 准备 → 子进程完整 pipe → 成功后清理 worktree。
-// 同步返回 spawnSync 结果（保留给既有单测/旧调用）；runItemAsync 用异步 spawn 并发。
-function runItem(epicName, item, driverName, st, main) {
-  const wtPath = path.resolve(main, '.worktrees', item.name);
-  try {
-    if (fs.existsSync(path.join(wtPath, '.git'))) {
-      worktree.ensureBranch(wtPath, item.name);
-      worktree.rebaseMain(wtPath); // 崩溃恢复 / 前置合并后 refresh
-    } else {
-      worktree.add({ worktreePath: wtPath, branch: item.name, main });
-    }
-  } catch (e) {
-    console.error(`✗ 子项 ${item.name} worktree 准备失败: ${e.message}`);
-    return 1;
-  }
-  st.items[item.name].worktree = wtPath;
-  saveEpicState(epicName, st);
-
-  const runJs = path.join(__dirname, 'run.js');
-  const res = spawnSync(process.execPath, [runJs, item.name, '--driver', driverName, '--cwd', wtPath], {
-    cwd: wtPath,
-    env: { ...process.env, PIPE_CORE_REPO_ROOT: main }, // D1：状态根锚定主仓库
-    encoding: 'utf8',
-    timeout: 30 * 60 * 1000,
-    maxBuffer: 128 * 1024 * 1024,
-  });
-  if (res.error) { console.error(`✗ 子项 ${item.name} 启动失败: ${res.error.message}`); return 1; }
-  if (res.status !== 0) {
-    const tail = (res.stderr || res.stdout || '').trim().split('\n').slice(-20).join('\n');
-    console.error(`✗ 子项 ${item.name} 退出码 ${res.status}\n${tail}`);
-    return res.status;
-  }
-  // 成功：合并已由子流程 integrate 完成（gh pr merge）；核心只清理 worktree + 分支
-  try {
-    worktree.cleanup(wtPath, item.name, main);
-  } catch (e) {
-    console.error(`⚠ 子项 ${item.name} 清理 worktree 失败: ${e.message}（可手动 git worktree remove）`);
-  }
-  return 0;
-}
-
-// 异步并发版：同 runItem 的 worktree 准备 + spawn，但用异步 child_process.spawn + Promise 收尾。
+// 异步 child_process.spawn + Promise 收尾（B2：批次内并发，替代旧 spawnSync 串行 for-loop）。
 // 批次内多个子项并发执行，完成时间互不阻塞；状态写入在 run() 的回调里串行化，无并发写竞态。
 function runItemAsync(epicName, item, driverName, st, main) {
   const wtPath = path.resolve(main, '.worktrees', item.name);
@@ -201,20 +161,42 @@ function runItemAsync(epicName, item, driverName, st, main) {
       env: { ...process.env, PIPE_CORE_REPO_ROOT: main },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    let stderr = '';
-    let stdout = '';
-    const killTimer = setTimeout(() => child.kill('SIGKILL'), 30 * 60 * 1000);
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
-    child.on('error', (e) => {
-      clearTimeout(killTimer);
-      console.error(`✗ 子项 ${item.name} 启动失败: ${e.message}`);
-      resolve(1);
-    });
+    // 输出只留尾部窗口（每流最多 64KB），防话痨子进程无界增长（原 spawnSync maxBuffer 128MB 的兜底）
+    const TAIL_BYTES = 64 * 1024;
+    const tails = { stdout: '', stderr: '' };
+    const pushTail = (key, d) => {
+      tails[key] = (tails[key] + d).slice(-TAIL_BYTES);
+    };
+    let timedOut = false;
+    let spawnErr = null;
+    const killTimer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, 30 * 60 * 1000);
+    child.stdout.on('data', (d) => pushTail('stdout', d));
+    child.stderr.on('data', (d) => pushTail('stderr', d));
+    child.on('error', (e) => { spawnErr = e; });
     child.on('close', (code) => {
       clearTimeout(killTimer);
+      if (spawnErr) {
+        // error 事件后 close 也会触发：只在此处统一上报，避免重复日志
+        console.error(`✗ 子项 ${item.name} 启动失败: ${spawnErr.message}`);
+        resolve(1);
+        return;
+      }
+      if (timedOut) {
+        console.error(`✗ 子项 ${item.name} 执行超时（30min SIGKILL）`);
+        resolve(1);
+        return;
+      }
+      if (code === null) {
+        // 非超时的异常终止（外部信号等）：无退出码，仅保留 signal 信息
+        console.error(`✗ 子项 ${item.name} 异常终止（无退出码，可能被信号打断）`);
+        resolve(1);
+        return;
+      }
       if (code !== 0) {
-        const tail = (stderr || stdout || '').trim().split('\n').slice(-20).join('\n');
+        const tail = (tails.stderr || tails.stdout || '').trim().split('\n').slice(-20).join('\n');
         console.error(`✗ 子项 ${item.name} 退出码 ${code}\n${tail}`);
         resolve(code);
         return;
@@ -229,4 +211,4 @@ function runItemAsync(epicName, item, driverName, st, main) {
   });
 }
 
-module.exports = { run, readyItems, epicFile, epicStateFile, loadEpic, loadEpicState, saveEpicState, runItem, runItemAsync, MAX_CONCURRENCY, EPIC_SCHEMA_VERSION };
+module.exports = { run, readyItems, epicFile, epicStateFile, loadEpic, loadEpicState, saveEpicState, runItemAsync, MAX_CONCURRENCY, EPIC_SCHEMA_VERSION };

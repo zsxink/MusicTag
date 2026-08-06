@@ -251,12 +251,14 @@ test('epic: 批次内子项并发执行（P3）——三个无依赖子项的子
     assert.equal(starts.length, 3, '应有 3 次 preflight-start');
     assert.equal(ends.length, 3, '应有 3 次 preflight-end');
 
-    // 并发证明：至少两个 preflight 在第一个 preflight-end 前已 start（重叠存活区间）
+    // 并发证明（主断言，抗慢 CI）：至少两个 preflight 在第一个 preflight-end 前已 start（重叠存活区间）。
+    // 串行下 starts=[t0,t500,t1000]、ends=[t500,t1000,t1500]，首个 end 前只有 1 个 start → 必失败；只依赖相对时序，不受机器快慢影响。
     const firstEnd = Math.min(...ends);
     const overlapping = starts.filter((s) => s < firstEnd).length;
     assert.ok(overlapping >= 2, `并发：至少 2 个 preflight 在首个 end 前已 start（实际重叠=${overlapping}）`);
-    // 串行基线对比：若串行执行，总耗时 ≥ 3×delay 且无重叠；并发下总耗时显著 < 3×delay
-    assert.ok(elapsed < delay * 3, `批次并发总耗时应 < 3×sleep（串行基线），实际 ${elapsed}ms`);
+    // 宽松 sanity bound（非并发证明，仅防病态挂起）：串行基线 3×sleep=1500ms，取 delay*4 留足慢 CI 启动/清理余量，
+    // 真实并发 ~sleep+overhead 远低于此；不再用 tight 耗时断言（慢 CI 会误报 flake）。
+    assert.ok(elapsed < delay * 4, `批次并发总耗时应远低于串行基线（sanity），实际 ${elapsed}ms`);
   } finally {
     delete process.env.PIPE_CORE_REPO_ROOT;
     delete process.env.PIPE_CLAUDE_BIN;
