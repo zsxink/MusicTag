@@ -182,8 +182,8 @@ pub async fn search_song_with_sources(
 
 /// `search_source(source, title, artist, album) -> Vec<SongCandidate>`（v1-search-fixes）：单源搜索，C2 换源用。
 ///
-/// 与 `search_song` 不同：**不做跨源聚合去重**——C2 需要「其他来源对同一首歌的候选」，
-/// 聚合去重会把同曲多源候选折叠成一条（Netease 稳定胜出）导致换源找不到其他源。同一 6s
+/// 与 `search_song` 不同：**绕过聚合**（multi-source-candidates 后为「同源去重 + 每源 TOP 3
+/// 截断」）——C2 换源需要逐源**完整**原始候选做归一化身份匹配，聚合截断会丢候选。同一 6s
 /// 超时；失败/超时 → 空列表（前端跳过该源）。返回该源原始候选（截前 N 条控制 IPC 载荷）。
 /// `album`（search-cover-album）：综合进查询关键词；C2 换源用候选自身 `cand.album`。
 pub async fn search_source(
