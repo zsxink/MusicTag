@@ -18,7 +18,7 @@ use app_lib::service::searcher::kugou::{
 use app_lib::service::searcher::MusicSource;
 use app_lib::model::MusicSourceId;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use common::mock_http_once;
+use common::{mock_http_capture, mock_http_once};
 
 #[test]
 fn signature_matches_known_vector_simple() {
@@ -231,6 +231,56 @@ fn parses_lyric_download_missing_or_empty_returns_none() {
     assert_eq!(
         parse_lyric_download(&serde_json::json!({"content": "@@@not-base64@@@"})),
         None
+    );
+}
+
+#[tokio::test]
+async fn search_uses_joined_keyword_in_http_request() {
+    // search-cover-album 三字段齐全（spec：酷狗 `keyword` = 「晴天 周杰伦 叶惠美」）。
+    // 与 QQ/iTunes/LRCLIB/网易云同对称：mock 服务器捕获**实际发出的请求目标**，断言
+    // `keyword` 参数为 join_query_terms 拼接串——验证 `Kugou::search()` 内部真的调用了
+    // join_query_terms（而非只测 search_params 纯构造函数能收拼接串）。
+    let response =
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":1,\"error_code\":0,\"data\":{\"lists\":[]}}"
+            .to_vec();
+    let (url, captured) = mock_http_capture(response);
+    let kugou = Kugou {
+        search_url: url,
+        lyric_search_url: String::new(),
+        lyric_download_url: String::new(),
+    };
+    let client = reqwest::Client::new();
+    kugou.search(&client, "晴天", "周杰伦", "叶惠美").await.unwrap();
+    let target = captured.lock().unwrap().clone();
+    let full = format!("{}{}", &kugou.search_url, target);
+    let parsed = reqwest::Url::parse(&full).expect("捕获请求目标应为合法 URL");
+    let params: std::collections::HashMap<String, String> =
+        parsed.query_pairs().into_owned().collect();
+    assert_eq!(
+        params.get("keyword").map(String::as_str),
+        Some("晴天 周杰伦 叶惠美")
+    );
+    assert!(params.contains_key("signature"), "签名参数应随请求发出");
+
+    // album 为空 → keyword 回退 title + artist（不改动无专辑文件搜索路径）
+    let (url2, captured2) = mock_http_capture(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":1,\"error_code\":0,\"data\":{\"lists\":[]}}"
+            .to_vec(),
+    );
+    let kugou2 = Kugou {
+        search_url: url2,
+        lyric_search_url: String::new(),
+        lyric_download_url: String::new(),
+    };
+    kugou2.search(&client, "晴天", "周杰伦", "").await.unwrap();
+    let target2 = captured2.lock().unwrap().clone();
+    let full2 = format!("{}{}", &kugou2.search_url, target2);
+    let parsed2 = reqwest::Url::parse(&full2).expect("捕获请求目标应为合法 URL");
+    let params2: std::collections::HashMap<String, String> =
+        parsed2.query_pairs().into_owned().collect();
+    assert_eq!(
+        params2.get("keyword").map(String::as_str),
+        Some("晴天 周杰伦")
     );
 }
 

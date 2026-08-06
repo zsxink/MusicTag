@@ -1389,6 +1389,16 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       expect(songStore.coverSearchState).toBe('idle') // 只刷歌词
     })
 
+    it('歌曲带专辑（search-cover-album）→ manualSearch 也把 cur.album 透传', async () => {
+      songStore.current!.album = '叶惠美'
+      const searchSongs = vi.fn(async () => result([makeCand()]))
+
+      await manualSearch('lyrics', searchSongs)
+
+      expect(searchSongs).toHaveBeenCalledWith('歌名', '作者', '叶惠美') // 与 autoSearchOnSelect 同表达式
+      expect(songStore.lyricSearchState).toBe('done')
+    })
+
     it('手动搜封面：只刷 coverCandidates（过滤 cover_url），不动歌词候选', async () => {
       songStore.lyricCandidates = [makeCand()]
       songStore.lyricSearchState = 'done'
