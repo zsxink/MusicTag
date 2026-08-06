@@ -21,3 +21,16 @@ test('self-check: 驱动缺失 → fail-closed 返回错误', () => {
   assert.equal(typeof res.ok, 'boolean');
   assert.ok(Array.isArray(res.errors));
 });
+
+test('self-check: 脚本语法错误（bash -n 失败）→ 真实触发 fail-closed 非零', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-selfcheck-fail-'));
+  fs.mkdirSync(path.join(repo, '.claude', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(repo, '.claude', 'workflows', 'broken.sh'), '#!/usr/bin/env bash\nif [\n'); // 语法错误
+  const res = selfcheck.run({ repoRoot: repo });
+  assert.equal(res.ok, false, 'bash -n 语法错误必须 fail-closed');
+  assert.ok(res.errors.some((e) => e.includes('bash -n')), `errors=${res.errors.join('; ')}`);
+  fs.rmSync(repo, { recursive: true, force: true });
+});

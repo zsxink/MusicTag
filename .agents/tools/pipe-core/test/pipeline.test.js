@@ -93,3 +93,14 @@ test('pipeline: devSpec infra 域自验证只跑 node/openspec，不跑 cargo/np
   assert.match(p, /node --test/);
   assert.ok(!p.includes('cargo test'));
 });
+
+test('pipeline: CR 复盘专项三检（跨模块状态/竞态与串扰/网络与离线判定）在新核心保留', () => {
+  const defs = pipeline.buildPipeline(stateWithDomain('both'));
+  const cr = defs.find((d) => d.id === 'cr');
+  const p = cr.prompt({});
+  assert.match(p, /跨模块状态语义/);
+  assert.match(p, /竞态与串扰/);
+  assert.match(p, /网络与离线判定/);
+  assert.match(p, /specReference/);
+  assert.match(p, /pass=true 仅当无 blocker 且无 major/);
+});

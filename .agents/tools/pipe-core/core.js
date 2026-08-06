@@ -45,6 +45,14 @@ function runPipeline(opts) {
     }
     topoSort(defs); // 环/缺失依赖抛错
 
+    // 失败节点级联失效（DVC，spec「失败节点缓存失效」）：状态加载/落地校验后标记 failed 的节点，
+    // 其依赖它的已通过节点也被标记 dirty → 续跑强制真实重跑，不复用被污染的旧结果；
+    // 未受污染的已通过节点保持 succeeded 直接复用。同步调度（runNode 不让出循环）下无 running 窗口。
+    for (const d of defs) {
+      const s = state.nodes[d.id];
+      if (s && s.status === 'failed') stateApi.markDirty(state, defs, d.id);
+    }
+
     const pending = defs.filter((d) => {
       const s = state.nodes[d.id];
       return !s || s.status !== 'succeeded';

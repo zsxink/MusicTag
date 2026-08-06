@@ -79,3 +79,35 @@ test('codex: 认证/配置缺失退出码非零 → 显式上报不降级', () =
   assert.equal(res.ok, false);
   assert.notEqual(res.exitCode, 0);
 });
+
+test('codex: 退出 0 但未产出 result 文件 → 显式失败', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const noOutput = path.join(__dirname, 'fixtures', 'fake-codex-no-output.js');
+  fs.writeFileSync(noOutput, '#!/usr/bin/env node\nprocess.exit(0);\n');
+  fs.chmodSync(noOutput, 0o755);
+  const res = codex.runAgent({ prompt: 'P', schema: SCHEMA }, { codexBin: noOutput });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /未产出 result 文件/);
+  fs.rmSync(noOutput, { force: true });
+});
+
+test('codex: result 文件非 JSON → 显式失败', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const badJson = path.join(__dirname, 'fixtures', 'fake-codex-bad-json.js');
+  fs.writeFileSync(badJson, '#!/usr/bin/env node\nconst fs=require("fs");const i=process.argv.indexOf("-o");if(i!==-1){fs.writeFileSync(process.argv[i+1],"{not json");}\n');
+  fs.chmodSync(badJson, 0o755);
+  const res = codex.runAgent({ prompt: 'P', schema: SCHEMA }, { codexBin: badJson });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /非 JSON/);
+  fs.rmSync(badJson, { force: true });
+});
+
+test('claude: 二进制缺失（spawn 失败）→ 显式上报失败，不崩溃', () => {
+  const res = claude.runAgent({ prompt: 'P', schema: SCHEMA }, { claudeBin: '/nonexistent/claude-bin' });
+  assert.equal(res.ok, false);
+  assert.equal(res.exitCode, null);
+});

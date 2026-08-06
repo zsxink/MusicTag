@@ -8,7 +8,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const stateApi = require('./state.js');
 const worktree = require('./worktree.js');
 
@@ -60,7 +60,7 @@ function readyItems(epic, st) {
 }
 
 // 执行器入口。返回退出码（0 全部完成 / 非零有失败子项）。
-function run(epicName, driverName) {
+async function run(epicName, driverName) {
   let epic;
   try { epic = loadEpic(epicName); } catch (e) { console.error(e.message); return 1; }
 
@@ -99,13 +99,21 @@ function run(epicName, driverName) {
     st.batch = batch;
     console.error(`[epic] batch ${batch}: ${batchItems.map((i) => i.name).join(', ')}`);
 
+    // 批次内 ≤MAX_CONCURRENCY 并行（P3）：先同步把每项状态置 running 并启动子进程，
+    // 再异步并发等待完成；写盘按完成顺序串行化（异步回调内独占 st），无并发写竞态。
+    const recs = [];
     for (const item of batchItems) {
       const rec = st.items[item.name];
       rec.status = 'running';
       rec.startedAt = new Date().toISOString();
-      saveEpicState(epicName, st);
+      recs.push(rec);
+    }
+    saveEpicState(epicName, st);
 
-      const code = runItem(epicName, item, driverName, st, main);
+    const completed = await Promise.all(batchItems.map((item) => runItemAsync(epicName, item, driverName, st, main)));
+    for (let i = 0; i < batchItems.length; i++) {
+      const rec = recs[i];
+      const code = completed[i];
       if (code === 0) {
         rec.status = 'done';
         rec.mergeOrder = ++mergeSeq;
@@ -114,7 +122,7 @@ function run(epicName, driverName) {
       } else {
         rec.status = 'failed';
         rec.error = `子流程退出码 ${code}`;
-        console.error(`✗ 子项 ${item.name} 失败（exit=${code}），见 worktree 运行日志 / epic-state.json`);
+        console.error(`✗ 子项 ${batchItems[i].name} 失败（exit=${code}），见 worktree 运行日志 / epic-state.json`);
       }
       saveEpicState(epicName, st);
     }
@@ -128,6 +136,7 @@ function run(epicName, driverName) {
 }
 
 // 单个子项：worktree 准备 → 子进程完整 pipe → 成功后清理 worktree。
+// 同步返回 spawnSync 结果（保留给既有单测/旧调用）；runItemAsync 用异步 spawn 并发。
 function runItem(epicName, item, driverName, st, main) {
   const wtPath = path.resolve(main, '.worktrees', item.name);
   try {
@@ -167,4 +176,57 @@ function runItem(epicName, item, driverName, st, main) {
   return 0;
 }
 
-module.exports = { run, readyItems, epicFile, epicStateFile, loadEpic, loadEpicState, saveEpicState, runItem, MAX_CONCURRENCY, EPIC_SCHEMA_VERSION };
+// 异步并发版：同 runItem 的 worktree 准备 + spawn，但用异步 child_process.spawn + Promise 收尾。
+// 批次内多个子项并发执行，完成时间互不阻塞；状态写入在 run() 的回调里串行化，无并发写竞态。
+function runItemAsync(epicName, item, driverName, st, main) {
+  const wtPath = path.resolve(main, '.worktrees', item.name);
+  try {
+    if (fs.existsSync(path.join(wtPath, '.git'))) {
+      worktree.ensureBranch(wtPath, item.name);
+      worktree.rebaseMain(wtPath);
+    } else {
+      worktree.add({ worktreePath: wtPath, branch: item.name, main });
+    }
+  } catch (e) {
+    console.error(`✗ 子项 ${item.name} worktree 准备失败: ${e.message}`);
+    return Promise.resolve(1);
+  }
+  st.items[item.name].worktree = wtPath;
+  saveEpicState(epicName, st);
+
+  const runJs = path.join(__dirname, 'run.js');
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [runJs, item.name, '--driver', driverName, '--cwd', wtPath], {
+      cwd: wtPath,
+      env: { ...process.env, PIPE_CORE_REPO_ROOT: main },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    let stdout = '';
+    const killTimer = setTimeout(() => child.kill('SIGKILL'), 30 * 60 * 1000);
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', (e) => {
+      clearTimeout(killTimer);
+      console.error(`✗ 子项 ${item.name} 启动失败: ${e.message}`);
+      resolve(1);
+    });
+    child.on('close', (code) => {
+      clearTimeout(killTimer);
+      if (code !== 0) {
+        const tail = (stderr || stdout || '').trim().split('\n').slice(-20).join('\n');
+        console.error(`✗ 子项 ${item.name} 退出码 ${code}\n${tail}`);
+        resolve(code);
+        return;
+      }
+      try {
+        worktree.cleanup(wtPath, item.name, main);
+      } catch (e) {
+        console.error(`⚠ 子项 ${item.name} 清理 worktree 失败: ${e.message}（可手动 git worktree remove）`);
+      }
+      resolve(0);
+    });
+  });
+}
+
+module.exports = { run, readyItems, epicFile, epicStateFile, loadEpic, loadEpicState, saveEpicState, runItem, runItemAsync, MAX_CONCURRENCY, EPIC_SCHEMA_VERSION };

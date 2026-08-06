@@ -181,6 +181,130 @@ test('core: resume 集成——失败节点重跑、已通过节点复用（落�
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
+// ---------- 失败路径与边界（除 happy-path 外强制审计） ----------
+
+test('core: 核心不认识模型——同一 DAG 内 claude 与 codex 节点走同一调度，仅 driver 层不同', () => {
+  const repo = tmpRepo();
+  withRoot(repo, () => {
+    const claudeDrv = require('../drivers/claude.js');
+    const codexDrv = require('../drivers/codex.js');
+    const FAKE_CLAUDE = path.join(__dirname, 'fixtures', 'fake-claude.js');
+    const FAKE_CODEX = path.join(__dirname, 'fixtures', 'fake-codex.js');
+    const SCHEMA = { type: 'object', properties: { v: { type: 'number' } }, required: ['v'] };
+    // 复合 driver：n1 走真实 claude driver，n2 走真实 codex driver；核心无模型专属分支
+    const composite = {
+      runAgent(task, ctx) {
+        if (task.id === 'n1') {
+          return claudeDrv.runAgent(task, { claudeBin: FAKE_CLAUDE, env: { ...process.env, FAKE_OUTPUT: JSON.stringify({ type: 'result', structured: { v: 1 } }) } });
+        }
+        return codexDrv.runAgent(task, { codexBin: FAKE_CODEX, env: { ...process.env, FAKE_OUTPUT: JSON.stringify({ v: 2 }) } });
+      },
+    };
+    const change = 'demo';
+    const state = stateApi.newState(change, 'mock');
+    const defs = [
+      Object.assign(node('n1', [], SCHEMA), { retry: { max: 1, intervalMs: 0 } }),
+      Object.assign(node('n2', ['n1'], SCHEMA), { retry: { max: 1, intervalMs: 0 } }),
+    ];
+    const res = core.runPipeline({ change, state, defsFn: () => defs, driver: composite });
+    assert.equal(res.status, 'success');
+    assert.equal(results(res).n1.v, 1);
+    assert.equal(results(res).n2.v, 2);
+    assert.equal(state.nodes.n1.status, 'succeeded');
+    assert.equal(state.nodes.n2.status, 'succeeded');
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('core: driver 输出违反 schema（二次校验失败）→ 节点失败 → 重试耗尽 escalate', () => {
+  const repo = tmpRepo();
+  withRoot(repo, () => {
+    const change = 'demo';
+    const state = stateApi.newState(change, 'mock');
+    const driver = makeDriver({
+      n1: () => ({ ok: true, structured: { wrong: 1 } }), // 缺必填 v
+    });
+    const defs = [Object.assign(node('n1', [], { type: 'object', properties: { v: { type: 'number' } }, required: ['v'] }), { retry: { max: 1, intervalMs: 0 } })];
+    const res = core.runPipeline({ change, state, defsFn: () => defs, driver });
+    assert.equal(res.status, 'suspended');
+    assert.equal(res.decision.action, 'escalate');
+    assert.match(state.nodes.n1.error, /schema 二次校验/);
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('core: driver 抛异常 → 节点失败，不使调度崩溃', () => {
+  const repo = tmpRepo();
+  withRoot(repo, () => {
+    const change = 'demo';
+    const state = stateApi.newState(change, 'mock');
+    const throwing = { runAgent() { throw new Error('driver crashed'); } };
+    const defs = [Object.assign(node('n1', []), { retry: { max: 1, intervalMs: 0 } })];
+    const res = core.runPipeline({ change, state, defsFn: () => defs, driver: throwing });
+    assert.equal(res.status, 'suspended');
+    assert.equal(res.decision.action, 'escalate');
+    assert.match(state.nodes.n1.error, /driver crashed/);
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('core: reroute 修复子节点失败 → 挂起 stage=reroute-fix-failed', () => {
+  const repo = tmpRepo();
+  withRoot(repo, () => {
+    const change = 'demo';
+    const state = stateApi.newState(change, 'mock');
+    const driver = makeDriver({
+      cr: () => ({ ok: true, structured: { pass: false, blockers: [{ severity: 'blocking', file: 'src/App.vue', issue: 'i', specReference: 's', suggestion: 'f' }], majors: [] } }),
+      'fix-vue-frontend': () => ({ ok: true, structured: { done: false, summary: 'failed to fix' } }), // 未返回 done=true
+    });
+    const defs = [Object.assign(node('cr', []), { role: 'cr-agent', maxRounds: 3, retry: { max: 1, intervalMs: 0 }, resultOk: (r) => r.pass === true })];
+    const res = core.runPipeline({ change, state, defsFn: () => defs, driver });
+    assert.equal(res.status, 'suspended');
+    assert.equal(res.stage, 'reroute-fix-failed');
+    assert.match(res.reason, /reroute 修复子节点执行失败/);
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('core: 落地校验失效后依赖它的已通过节点续跑被污染（失败节点缓存失效，spec 要求强制重跑）', () => {
+  const repo = tmpRepo();
+  withRoot(repo, () => {
+    const change = 'demo';
+    const state = stateApi.newState(change, 'mock');
+    let av = 1;
+    // B 是「写盘开发节点」：每次重跑产生一次真实 commit → 新 HEAD；getHead 才能观测到差异。
+    // 落地校验不信任节点自报 done，commitSha 必须落到真实 git 历史才能被 validateLandings 认可。
+    let bRuns = 0;
+    const driver = makeDriver({
+      A: () => ({ ok: true, structured: { v: av++ } }),
+      B: () => {
+        bRuns++;
+        fs.writeFileSync(path.join(repo, 'b.txt'), `run-${bRuns}`);
+        execSync('git add b.txt && git commit -qm "b run"', { cwd: repo });
+        return { ok: true, structured: { v: 100 } };
+      },
+    });
+    const getHead = () => execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim();
+    const defs = [node('A', []), node('B', ['A'])];
+    const r1 = core.runPipeline({ change, state, defsFn: () => defs, driver, getHead });
+    assert.equal(r1.status, 'success');
+    const bShaBefore = state.nodes.B.commitSha;
+
+    // A 的提交被重写 → 落地校验标记 A 失败；B 依赖 A，属「被污染」应标记 dirty
+    state.nodes.A.commitSha = '0000000000000000000000000000000000000000';
+    stateApi.validateLandings(state);
+    assert.equal(state.nodes.A.status, 'failed');
+
+    // 续跑：A 重跑（结果变化 v1→v2），B 的缓存应失效并强制重跑（B 真实重跑 → 新 commit → 新 commitSha）
+    driver.calls.length = 0;
+    core.runPipeline({ change, state, defsFn: () => defs, driver, getHead });
+    assert.ok(driver.calls.includes('B'), '依赖被重跑节点的 B 应被标记 dirty 并强制真实重跑（spec「失败节点缓存失效」）');
+    assert.notEqual(state.nodes.B.commitSha, bShaBefore, 'B 重跑后 commitSha 应更新');
+    assert.equal(bRuns, 2, 'B 在污染后必须真实重跑（第二次执行）');
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
 // 从调度结果提取结果的辅助（core 把结果放进传入的 results 对象）
 function results(res) {
   return res.results || {};

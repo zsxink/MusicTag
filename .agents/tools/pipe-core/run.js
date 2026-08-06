@@ -99,7 +99,7 @@ function wrapDriver(driverName, driver, baseCtx) {
   };
 }
 
-function main() {
+async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.cwd) {
     try { process.chdir(opts.cwd); } catch (e) { console.error(`无法进入目录 ${opts.cwd}: ${e.message}`); process.exit(2); }
@@ -124,7 +124,7 @@ function main() {
       console.error('--epic 需要 --driver claude|codex（环境无法自动判断）');
       process.exit(2);
     }
-    process.exit(epicRunner.run(opts.epic, driverName));
+    process.exit(await epicRunner.run(opts.epic, driverName));
   }
 
   if (!opts.change) { printUsage(); process.exit(2); }
@@ -153,7 +153,13 @@ function main() {
     state = stateApi.newState(opts.change, driverName);
   }
 
-  const driver = wrapDriver(driverName, DRIVERS[driverName], { cwd: root, model: process.env.PIPE_MODEL || undefined });
+  // 测试/CI 可注入 fake driver 二进制（未设置时回退 claude/codex 本体，行为不变）
+  const driver = wrapDriver(driverName, DRIVERS[driverName], {
+    cwd: root,
+    model: process.env.PIPE_MODEL || undefined,
+    claudeBin: process.env.PIPE_CLAUDE_BIN,
+    codexBin: process.env.PIPE_CODEX_BIN,
+  });
 
   const result = runPipeline({
     change: opts.change,
