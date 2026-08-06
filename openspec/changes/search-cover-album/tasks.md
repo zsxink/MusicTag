@@ -1,3 +1,5 @@
+> **变更域：both（跨前后端）**。串行顺序：组 1–3（Rust）→ 组 4（前端）→ 组 5–6（版本 + 契约文档）→ 组 7（验证归档）。不建 worktree，禁止并写。每组的测试改动与本组实现同 commit（先红后绿）。
+
 ## 1. 契约与 trait 扩展（Rust 后端）
 
 - [ ] 1.1 `src-tauri/src/service/searcher/mod.rs`：`MusicSource::search` trait 增加 `album: &str` 参数（`search` 签名 `(client, title, artist, album)`）；先改 `tests/searcher_mod_tests.rs` 中 `FakeSource` 的 `search` 实现适配新签名（红），再改 trait。
@@ -7,9 +9,9 @@
 
 ## 2. 各源查询构造透传 album
 
-- [ ] 2.1 `netease.rs`：`search_payload(title, artist, album)`——`params.s` 用 `join_query_terms`；`search` 不再忽略 artist；先改 `tests/searcher_netease_tests.rs` 断言（红）再实现。
-- [ ] 2.2 `qqmusic.rs`：`w` 参数用 `join_query_terms(title, artist, album)`；先改测试断言（红）再实现。
-- [ ] 2.3 `kugou.rs`：`search_params` 的 `keyword` 用 `join_query_terms(title, artist, album)`；先改测试断言（红）再实现。
+- [ ] 2.1 `netease.rs`：`search()` 内 `let kw = join_query_terms(title, artist, album)` 再 `crypto::linuxapi(&search_payload(&kw))`——`params.s = kw`（`search_payload` 签名保持 `keyword: &str` 不变）；`search` 不再忽略 artist；先改 `tests/searcher_netease_tests.rs` 断言（红：`search_payload("晴天 周杰伦 叶惠美")` → `params.s`）再实现。
+- [ ] 2.2 `qqmusic.rs`：`search()` 内 `w` 参数 = `join_query_terms(title, artist, album)`（params 数组内直接传或先算 `kw`）；先改测试断言（红：w 为拼接串）再实现。
+- [ ] 2.3 `kugou.rs`：`search()` 内 `search_params(&join_query_terms(title, artist, album))`（`search_params` 签名保持 `keyword: &str` 不变）；先改测试断言（红：keyword 为拼接串）再实现。
 - [ ] 2.4 `lrclib.rs`：`track_name`/`artist_name` 外追加 `album_name`（album 空省略该参数）；先改测试断言（红）再实现。
 - [ ] 2.5 `itunes.rs`：`term` 用 `join_query_terms(title, artist, album)`；先改测试断言（红）再实现。
 
@@ -26,15 +28,15 @@
 
 ## 5. 版本号同步
 
-- [ ] 5.1 `package.json` / `package-lock.json`（顶层 + `packages[""]`）/ `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` 四处 version `0.1.0` → `0.1.1`。
-- [ ] 5.2 核对 `Cargo.lock` root package version（如随 Cargo.toml 变化需同步）。
+- [x] 5.1 `package.json` / `package-lock.json`（顶层 + `packages[""]`）/ `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` 四处 version `0.1.0` → `0.1.1`。
+- [x] 5.2 核对 `Cargo.lock` root package version（如随 Cargo.toml 变化需同步）。
 
 ## 6. 契约文档与守卫同步
 
-- [ ] 6.1 `docs/design/design.md` §10.3：`search_song(title, artist, album)`、`search_source(source, title, artist, album)` 两行签名更新。
-- [ ] 6.2 `docs/V1-PRD.md`：FR-8.5/8.6 相关搜索描述同步「综合 title/artist/album」。
-- [ ] 6.3 `openspec/specs/search-sources/spec.md` 主规格：按 delta 合入（五源查询构造、打分规则、签名带 album）。
-- [ ] 6.4 `openspec/config.yaml` 契约清单 / `src/styles/command-contract.test.ts` 扫描字样同步 `search_song(title, artist, album)`（否则守卫失败）。
+- [x] 6.1 `docs/design/design.md` §10.3：`search_song(title, artist, album)`、`search_source(source, title, artist, album)` 两行签名更新。
+- [x] 6.2 `docs/V1-PRD.md`：FR-8.5/8.6 相关搜索描述同步「综合 title/artist/album」。
+- [ ] 6.3 `openspec/specs/search-sources/spec.md` 主规格：按 delta 合入（五源查询构造、打分规则、签名带 album）——由归档步骤 `/opsx:archive` 自动处理，不手动改主规格。
+- [x] 6.4 `openspec/config.yaml` 契约清单同步（command 名不变，仅描述/清单行跟随签名）；`command-contract.test.ts` **不需要改**——守卫只比 command 名与无参签名，`search_song`/`search_source` 加参数不触发红（design.md D4「守卫机制精度」）。
 
 ## 7. 验证与归档
 
