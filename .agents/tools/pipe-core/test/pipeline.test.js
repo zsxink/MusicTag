@@ -79,6 +79,15 @@ test('pipeline: verify prompt 对 infra 域跳过 cargo/npm，执行短路基线
   assert.ok(!p.includes('cargo check'));
 });
 
+test('pipeline: infra 域 verify 测试命令必须 glob 形式（目录形式在 Node≥22 必 exit 1，独立复核 major）', () => {
+  const defs = pipeline.buildPipeline(stateWithDomain('infra'));
+  const verify = defs.find((d) => d.id === 'verify');
+  const p = verify.prompt({});
+  // 必须是 glob test/*.test.js，不是目录 .agents/tools/pipe-core/（该目录形式实测 exit 1）
+  assert.match(p, /node --test \.agents\/tools\/pipe-core\/test\/\*\.test\.js/);
+  assert.doesNotMatch(p, /node --test \.agents\/tools\/pipe-core\/(?!test)/);
+});
+
 test('pipeline: verify prompt 对 code 域跑统一基线 + 复盘回归', () => {
   const defs = pipeline.buildPipeline(stateWithDomain('both'));
   const verify = defs.find((d) => d.id === 'verify');

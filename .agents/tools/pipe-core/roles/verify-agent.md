@@ -13,7 +13,7 @@ openspec validate <name> --strict --no-interactive   # 变更的 specs/design/ta
 
 docs/spec/infra 域（自适应编排，跳过业务编译）：
 ```sh
-node --test <核心单测目录>        # 编排核心单测（infra 域）
+node --test <核心单测目录>/test/*.test.js   # 编排核心单测（infra 域；必须 glob 形式——Node ≥22 对目录形式返回 exit 1）
 node .agents/tools/pipe-core/run.js --self-check    # 角色/节点定义/脚本静态自检（infra 域）
 openspec validate <name> --strict --no-interactive
 ```

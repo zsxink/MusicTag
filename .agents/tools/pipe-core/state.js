@@ -87,7 +87,8 @@ function currentHead() {
 }
 
 // 落地校验：commit 存在（cat-file -e）且是当前 HEAD 祖先（工作仍在历史里）。
-// 以仓库根为 cwd 执行（worktree 场景同样针对主仓库对象库判定）。
+// 判定根（cwd）可传——worktree 场景须传 worktree 路径：commit 对象在主仓库对象库（共享），
+// 但 HEAD 是 worktree 分支 HEAD，merge-base 判定必须针对该分支（独立复核 M3/M1）。
 function commitLanded(sha, root = repoRoot()) {
   if (!sha) return false;
   try {
@@ -100,10 +101,11 @@ function commitLanded(sha, root = repoRoot()) {
 }
 
 // 续跑：对每个 succeeded 节点校验落地；未落地 → 标记 failed（待重跑）。
-function validateLandings(stateObj) {
+// root 为判定根（默认 repoRoot；worktree 场景传 worktree 路径）。
+function validateLandings(stateObj, root) {
   const dirty = [];
   for (const [id, node] of Object.entries(stateObj.nodes)) {
-    if (node.status === 'succeeded' && !commitLanded(node.commitSha)) {
+    if (node.status === 'succeeded' && !commitLanded(node.commitSha, root)) {
       dirty.push(id);
       node.status = 'failed';
       node.error = node.error || '落地校验失败：记录的 commit 不存在或已被重写';

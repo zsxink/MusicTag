@@ -65,7 +65,7 @@ npm run build           # 前端构建
 npm run test            # 前端测试
 cargo check --manifest-path src-tauri/Cargo.toml   # 后端类型检查
 cargo test --manifest-path src-tauri/Cargo.toml    # 后端测试
-node --test .agents/tools/pipe-core/test/          # 编排核心单测
+node --test .agents/tools/pipe-core/test/*.test.js   # 编排核心单测（glob，目录形式在 Node ≥22 会失败）
 npx openspec validate <change> --strict --no-interactive
 ```
 

@@ -28,11 +28,12 @@ function runPipeline(opts) {
     maxConcurrency = 3,
     sleep = sleepSync,
     getHead = stateApi.currentHead,
+    commitRoot, // 落地校验判定根（worktree 场景由 run.js 传 worktree 路径；缺省 repoRoot）
     results = {},
   } = opts;
 
   const log = (msg) => { if (logger) logger(msg); };
-  const runCtx = { change, ctx, state, driver, getHead, log, sleep, results };
+  const runCtx = { change, ctx, state, driver, getHead, commitRoot, log, sleep, results };
 
   let guard = 0;
   const maxIterations = 1000;
@@ -48,6 +49,7 @@ function runPipeline(opts) {
     // 失败节点级联失效（DVC，spec「失败节点缓存失效」）：状态加载/落地校验后标记 failed 的节点，
     // 其依赖它的已通过节点也被标记 dirty → 续跑强制真实重跑，不复用被污染的旧结果；
     // 未受污染的已通过节点保持 succeeded 直接复用。同步调度（runNode 不让出循环）下无 running 窗口。
+    // 落地校验在 resume 路径由 run.js 调用 validateLandings（commitRoot 判定根）完成；此处透传供单测。
     for (const d of defs) {
       const s = state.nodes[d.id];
       if (s && s.status === 'failed') stateApi.markDirty(state, defs, d.id);

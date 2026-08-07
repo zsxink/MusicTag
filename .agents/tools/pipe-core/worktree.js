@@ -30,8 +30,10 @@ function add({ worktreePath, branch, main }) {
 }
 
 // 崩溃恢复：确保 worktree 在目标分支上（已存在则 checkout）。
+// 独立复核 major：此前吞掉全部 checkout 错误——若 worktree 停在错误分支（如孤儿提交残留），
+// 后续 rebase/开发会在错误分支上进行。改为失败即抛错，由 runItemAsync 捕获置 failed 交主会话。
 function ensureBranch(worktreePath, branch) {
-  try { git(`checkout "${branch}"`, { cwd: worktreePath }); } catch (_) { /* 分支缺失/已检出则跳过 */ }
+  git(`checkout "${branch}"`, { cwd: worktreePath });
 }
 
 // 前置合并后 refresh（D4）：predecessors 已合回 main → worktree 先 rebase 刷新基准，

@@ -227,7 +227,7 @@ function buildPipeline(state) {
       prompt: (ctx) => {
         if (NON_CODE_DOMAINS.includes(domain)) {
           return `你是验证(CI)角色。变更「${change}」域为 ${domain}，按自适应编排跳过业务编译（P4）：\n` +
-            `按序短路运行：node --test .agents/tools/pipe-core/ → node .agents/tools/pipe-core/run.js --self-check → ` +
+            `按序短路运行：node --test .agents/tools/pipe-core/test/*.test.js → node .agents/tools/pipe-core/run.js --self-check → ` +
             `openspec validate ${change} --strict --no-interactive。任一 fail 即整体 verify_failed，只验证不修复，失败输出如实上报。\n` +
             `全部通过才 pass=true，并逐项返回 steps（step + status + detail）。`;
         }

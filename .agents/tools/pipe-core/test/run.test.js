@@ -12,6 +12,7 @@ const { spawnSync, execSync } = require('node:child_process');
 const RUNJS = path.join(__dirname, '..', 'run.js');
 const FAKE_CLAUDE = path.join(__dirname, 'fixtures', 'fake-pipe-claude.js');
 const FAKE_CODEX = path.join(__dirname, 'fixtures', 'fake-pipe-codex.js');
+const RECORD_CWD = path.join(__dirname, 'fixtures', 'fake-pipe-record-cwd.js');
 
 function tmpRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-cli-'));
@@ -146,5 +147,38 @@ test('run.js: 状态文件已存在但未 --resume → 退出码 2 阻止误重�
   const res = runCli(['demo'], env, repo);
   assert.equal(res.status, 2);
   assert.match(res.stderr, /状态文件已存在/);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('run.js: CLAUDECODE="0" 不误判为 claude（复核2 minor）', () => {
+  const repo = tmpRepo();
+  const res = runCli(['demo'], { PIPE_CORE_REPO_ROOT: repo, CLAUDECODE: '0', AI_AGENT: '', PIPE_CLAUDE_BIN: FAKE_CLAUDE }, repo);
+  assert.equal(res.status, 2, 'CLAUDECODE="0" 不应被当作 claude 标记，环境无法判断 → exit 2');
+  assert.match(res.stderr, /无法自动判断 driver/);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('run.js: B1——driver cwd 取 --cwd worktree 而非 repoRoot（P3 worktree 隔离）', () => {
+  const repo = tmpRepo();
+  const worktreeDir = path.join(repo, 'wt-sub');
+  fs.mkdirSync(worktreeDir);
+  const cwdFile = path.join(repo, 'driver-cwd.txt');
+  const env = {
+    PIPE_CORE_REPO_ROOT: repo, // repoRoot（主仓库）
+    CLAUDECODE: '1',
+    AI_AGENT: '',
+    PIPE_CLAUDE_BIN: RECORD_CWD,
+    FAKE_RECORD_CWD: cwdFile,
+  };
+  const res = runCli(['demo', '--driver', 'claude', '--cwd', worktreeDir], env, repo);
+  assert.equal(res.status, 0, `stdout=${res.stdout} stderr=${res.stderr}`);
+  const lines = fs.readFileSync(cwdFile, 'utf8').trim().split('\n').filter(Boolean);
+  assert.ok(lines.length > 0, 'fake driver 应记录 cwd');
+  // macOS /var→/private/var symlink：driver 子进程 process.cwd() 返回真实路径，两侧都 realpath 归一化再比
+  const want = fs.realpathSync(worktreeDir);
+  for (const l of lines) {
+    const got = fs.realpathSync(l);
+    assert.equal(got, want, `driver 实际工作目录应为 --cwd 指定的 worktree（${worktreeDir}），而非 repoRoot（${repo}）——实际 ${l}`);
+  }
   fs.rmSync(repo, { recursive: true, force: true });
 });

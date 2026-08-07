@@ -166,6 +166,115 @@ test('epic: 仓库根判定——PIPE_CORE_REPO_ROOT 优先（worktree 场景状
   fs.rmSync(main, { recursive: true, force: true });
 });
 
+// ---------- 独立复核修复专项测试 ----------
+
+test('epic: dependsOn 引用未知子项名 → run 显式报错返回非零（复核2 minor）', async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-epic-dep-'));
+  const prev = process.env.PIPE_CORE_REPO_ROOT;
+  process.env.PIPE_CORE_REPO_ROOT = repo;
+  try {
+    const bad = { name: 'e', items: [{ name: 'A', dependsOn: ['GHOST'], status: 'pending' }] };
+    fs.mkdirSync(path.join(repo, 'openspec', 'epics', 'e'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'openspec', 'epics', 'e', 'epic.json'), JSON.stringify(bad));
+    const code = await epic.run('e', 'mock');
+    assert.equal(code, 1);
+  } finally {
+    if (prev === undefined) delete process.env.PIPE_CORE_REPO_ROOT;
+    else process.env.PIPE_CORE_REPO_ROOT = prev;
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('epic: pid 锁——孤儿存活拒绝双跑；孤儿已死清理锁可续跑（复核2 major）', () => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-epic-lock-'));
+  try {
+    // 无锁 → 可续跑
+    assert.equal(epic.acquirePidLock(wt, { name: 'A' }), null);
+    // 写锁（pid 为本进程，必然存活）
+    epic.writePidLock(wt, 'A', process.pid);
+    assert.ok(fs.existsSync(epic.lockFile(wt)), '锁文件应存在');
+    const orphan = epic.acquirePidLock(wt, { name: 'A' });
+    assert.ok(orphan, '存活 pid 的锁 → 判定为孤儿，拒绝双跑');
+    assert.equal(orphan.pid, process.pid);
+    // 孤儿已死：模拟残留死 pid 锁 → acquire 应清理并返回 null
+    fs.writeFileSync(epic.lockFile(wt), JSON.stringify({ pid: 999999, item: 'A', startedAt: 'x' }));
+    assert.equal(epic.acquirePidLock(wt, { name: 'A' }), null, '死 pid 锁应被清理，可续跑');
+    assert.ok(!fs.existsSync(epic.lockFile(wt)), '死锁应被删除');
+  } finally {
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('epic: readyItems 排除 suspended（挂起子项不自动重试，复核2/3）', () => {
+  withRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-epic-susp-')), () => {
+    const st = { schemaVersion: epic.EPIC_SCHEMA_VERSION, items: { A: { status: 'suspended' }, B: { status: 'done' } } };
+    const def = { name: 'e', items: [{ name: 'A', dependsOn: [], status: 'pending' }, { name: 'B', dependsOn: [], status: 'pending' }] };
+    const ready = epic.readyItems(def, st).map((i) => i.name);
+    assert.deepEqual(ready, [], 'suspended 项不进就绪集');
+  });
+});
+
+test('epic: 子项挂起（exit 3）→ epic.run 返回 3，不折叠为 failed（复核2 major）', async () => {
+  // fake driver 通过注入 PIPE_CLAUDE_BIN 让子项在 tester 语义失败 → run.js 退出 3。
+  // 用真实 run.js + fake driver + 真实 git worktree，断言 epic.run 返回 3 且子项状态 suspended。
+  const main = tmpMainRepo();
+  const def = { name: 'susp', items: [{ name: 'S', dependsOn: [], status: 'pending', issue: 1 }] };
+  fs.mkdirSync(path.join(main, 'openspec', 'epics', 'susp'), { recursive: true });
+  fs.writeFileSync(path.join(main, 'openspec', 'epics', 'susp', 'epic.json'), JSON.stringify(def));
+  execSync('git add openspec && git commit -qm "add epic.json"', { cwd: main });
+  process.env.PIPE_CORE_REPO_ROOT = main;
+  process.env.PIPE_CLAUDE_BIN = FAKE_CLAUDE;
+  process.env.FAKE_TESTER_FAIL = '1';
+  process.env.CLAUDECODE = '1';
+  delete process.env.AI_AGENT;
+  try {
+    const code = await epic.run('susp', 'claude');
+    assert.equal(code, 3, '子项挂起 → epic 应返回 3（透传 suspended）');
+    const st = epic.loadEpicState('susp');
+    assert.equal(st.items.S.status, 'suspended', '子项状态应为 suspended 而非 failed');
+  } finally {
+    delete process.env.PIPE_CORE_REPO_ROOT;
+    delete process.env.PIPE_CLAUDE_BIN;
+    delete process.env.FAKE_TESTER_FAIL;
+    delete process.env.CLAUDECODE;
+    execSync('git worktree prune', { cwd: main, stdio: 'ignore' });
+    fs.rmSync(path.join(main, '.worktrees'), { recursive: true, force: true });
+    fs.rmSync(main, { recursive: true, force: true });
+  }
+});
+
+test('epic: B2 自动 --resume——子项已存在 state.json 时续跑自动追加（不再被 exit 2 挡死）', async () => {
+  // 前置：创建 epic 定义；子项的 .agents/runs/<item>/state.json 已存在（模拟中途崩溃落盘）。
+  // 若 runItemAsync 不自动 --resume，子进程 run.js 会 exit 2 → 子项 failed。
+  // 断言最终子项 done（说明自动 --resume 生效，从既有状态续跑而非被挡死）。
+  const main = tmpMainRepo();
+  const def = { name: 'resume2', items: [{ name: 'R', dependsOn: [], status: 'pending', issue: 1 }] };
+  fs.mkdirSync(path.join(main, 'openspec', 'epics', 'resume2'), { recursive: true });
+  fs.writeFileSync(path.join(main, 'openspec', 'epics', 'resume2', 'epic.json'), JSON.stringify(def));
+  execSync('git add openspec && git commit -qm "add epic.json"', { cwd: main });
+  // 预置子项 state.json：nodes 为空 → --resume 加载后无已通过节点，全量重跑（fake driver 全绿）
+  fs.mkdirSync(path.join(main, '.agents', 'runs', 'R'), { recursive: true });
+  fs.writeFileSync(path.join(main, '.agents', 'runs', 'R', 'state.json'),
+    JSON.stringify({ schemaVersion: 1, change: 'R', driver: 'claude', startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), nodes: {} }));
+  process.env.PIPE_CORE_REPO_ROOT = main;
+  process.env.PIPE_CLAUDE_BIN = FAKE_CLAUDE;
+  process.env.CLAUDECODE = '1';
+  delete process.env.AI_AGENT;
+  try {
+    const code = await epic.run('resume2', 'claude');
+    assert.equal(code, 0, '预置 state.json 的子项应经自动 --resume 续跑成功而非 exit 2');
+    const st = epic.loadEpicState('resume2');
+    assert.equal(st.items.R.status, 'done');
+  } finally {
+    delete process.env.PIPE_CORE_REPO_ROOT;
+    delete process.env.PIPE_CLAUDE_BIN;
+    delete process.env.CLAUDECODE;
+    execSync('git worktree prune', { cwd: main, stdio: 'ignore' });
+    fs.rmSync(path.join(main, '.worktrees'), { recursive: true, force: true });
+    fs.rmSync(main, { recursive: true, force: true });
+  }
+});
+
 // ---------- P3 并行执行器端到端（真实 subprocess run.js + fake driver + 真实 git worktree） ----------
 
 const FAKE_CLAUDE = path.join(__dirname, 'fixtures', 'fake-pipe-claude.js');

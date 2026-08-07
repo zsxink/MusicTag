@@ -110,6 +110,37 @@ test('state: validateLandings 将 commit 不存在的 succeeded 节点标记失�
   }
 });
 
+test('state: commitLanded 判定根可传——worktree 分支 HEAD 判定（独立复核 M3/M1）', () => {
+  const main = tmpRepo();
+  const prevRoot = process.env.PIPE_CORE_REPO_ROOT;
+  process.env.PIPE_CORE_REPO_ROOT = main;
+  try {
+    // worktree 分支 base = main HEAD
+    const base = execSync('git rev-parse HEAD', { cwd: main, encoding: 'utf8' }).trim();
+    // 在 main 上新建 commit：它存在于对象库，但不是任何 worktree 分支的祖先前提要再造分支。
+    // 用真实 worktree 验证「判定根是 worktree 分支 HEAD 而非 main HEAD」：
+    execSync(`git worktree add ${main}/wt -b feature-x`, { cwd: main, stdio: 'ignore' });
+    const wtHead = execSync('git rev-parse HEAD', { cwd: `${main}/wt`, encoding: 'utf8' }).trim();
+    // 主仓库对象库共享，base/wtHead 都在对象库
+    assert.equal(state.commitLanded(base, `${main}/wt`), true, 'base 是 wt 分支祖先');
+    assert.equal(state.commitLanded(wtHead, `${main}/wt`), true, 'wtHead 是 wt 自身 HEAD');
+
+    // main 上再提交一个新 commit（不在 wt 分支历史里）→ 以 wt 为判定根应为 false
+    fs.writeFileSync(path.join(main, 'b.txt'), 'bye');
+    execSync('git add . && git commit -qm "main only"', { cwd: main });
+    const mainOnly = execSync('git rev-parse HEAD', { cwd: main, encoding: 'utf8' }).trim();
+    assert.equal(state.commitLanded(mainOnly, `${main}/wt`), false, 'main-only commit 不是 wt 分支祖先 → 校验应失败');
+    assert.equal(state.commitLanded(mainOnly, main), true, '但以 main 为判定根是真祖先');
+
+    execSync('git worktree remove --force wt', { cwd: main, stdio: 'ignore' });
+    execSync('git branch -D feature-x', { cwd: main, stdio: 'ignore' });
+  } finally {
+    if (prevRoot === undefined) delete process.env.PIPE_CORE_REPO_ROOT;
+    else process.env.PIPE_CORE_REPO_ROOT = prevRoot;
+    fs.rmSync(main, { recursive: true, force: true });
+  }
+});
+
 test('state: markDirty 标记自身与依赖它的节点（dependents）', () => {
   const defs = [
     { id: 'integrate', role: 'leader', dependsOn: ['cr'] },

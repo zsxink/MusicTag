@@ -28,7 +28,9 @@ try {
 
 // D5 环境自动感知。
 function detectDriver() {
-  if (process.env.CLAUDECODE) return 'claude';
+  // CLAUDECODE 按真值判断（'1'/'true' 等）；'0'/空串不误判为 claude（复核2 minor）
+  const cc = String(process.env.CLAUDECODE || '').toLowerCase();
+  if (cc === '1' || cc === 'true') return 'claude';
   const agent = process.env.AI_AGENT || '';
   if (/claude/i.test(agent)) return 'claude';
   if (/codex/i.test(agent)) return 'codex';
@@ -143,7 +145,8 @@ async function main() {
   if (opts.resume) {
     state = stateApi.loadState(opts.change);
     if (!state) { console.error(`无状态文件可续跑：${stateFile}`); process.exit(2); }
-    const dirty = stateApi.validateLandings(state);
+    // 判定根取实际工作目录（epic worktree 子进程场景下为 worktree 分支 HEAD）
+    const dirty = stateApi.validateLandings(state, opts.cwd || root);
     if (dirty.length) console.error(`[resume] 落地校验 ${dirty.length} 个 succeeded 节点失败，标记重跑：${dirty.join(', ')}`);
   } else {
     if (fs.existsSync(stateFile)) {
@@ -153,9 +156,12 @@ async function main() {
     state = stateApi.newState(opts.change, driverName);
   }
 
-  // 测试/CI 可注入 fake driver 二进制（未设置时回退 claude/codex 本体，行为不变）
+  // 测试/CI 可注入 fake driver 二进制（未设置时回退 claude/codex 本体，行为不变）。
+  // B1（独立复核）：driver 的 cwd 必须取实际工作目录（epic worktree 场景下为 --cwd 注入的 worktree），
+  // 而非 repoRoot——否则 claude/codex agent 会在主仓库工作区/分支上干活，P3 worktree 隔离被架空。
+  const workDir = opts.cwd || root;
   const driver = wrapDriver(driverName, DRIVERS[driverName], {
-    cwd: root,
+    cwd: workDir,
     model: process.env.PIPE_MODEL || undefined,
     claudeBin: process.env.PIPE_CLAUDE_BIN,
     codexBin: process.env.PIPE_CODEX_BIN,
@@ -167,7 +173,10 @@ async function main() {
     defsFn: (s) => pipeline.buildPipeline(s),
     driver,
     logger: console.error,
-    getHead: () => repoHead(root),
+    // 落地校验根：worktree 场景必须取 worktree 分支 HEAD（getHead 与 commitLanded 同一判定根），
+    // 否则 commitSha 记主仓库 HEAD、commitLanded 恒真（独立复核 M3/M1）。
+    getHead: () => repoHead(workDir),
+    commitRoot: workDir,
     maxConcurrency: 1, // 单变更 DAG 串行（epic 并行在 worktree 层）
   });
 
