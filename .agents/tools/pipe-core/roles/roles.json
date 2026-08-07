@@ -1,0 +1,44 @@
+{
+  "leader": {
+    "name": "Leader（编排者）",
+    "file": "leader.md",
+    "sandbox": "workspace-write",
+    "allowedTools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "LSP"]
+  },
+  "architect": {
+    "name": "Architect（架构设计师）",
+    "file": "architect.md",
+    "sandbox": "workspace-write",
+    "allowedTools": ["Bash", "Read", "Glob", "Grep", "WebSearch"]
+  },
+  "rust-backend": {
+    "name": "Rust-Dev（Rust 后端专家）",
+    "file": "rust-backend.md",
+    "sandbox": "workspace-write",
+    "allowedTools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "LSP"]
+  },
+  "vue-frontend": {
+    "name": "Vue-Dev（Vue 前端专家）",
+    "file": "vue-frontend.md",
+    "sandbox": "workspace-write",
+    "allowedTools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "LSP"]
+  },
+  "cr-agent": {
+    "name": "CR（代码审查者，只读）",
+    "file": "cr-agent.md",
+    "sandbox": "read-only",
+    "allowedTools": ["Bash", "Read", "Glob", "Grep"]
+  },
+  "verify-agent": {
+    "name": "Verify/CI（验证角色，只验证不修复）",
+    "file": "verify-agent.md",
+    "sandbox": "workspace-write",
+    "allowedTools": ["Bash", "Read", "Glob", "Grep"]
+  },
+  "tester": {
+    "name": "Tester（测试角色）",
+    "file": "tester.md",
+    "sandbox": "workspace-write",
+    "allowedTools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
+  }
+}

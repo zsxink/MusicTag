@@ -38,8 +38,8 @@ tags: [workflow, epic, split, pipeline]
 读取来源规格，产出子变更清单（每项）：
 - kebab-case 名（= 未来的 openspec change 名 = 分支名）
 - 一句话范围
-- 变更域：backend / frontend / both
-- dependsOn：前置子变更名数组（用于顺序校验）
+- 变更域：backend / frontend / both / docs / spec / infra（docs/spec/infra 为纯文档/流程变更，不触发业务编译门禁）
+- dependsOn：前置子变更名数组（用于就绪集判定与合并顺序）
 - 切片索引：从来源规格（V1-PRD 章节 / Issue / 描述）锚定内容来源
 按依赖序排列（依赖者排后）。粒度 = 可独立 CR + 可独立验收 + 可独立合并的最小单元。
 ```
@@ -77,6 +77,7 @@ tags: [workflow, epic, split, pipeline]
   "sourceRevision": "<批准时 main 的 commit>"
 }
 ```
+> `cursor` 字段已随并行模型废弃（保留兼容），推进判定以 `.agents/runs/<epic>/epic-state.json` 就绪集/批次为准。
 - 写 `epic.md`（人类读）：总 PRD 摘要、子变更说明、依赖、确认记录、artifact 校验结果；`sourceRevision` 必须记录批准时 `git rev-parse HEAD` 的 commit。
 - 在 main 上提交初始化状态；用户批准后，`prdConfirmed = true`，`status = ready`。此后 `/pipe:epic` 可串行实施，不再逐个子变更确认。
 

@@ -1,6 +1,6 @@
 ---
 name: "Pipe: Epic Status"
-description: 查看 Epic 进度——读 epic.json 展示每个子变更的状态、cursor、错误
+description: 查看 Epic 进度——读 epic.json 与 epic-state.json 展示每个子变更的状态、就绪集、错误
 category: Workflow
 tags: [workflow, epic, status]
 ---
@@ -9,7 +9,7 @@ tags: [workflow, epic, status]
 
 **触发**：`/pipe:epic:status <epic名>`（如 `v1`）。
 
-**目标**：读取 `openspec/epics/<epic>/epic.json`，展示 Epic 当前进度与断点。
+**目标**：读取 `openspec/epics/<epic>/epic.json` 与 `.agents/runs/<epic>/epic-state.json`（并行运行态），展示 Epic 当前进度与断点。
 
 ## 展示内容
 
@@ -19,9 +19,10 @@ tags: [workflow, epic, status]
    |------|----|-----------|------|----------------------|---------|
    | v1-skeleton | both | — | ✅ done | abc123 | FR-1/FR-2 |
    | v1-tag-read | both | v1-skeleton | 🔄 running | — | FR-3 |
-   | v1-tag-save | both | v1-tag-read | ⏳ todo | — | FR-5 |
-3. **cursor**：下一个要执行的 index。
-4. **error**（若有）：最近失败/挂起的子变更与原因。
+   | v1-tag-save | both | v1-tag-read | ⏳ pending | — | FR-5 |
+   | v1-search-ui | frontend | … | ⏸ suspended | — | FR-8 |
+3. **并行运行态**（`epic-state.json`，版本控制外）：当前批次、worktree 路径、mergeOrder、各子项状态（pending/running/done/failed）。
+4. **error**（若有）：最近失败/挂起的子项与原因。
 5. **next 提示**：若 `prdConfirmed && status !== 'done'` → 建议 `/pipe:epic <epic>`；若 `prdConfirmed === false` → 建议先 `/pipe:init <epic>` 完成确认。
 
 ## 输出
