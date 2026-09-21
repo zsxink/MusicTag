@@ -1,0 +1,7 @@
+{
+  "name": "pipe-core",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "MusicTag 模型无关编排核心（纯 node，零运行时依赖）"
+}
