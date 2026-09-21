@@ -90,6 +90,8 @@ test('codex: response schema 为 object 递归补齐 additionalProperties=false'
   });
   assert.equal(normalized.additionalProperties, false);
   assert.equal(normalized.properties.nested.additionalProperties, false);
+  assert.deepEqual(normalized.required, ['nested']);
+  assert.deepEqual(normalized.properties.nested.required, ['ok']);
 });
 
 test('codex: runAgent 读 result 文件 + schema 二次校验', () => {

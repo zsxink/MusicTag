@@ -34,8 +34,12 @@ function codexSchema(schema) {
   if (out.anyOf) out.anyOf = out.anyOf.map(codexSchema);
   if (out.oneOf) out.oneOf = out.oneOf.map(codexSchema);
   if (out.allOf) out.allOf = out.allOf.map(codexSchema);
-  if (out.type === 'object' && !Object.prototype.hasOwnProperty.call(out, 'additionalProperties')) {
-    out.additionalProperties = false;
+  if (out.type === 'object') {
+    if (!Object.prototype.hasOwnProperty.call(out, 'additionalProperties')) out.additionalProperties = false;
+    if (out.properties && typeof out.properties === 'object') {
+      // Codex strict response_format 要求 properties 中的每个 key 都 required。
+      out.required = Object.keys(out.properties);
+    }
   }
   return out;
 }
