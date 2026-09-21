@@ -55,6 +55,12 @@ test('pipeline: docs/spec/infra 域 → leader 开发节点（自适应编排不
   }
 });
 
+test('pipeline: dev 节点必须拒绝 done=false 的未完成结果', () => {
+  const dev = pipeline.buildPipeline(stateWithDomain('infra')).find((d) => d.id === 'dev');
+  assert.equal(dev.resultOk({ done: true }), true);
+  assert.equal(dev.resultOk({ done: false }), false);
+});
+
 test('pipeline: architect 未判定前仅 preflight+architect 两个节点', () => {
   const defs = pipeline.buildPipeline({ change: 'demo', nodes: {} });
   assert.deepEqual(defs.map((d) => d.id).sort(), ['architect', 'preflight']);

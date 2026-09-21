@@ -14,7 +14,8 @@ const { validate } = require('../schema.js');
 function buildArgs(task, ctx = {}) {
   const args = ['exec', '--ephemeral', task.prompt, '--json'];
   if (ctx.cwd) args.push('--cd', ctx.cwd);
-  if (ctx.sandbox) args.push('--sandbox', ctx.sandbox);
+  const sandbox = ctx.codexSandbox || process.env.PIPE_CODEX_SANDBOX || ctx.sandbox;
+  if (sandbox) args.push('--sandbox', sandbox);
   if (task.schema && ctx.schemaFile) args.push('--output-schema', ctx.schemaFile);
   if (ctx.resultFile) args.push('-o', ctx.resultFile);
   if (ctx.model) args.push('--model', ctx.model);

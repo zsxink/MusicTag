@@ -130,7 +130,12 @@ function devSpec(change, domain) {
 }
 
 function buildDevDefs(change, domain) {
-  const base = { dependsOn: ['architect'], schema: DEV_SCHEMA, retry: { max: 1, intervalMs: 0 } };
+  const base = {
+    dependsOn: ['architect'],
+    schema: DEV_SCHEMA,
+    retry: { max: 1, intervalMs: 0 },
+    resultOk: (r) => r.done === true,
+  };
   if (domain === 'backend') {
     return [{ ...base, id: 'dev-rust', role: 'rust-backend', prompt: (ctx) => `你是 Rust 开发。${devSpec(change, domain)}\n只负责 src-tauri/ 下 Rust 侧任务。` }];
   }

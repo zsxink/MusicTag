@@ -83,6 +83,19 @@ test('codex: buildArgs 拼装完整（--json --cd --sandbox --output-schema -o -
   ]);
 });
 
+test('codex: 可通过 PIPE_CODEX_SANDBOX 显式提升本地写权限', () => {
+  const previous = process.env.PIPE_CODEX_SANDBOX;
+  process.env.PIPE_CODEX_SANDBOX = 'danger-full-access';
+  try {
+    const args = codex.buildArgs({ prompt: 'P' }, { cwd: '/repo', sandbox: 'workspace-write' });
+    assert.deepEqual(args.slice(0, 6), ['exec', '--ephemeral', 'P', '--json', '--cd', '/repo',]);
+    assert.ok(args.includes('danger-full-access'));
+  } finally {
+    if (previous === undefined) delete process.env.PIPE_CODEX_SANDBOX;
+    else process.env.PIPE_CODEX_SANDBOX = previous;
+  }
+});
+
 test('codex: response schema 为 object 递归补齐 additionalProperties=false', () => {
   const normalized = codex.codexSchema({
     type: 'object',
