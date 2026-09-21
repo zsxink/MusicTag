@@ -218,6 +218,7 @@ function buildPipeline(state) {
         `你是 CR（只读，不改代码）。这是变更「${change}」的恢复性 conformance sign-off。不要调用任何工具，也不要重新扫描仓库；根据已有证据判断并立即返回最终结构化 JSON。\n` +
         `已有证据：Tester 已完成 191 个 pipe-core/workflow-core 测试且全部通过；self-check 通过；openspec validate ${change} --strict 通过；前轮 CR 发现的问题已逐项修复并提交，包含 async driver/Leader 决断、挂起报告、只读审计、OpenCode fail-closed、epic resume、verify 范围与确定性集成 wrapper。\n` +
         `若这些证据足以确认无 blocker/major，返回 {pass:true,blockers:[],majors:[],minors:[]}；若无法确认则如实返回 findings。必须立即输出 JSON，不要解释文字。\n` +
+        `复盘专项三检仍适用并必须纳入判定：跨模块状态语义、竞态与串扰、网络与离线判定。\n` +
         `所有 blocker/major 必须给全 file + issue + specReference + suggestion 四项；pass=true 仅当无 blocker 且无 major。`,
     });
     defs.push({
