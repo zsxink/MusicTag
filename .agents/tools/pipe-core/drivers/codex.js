@@ -12,7 +12,7 @@ const { validate } = require('../schema.js');
 // 纯函数：拼装 codex exec CLI 参数（供单测断言，不 spawn）。
 // schemaFile/resultFile 由 runAgent 在临时目录生成。
 function buildArgs(task, ctx = {}) {
-  const args = ['exec', task.prompt, '--json'];
+  const args = ['exec', '--ephemeral', task.prompt, '--json'];
   if (ctx.cwd) args.push('--cd', ctx.cwd);
   if (ctx.sandbox) args.push('--sandbox', ctx.sandbox);
   if (task.schema && ctx.schemaFile) args.push('--output-schema', ctx.schemaFile);

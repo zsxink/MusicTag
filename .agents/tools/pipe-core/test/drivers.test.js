@@ -78,7 +78,7 @@ test('codex: buildArgs 拼装完整（--json --cd --sandbox --output-schema -o -
     cwd: '/repo', sandbox: 'workspace-write', schemaFile: '/tmp/s.json', resultFile: '/tmp/r.json', model: 'gpt-5',
   });
   assert.deepEqual(args, [
-    'exec', 'P', '--json', '--cd', '/repo', '--sandbox', 'workspace-write',
+    'exec', '--ephemeral', 'P', '--json', '--cd', '/repo', '--sandbox', 'workspace-write',
     '--output-schema', '/tmp/s.json', '-o', '/tmp/r.json', '--model', 'gpt-5',
   ]);
 });
