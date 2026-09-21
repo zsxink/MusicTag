@@ -11,6 +11,8 @@ const FAKE_CODEX = path.join(__dirname, 'fixtures', 'fake-codex.js');
 const SCHEMA = { type: 'object', properties: { ready: { type: 'boolean' } }, required: ['ready'] };
 
 test('claude: buildArgs 拼装完整（--json-schema + --append-system-prompt + 工具/模型）', () => {
+  // 子进程工作目录由 spawnSync 的 `cwd` 选项控制（B1 复核：driver cwd 指向 worktree），
+  // claude CLI 无 --cwd 参数；拼进去会被 claude 拒为 unknown option（P1-P5 深埋 bug）。
   const args = claude.buildArgs({ prompt: 'P', schema: SCHEMA }, {
     roleFile: '/r/roles/leader.md', cwd: '/repo', permissionMode: 'acceptEdits',
     allowedTools: ['Bash', 'Read'], model: 'sonnet',
@@ -19,11 +21,11 @@ test('claude: buildArgs 拼装完整（--json-schema + --append-system-prompt + 
     '-p', 'P', '--output-format', 'json',
     '--json-schema', JSON.stringify(SCHEMA),
     '--append-system-prompt', '/r/roles/leader.md',
-    '--cwd', '/repo',
     '--permission-mode', 'acceptEdits',
     '--allowedTools', 'Bash,Read',
     '--model', 'sonnet',
   ]);
+  assert.ok(!args.includes('--cwd'), 'claude CLI 无 --cwd 参数，不得拼入');
 });
 
 test('claude: 不用 --agent（D7 拍板）', () => {
@@ -38,6 +40,11 @@ test('claude: parseOutput 提取 .structured', () => {
   assert.deepEqual(nested.structured, { ready: false });
   const bad = claude.parseOutput('not json');
   assert.equal(bad.structured, null);
+});
+
+test('claude: parseOutput 支持真实 structured_output 字段（实测字段名，下划线）', () => {
+  const parsed = claude.parseOutput(JSON.stringify({ type: 'result', structured_output: { ready: true, branch: 'workflow-core', issues: [] } }));
+  assert.deepEqual(parsed.structured, { ready: true, branch: 'workflow-core', issues: [] });
 });
 
 test('claude: runAgent 成功解析结构化输出', () => {

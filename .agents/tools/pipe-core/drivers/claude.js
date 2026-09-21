@@ -6,12 +6,13 @@
 const { spawnSync } = require('node:child_process');
 
 // 纯函数：拼装 claude CLI 参数（供单测断言，不 spawn）。
+// 注意：claude CLI 无 `--cwd` 参数（那是 codex 的 `--cd`）；指定工作目录走 spawnSync 的
+// `cwd` 选项（B1 复核：driver cwd 必须指向实际工作目录，epic worktree 场景下为 worktree）。
 function buildArgs(task, ctx = {}) {
   const args = ['-p', task.prompt];
   args.push('--output-format', 'json');
   if (task.schema) args.push('--json-schema', JSON.stringify(task.schema));
   if (ctx.roleFile) args.push('--append-system-prompt', ctx.roleFile);
-  if (ctx.cwd) args.push('--cwd', ctx.cwd);
   if (ctx.permissionMode) args.push('--permission-mode', ctx.permissionMode);
   if (ctx.allowedTools && ctx.allowedTools.length) {
     args.push('--allowedTools', ctx.allowedTools.join(','));
@@ -20,13 +21,13 @@ function buildArgs(task, ctx = {}) {
   return args;
 }
 
-// 解析 claude -p --output-format json 的输出。claude 返回
-// { type:'result', ... result: { type:'text', ... }, structured: <schema 输出> }
-// 兼容多种形态：优先取顶层 structured；其次 result.result。
+// 解析 claude -p --output-format json 的输出。真实 claude 返回顶层 `structured_output`
+//（下划线，实测确认），兼容旧假想 `structured` 与嵌套 `result.result` 形态。
 function parseOutput(raw) {
   try {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
+      if (parsed.structured_output !== undefined) return { structured: parsed.structured_output, raw, sessionId: parsed.session_id || null };
       if (parsed.structured !== undefined) return { structured: parsed.structured, raw, sessionId: parsed.session_id || null };
       if (parsed.result && typeof parsed.result === 'object') {
         const nested = parsed.result.result ?? parsed.result;
