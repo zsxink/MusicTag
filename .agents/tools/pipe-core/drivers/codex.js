@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { validate } = require('../schema.js');
-const { API_VERSION } = require('./contract.js');
+const { API_VERSION, normalizeResult } = require('./contract.js');
 
 // 纯函数：拼装 codex exec CLI 参数（供单测断言，不 spawn）。
 // schemaFile/resultFile 由 runAgent 在临时目录生成。
@@ -50,6 +50,10 @@ function timeoutMs(ctx = {}) {
   return Number(ctx.timeoutMs || process.env.PIPE_AGENT_TIMEOUT_MS) || 600000;
 }
 
+function finish(result) {
+  return normalizeResult({ ...result, driverApiVersion: API_VERSION });
+}
+
 function runAgent(task, ctx = {}) {
   const bin = ctx.codexBin || 'codex';
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-codex-'));
@@ -74,32 +78,33 @@ function runAgent(task, ctx = {}) {
         maxBuffer: 64 * 1024 * 1024,
       });
     } catch (e) {
-      return { ok: false, error: String(e), exitCode: null };
+      return finish({ ok: false, error: { kind: e && e.code === 'ENOENT' ? 'spawn' : 'agent', message: String(e) }, exitCode: null });
     }
     if (res.error) {
-      return { ok: false, error: String(res.error), exitCode: res.status ?? null };
+      const kind = res.error.code === 'ETIMEDOUT' ? 'timeout' : res.error.code === 'ENOENT' ? 'spawn' : 'agent';
+      return finish({ ok: false, error: { kind, message: String(res.error) }, exitCode: res.status ?? null });
     }
     if (res.status !== 0) {
       // 认证/配置缺失显式上报，不静默降级
-      return { ok: false, raw: res.stdout, error: res.stderr || `codex exec 退出码 ${res.status}`, exitCode: res.status };
+      return finish({ ok: false, raw: res.stdout, error: { kind: 'agent', message: res.stderr || `codex exec 退出码 ${res.status}` }, exitCode: res.status });
     }
     if (!fs.existsSync(resultFile)) {
-      return { ok: false, error: 'codex exec 未产出 result 文件', exitCode: res.status };
+      return finish({ ok: false, error: { kind: 'protocol', message: 'codex exec 未产出 result 文件' }, exitCode: res.status });
     }
     const raw = fs.readFileSync(resultFile, 'utf8');
     let structured;
     try {
       structured = JSON.parse(raw);
     } catch (_) {
-      return { ok: false, error: 'codex result 文件非 JSON', raw, exitCode: res.status };
+      return finish({ ok: false, error: { kind: 'protocol', message: 'codex result 文件非 JSON' }, raw, exitCode: res.status });
     }
     if (task.schema) {
       const v = validate(task.schema, structured);
       if (!v.valid) {
-        return { ok: false, error: `codex 输出未通过 schema 二次校验: ${v.errors.join('; ')}`, raw, exitCode: res.status };
+        return finish({ ok: false, error: { kind: 'schema', message: `codex 输出未通过 schema 二次校验: ${v.errors.join('; ')}` }, raw, exitCode: res.status });
       }
     }
-    return { ok: true, structured, raw, exitCode: res.status };
+    return finish({ ok: true, structured, raw, exitCode: res.status });
   } finally {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) { /* 忽略清理失败 */ }
   }

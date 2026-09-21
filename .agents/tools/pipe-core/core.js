@@ -90,6 +90,8 @@ function runPipeline(opts) {
 
     const batch = ready.slice(0, maxConcurrency);
     for (const def of batch) {
+      state.nodes[def.id] = { status: 'ready', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
+      stateApi.saveState(change, state);
       const res = runNode(def, runCtx, decider);
       if (res.status === 'suspended' || res.status === 'failed') return res;
     }
@@ -140,6 +142,7 @@ function runNode(def, runCtx, decider) {
       if (readOnlyMutation(beforeAudit, afterAudit) && (def.role === 'cr-agent' || runCtx.ctx.readOnly === true)) {
         res = { ok: false, error: { kind: 'config', message: `read-only 节点 ${id} 产生工作区写入`, retryable: false } };
       }
+      res = contract.normalizeResult(res);
       if (res && res.error && typeof res.error === 'object') res.errorKind = res.error.kind || contract.classify(res);
       else if (res && !res.ok) res.errorKind = contract.classify(res);
 
@@ -147,7 +150,7 @@ function runNode(def, runCtx, decider) {
       if (res.ok && res.structured && def.schema) {
         const v = validate(def.schema, res.structured);
         if (!v.valid) {
-          res = { ok: false, error: `输出未通过 schema 二次校验: ${v.errors.join('; ')}` };
+          res = contract.normalizeResult({ ok: false, error: `输出未通过 schema 二次校验: ${v.errors.join('; ')}` });
         }
       }
 
@@ -183,7 +186,7 @@ function runNode(def, runCtx, decider) {
       stateApi.saveState(change, state);
       log(`✗ ${id} 失败: ${errText}`);
 
-      const decisionCtx = { def, attempts, error: errText, result: res.structured || null, round, maxRounds, ctx: runCtx.ctx };
+      const decisionCtx = { def, attempts, error: errText, errorKind: res.errorKind, result: res.structured || null, round, maxRounds, ctx: runCtx.ctx };
       d = decider ? decider(decisionCtx) : decision.decide(decisionCtx);
 
       if (d.action === 'retry') {

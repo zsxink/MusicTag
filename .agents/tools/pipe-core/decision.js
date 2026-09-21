@@ -34,7 +34,7 @@ function roleLabel(role) {
 // 决断入口：节点失败后调用。返回 { action, node, reason, ... }。
 // ctx: { def, attempts, error, result, round, maxRounds }
 function decide(ctx) {
-  const { def, attempts, error, result, round, maxRounds } = ctx;
+  const { def, attempts, error, errorKind, result, round, maxRounds } = ctx;
 
   // ① CR 内容问题（pass=false 且 blocker/major 非空）优先 reroute（内容问题非技术性，不进 retry）
   if (def.role === 'cr-agent' && result && result.pass === false) {
@@ -54,6 +54,17 @@ function decide(ctx) {
       node: def.id,
       reason: 'CR 三轮未通过，挂起交主会话决策',
       problems,
+      escalate: true,
+    };
+  }
+
+  // 配置/权限/schema 错误重试不会改变外部条件；尤其只读节点已经产生
+  // 工作区写入时，第二次尝试可能把同一污染误判为“无变化”。立即挂起。
+  if (['auth', 'config', 'schema'].includes(errorKind)) {
+    return {
+      action: 'escalate',
+      node: def.id,
+      reason: `节点 ${def.id} 发生不可重试的 ${errorKind} 错误：${error || '未知'}`,
       escalate: true,
     };
   }

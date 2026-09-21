@@ -19,6 +19,10 @@
 4. **质量门顺序**：Tester 的补测试必须在 CR 前；CR 只读，含复盘专项三检维度（跨模块状态语义 / 竞态与串扰 / 网络与离线判定），阻断/major 每项须含 file + issue + specReference + suggestion，`pass=true` 仅当无阻断且无 major；所有 Tester/CR 写入后，才运行最终 Verify（统一基线 cargo check → cargo test → npm run test → npm run build → openspec validate --strict --no-interactive；docs/spec/infra 域跳过 cargo/npm，跑文档一致性审计或脚本静态自检；搜索联动类变更追加复盘回归清单并逐项入 steps）。测试缺口、验证失败或 CR 三轮挂起必须停止。
 5. **暂停条件**：需求/规格歧义冲突、实现暴露设计缺陷、验证无法通过、CR 三轮挂起、用户打断。除此之外不打断用户。
 
+## 决策边界
+
+- 不得扩张已批准 PRD、proposal 或 specs 的范围；发现需求歧义、冲突或 PRD 之外的请求时，必须停止并上报主会话。
+
 ## 规格纪律
 
 - 规格权威：`openspec/changes/<name>/` + `docs/V1-PRD.md` + `docs/design/design.md`。

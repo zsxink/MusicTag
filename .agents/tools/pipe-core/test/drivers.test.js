@@ -74,13 +74,20 @@ test('claude: runAgent 非零退出上报失败', () => {
 });
 
 test('codex: buildArgs 拼装完整（--json --cd --sandbox --output-schema -o --model）', () => {
-  const args = codex.buildArgs({ prompt: 'P', schema: SCHEMA }, {
-    cwd: '/repo', sandbox: 'workspace-write', schemaFile: '/tmp/s.json', resultFile: '/tmp/r.json', model: 'gpt-5',
-  });
-  assert.deepEqual(args, [
-    'exec', '--ephemeral', 'P', '--json', '--cd', '/repo', '--sandbox', 'workspace-write',
-    '--output-schema', '/tmp/s.json', '-o', '/tmp/r.json', '--model', 'gpt-5',
-  ]);
+  const previous = process.env.PIPE_CODEX_SANDBOX;
+  delete process.env.PIPE_CODEX_SANDBOX;
+  try {
+    const args = codex.buildArgs({ prompt: 'P', schema: SCHEMA }, {
+      cwd: '/repo', sandbox: 'workspace-write', schemaFile: '/tmp/s.json', resultFile: '/tmp/r.json', model: 'gpt-5',
+    });
+    assert.deepEqual(args, [
+      'exec', '--ephemeral', 'P', '--json', '--cd', '/repo', '--sandbox', 'workspace-write',
+      '--output-schema', '/tmp/s.json', '-o', '/tmp/r.json', '--model', 'gpt-5',
+    ]);
+  } finally {
+    if (previous === undefined) delete process.env.PIPE_CODEX_SANDBOX;
+    else process.env.PIPE_CODEX_SANDBOX = previous;
+  }
 });
 
 test('codex: 可通过 PIPE_CODEX_SANDBOX 显式提升本地写权限', () => {
@@ -116,7 +123,7 @@ test('codex: runAgent 读 result 文件 + schema 二次校验', () => {
 test('codex: 输出违反 schema 二次校验 → 节点失败', () => {
   const res = codex.runAgent({ prompt: 'P', schema: SCHEMA }, { codexBin: FAKE_CODEX, env: { ...process.env, FAKE_OUTPUT: JSON.stringify({ ready: 'yes' }) } });
   assert.equal(res.ok, false);
-  assert.match(res.error, /schema 二次校验/);
+  assert.match(res.error.message, /schema 二次校验/);
 });
 
 test('codex: 认证/配置缺失退出码非零 → 显式上报不降级', () => {
@@ -134,7 +141,7 @@ test('codex: 退出 0 但未产出 result 文件 → 显式失败', () => {
   fs.chmodSync(noOutput, 0o755);
   const res = codex.runAgent({ prompt: 'P', schema: SCHEMA }, { codexBin: noOutput });
   assert.equal(res.ok, false);
-  assert.match(res.error, /未产出 result 文件/);
+  assert.match(res.error.message, /未产出 result 文件/);
   fs.rmSync(noOutput, { force: true });
 });
 
@@ -147,7 +154,7 @@ test('codex: result 文件非 JSON → 显式失败', () => {
   fs.chmodSync(badJson, 0o755);
   const res = codex.runAgent({ prompt: 'P', schema: SCHEMA }, { codexBin: badJson });
   assert.equal(res.ok, false);
-  assert.match(res.error, /非 JSON/);
+  assert.match(res.error.message, /非 JSON/);
   fs.rmSync(badJson, { force: true });
 });
 
