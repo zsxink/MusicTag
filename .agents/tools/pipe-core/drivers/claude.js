@@ -71,7 +71,9 @@ function runAgent(task, ctx = {}) {
     return finish({ ok: false, error: { kind, message: String(res.error) }, exitCode: res.status ?? null });
   }
   if (res.status !== 0) {
-    return finish({ ok: false, raw: res.stdout, error: { kind: 'agent', message: res.stderr || `claude 退出码 ${res.status}` }, exitCode: res.status });
+    // 保留 stderr 原文交给统一 contract 分类：401/403 必须落为 auth，
+    // 不应被固定标成可重试的 agent 错误。
+    return finish({ ok: false, raw: res.stdout, error: res.stderr || `claude 退出码 ${res.status}`, exitCode: res.status });
   }
   return finish({ ok: true, ...parseOutput(res.stdout), exitCode: 0 });
 }

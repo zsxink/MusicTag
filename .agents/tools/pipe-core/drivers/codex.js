@@ -86,7 +86,7 @@ function runAgent(task, ctx = {}) {
     }
     if (res.status !== 0) {
       // 认证/配置缺失显式上报，不静默降级
-      return finish({ ok: false, raw: res.stdout, error: { kind: 'agent', message: res.stderr || `codex exec 退出码 ${res.status}` }, exitCode: res.status });
+      return finish({ ok: false, raw: res.stdout, error: res.stderr || `codex exec 退出码 ${res.status}`, exitCode: res.status });
     }
     if (!fs.existsSync(resultFile)) {
       return finish({ ok: false, error: { kind: 'protocol', message: 'codex exec 未产出 result 文件' }, exitCode: res.status });

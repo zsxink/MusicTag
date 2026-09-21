@@ -76,7 +76,8 @@ function runAgent(task, ctx = {}) {
     const kind = res.error.code === 'ETIMEDOUT' ? 'timeout' : res.error.code === 'ENOENT' ? 'spawn' : 'agent';
     return normalizeResult({ ok: false, error: { kind, message: String(res.error), retryable: kind === 'spawn' || kind === 'timeout' }, exitCode: res.status ?? null });
   }
-  if (res.status !== 0) return normalizeResult({ ok: false, error: { kind: 'agent', message: res.stderr || `opencode 退出码 ${res.status}`, retryable: true }, raw: res.stdout, exitCode: res.status });
+  // 交给统一 contract 分类 stderr，避免 HTTP 401/403 被固定归为可重试 agent。
+  if (res.status !== 0) return normalizeResult({ ok: false, error: res.stderr || `opencode 退出码 ${res.status}`, raw: res.stdout, exitCode: res.status });
   const parsed = parseOutput(res.stdout);
   if (!parsed.ok) return normalizeResult({ ...parsed, exitCode: res.status });
   if (task.schema) {

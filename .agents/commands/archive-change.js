@@ -2,7 +2,7 @@
 'use strict';
 
 // DAG 节点使用的确定性 OpenSpec wrapper；入口层的 /opsx:archive 不进入核心。
-const { spawnSync } = require('node:child_process');
+import { spawnSync } from 'node:child_process';
 const change = process.argv[2];
 if (!change || !/^[a-z0-9][a-z0-9-]*$/.test(change)) {
   console.error('用法: node .agents/commands/archive-change.js <change>'); process.exit(2);
