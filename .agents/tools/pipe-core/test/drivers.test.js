@@ -83,6 +83,15 @@ test('codex: buildArgs 拼装完整（--json --cd --sandbox --output-schema -o -
   ]);
 });
 
+test('codex: response schema 为 object 递归补齐 additionalProperties=false', () => {
+  const normalized = codex.codexSchema({
+    type: 'object',
+    properties: { nested: { type: 'object', properties: { ok: { type: 'boolean' } } } },
+  });
+  assert.equal(normalized.additionalProperties, false);
+  assert.equal(normalized.properties.nested.additionalProperties, false);
+});
+
 test('codex: runAgent 读 result 文件 + schema 二次校验', () => {
   const res = codex.runAgent({ prompt: 'P', schema: SCHEMA }, { codexBin: FAKE_CODEX, env: { ...process.env, FAKE_OUTPUT: JSON.stringify({ ready: true }) } });
   assert.equal(res.ok, true);

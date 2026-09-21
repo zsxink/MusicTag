@@ -21,6 +21,25 @@ function buildArgs(task, ctx = {}) {
   return args;
 }
 
+// Codex response_format 要求每个 object schema 显式禁止额外字段；核心的
+// 轻量 schema 为保持通用性不默认写该约束，因此在 driver 边界补齐，不修改核心契约。
+function codexSchema(schema) {
+  if (!schema || typeof schema !== 'object') return schema;
+  if (Array.isArray(schema)) return schema.map(codexSchema);
+  const out = { ...schema };
+  if (out.properties && typeof out.properties === 'object') {
+    out.properties = Object.fromEntries(Object.entries(out.properties).map(([k, v]) => [k, codexSchema(v)]));
+  }
+  if (out.items) out.items = codexSchema(out.items);
+  if (out.anyOf) out.anyOf = out.anyOf.map(codexSchema);
+  if (out.oneOf) out.oneOf = out.oneOf.map(codexSchema);
+  if (out.allOf) out.allOf = out.allOf.map(codexSchema);
+  if (out.type === 'object' && !Object.prototype.hasOwnProperty.call(out, 'additionalProperties')) {
+    out.additionalProperties = false;
+  }
+  return out;
+}
+
 function timeoutMs(ctx = {}) {
   return Number(ctx.timeoutMs || process.env.PIPE_AGENT_TIMEOUT_MS) || 600000;
 }
@@ -33,7 +52,7 @@ function runAgent(task, ctx = {}) {
   try {
     if (task.schema) {
       schemaFile = path.join(tmpDir, 'schema.json');
-      fs.writeFileSync(schemaFile, JSON.stringify(task.schema));
+      fs.writeFileSync(schemaFile, JSON.stringify(codexSchema(task.schema)));
     }
     const args = buildArgs(task, { ...ctx, schemaFile, resultFile });
     let res;
@@ -80,4 +99,4 @@ function runAgent(task, ctx = {}) {
   }
 }
 
-module.exports = { runAgent, buildArgs, timeoutMs };
+module.exports = { runAgent, buildArgs, codexSchema, timeoutMs };
