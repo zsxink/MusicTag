@@ -75,7 +75,11 @@ function runAgent(task, ctx = {}) {
     // 不应被固定标成可重试的 agent 错误。
     return finish({ ok: false, raw: res.stdout, error: res.stderr || `claude 退出码 ${res.status}`, exitCode: res.status });
   }
-  return finish({ ok: true, ...parseOutput(res.stdout), exitCode: 0 });
+  const parsed = parseOutput(res.stdout);
+  if (parsed.structured === null) {
+    return finish({ ok: false, raw: res.stdout, error: { kind: 'protocol', message: 'claude 输出不是有效 JSON', retryable: true }, exitCode: 0 });
+  }
+  return finish({ ok: true, ...parsed, exitCode: 0 });
 }
 
 module.exports = { API_VERSION, DRIVER_VERSION: '1.0.0', runAgent, buildArgs, parseOutput, timeoutMs };

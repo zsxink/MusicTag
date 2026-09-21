@@ -143,8 +143,9 @@ async function main() {
     console.error(`driver ${driverName} 不可用：${driverInfo.loadError || '模块未实现 runAgent'}。不可用 runtime 不静默换 driver（D5/D11）。`);
     process.exit(2);
   }
-  if (driverInfo.apiVersion && driverInfo.apiVersion !== contract.API_VERSION) {
-    console.error(`driver ${driverName} 契约版本不兼容（driver=${driverInfo.apiVersion} !== contract=${contract.API_VERSION}），启动前拒绝（D11 约束 7）。`);
+  const loadedApiVersion = driverInfo.module && driverInfo.module.API_VERSION;
+  if (driverInfo.apiVersion !== contract.API_VERSION || loadedApiVersion !== contract.API_VERSION) {
+    console.error(`driver ${driverName} 契约版本不兼容（manifest=${driverInfo.apiVersion}，module=${loadedApiVersion}，contract=${contract.API_VERSION}），启动前拒绝（D11 约束 7）。`);
     process.exit(2);
   }
 

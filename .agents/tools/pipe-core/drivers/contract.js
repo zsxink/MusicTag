@@ -31,7 +31,9 @@ const KINDS = {
 
 // 对 driver 返回结果做关键字归类。driver 可显式给 { kind }，缺省按 message 探测。
 function classify(result) {
-  if (result.error && typeof result.error === 'object' && result.error.kind) return result.error.kind;
+  if (result.error && typeof result.error === 'object' && result.error.kind && Object.prototype.hasOwnProperty.call(KINDS, result.error.kind)) {
+    return result.error.kind;
+  }
   const msg = String((result.error && result.error.message) || result.error || '').toLowerCase();
   if (result.timeout || /timedout|time(?:d)?[ -]?out|etimedout/i.test(msg)) return 'timeout';
   if (/enoent|spawn|not found|no such file/i.test(msg)) return 'spawn';

@@ -23,7 +23,9 @@ function sleepSync(ms) {
 function worktreeSnapshot(root = process.cwd()) {
   try {
     const head = execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const status = execSync('git status --porcelain', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    // --ignored=matching 把被 .gitignore 隐藏的写入也纳入快照；只读 runtime
+    // 不得通过写 ignored 文件绕过工作区污染审计。
+    const status = execSync('git status --porcelain --untracked-files=all --ignored', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     return { head, status };
   } catch (_) { return null; }
 }
@@ -90,6 +92,8 @@ function runPipeline(opts) {
 
     const batch = ready.slice(0, maxConcurrency);
     for (const def of batch) {
+      state.nodes[def.id] = { status: 'pending', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
+      stateApi.saveState(change, state);
       state.nodes[def.id] = { status: 'ready', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
       stateApi.saveState(change, state);
       const res = runNode(def, runCtx, decider);
@@ -133,10 +137,15 @@ function runNode(def, runCtx, decider) {
       let res;
       const auditRoot = commitRoot || runCtx.ctx.cwd || stateApi.repoRoot();
       const beforeAudit = worktreeSnapshot(auditRoot);
-      try {
-        res = driver.runAgent(task, { ...runCtx.ctx, nodeId: id });
-      } catch (e) {
-        res = { ok: false, error: String(e) };
+      const taskErrors = contract.validateTask(task);
+      if (taskErrors.length) {
+        res = { ok: false, error: { kind: 'config', message: `task 非法：${taskErrors.join('; ')}`, retryable: false } };
+      } else {
+        try {
+          res = driver.runAgent(task, { ...runCtx.ctx, nodeId: id });
+        } catch (e) {
+          res = { ok: false, error: String(e) };
+        }
       }
       const afterAudit = worktreeSnapshot(auditRoot);
       if (readOnlyMutation(beforeAudit, afterAudit) && (def.role === 'cr-agent' || runCtx.ctx.readOnly === true)) {
@@ -240,7 +249,9 @@ function dispatchFixes(problems, runCtx) {
     } catch (e) {
       res = { ok: false, error: String(e) };
     }
-    if (!res.ok || !res.structured || res.structured.done !== true) {
+    const fixed = res && res.ok && res.structured;
+    const valid = fixed && validate(DEV_SCHEMA, fixed).valid;
+    if (!valid || !fixed || fixed.done !== true) {
       log(`✗ 修复子节点 ${fixId} 失败: ${res.error || '未返回 done=true'}`);
       return false;
     }
