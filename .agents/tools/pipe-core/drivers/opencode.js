@@ -16,6 +16,14 @@ function buildArgs(task, ctx = {}) {
   return args;
 }
 
+function buildEnv(ctx = {}) {
+  const env = { ...(ctx.env || process.env) };
+  if (ctx.sandbox) env.PIPE_OPENCODE_SANDBOX = ctx.sandbox;
+  if (ctx.permissionMode) env.PIPE_OPENCODE_PERMISSION_MODE = ctx.permissionMode;
+  if (ctx.allowedTools && ctx.allowedTools.length) env.PIPE_OPENCODE_ALLOWED_TOOLS = ctx.allowedTools.join(',');
+  return env;
+}
+
 function textFromContent(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -63,10 +71,18 @@ function timeoutMs(ctx = {}) {
 
 function runAgent(task, ctx = {}) {
   const bin = ctx.opencodeBin || 'opencode';
+  // OpenCode 当前没有可由本适配器可靠确认的只读沙箱/工具白名单参数；
+  // 只读角色必须在启动前 fail-closed，不能用 prompt 或环境变量冒充权限隔离。
+  if (ctx.sandbox === 'read-only' && ctx.opencodeReadOnlyPolicy !== 'enforced') {
+    return normalizeResult({
+      ok: false,
+      error: { kind: 'config', message: 'OpenCode 无法可靠施加 read-only 沙箱，拒绝启动只读节点', retryable: false },
+    });
+  }
   let res;
   try {
     res = spawnSync(bin, buildArgs(task, ctx), {
-      encoding: 'utf8', cwd: ctx.cwd || process.cwd(), env: ctx.env || process.env,
+      encoding: 'utf8', cwd: ctx.cwd || process.cwd(), env: buildEnv(ctx),
       stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs(ctx), maxBuffer: 64 * 1024 * 1024,
     });
   } catch (error) {
@@ -87,4 +103,4 @@ function runAgent(task, ctx = {}) {
   return normalizeResult({ ...parsed, exitCode: 0, driverApiVersion: API_VERSION });
 }
 
-module.exports = { API_VERSION, DRIVER_VERSION: '1.0.0', runAgent, buildArgs, parseOutput, extractJson, timeoutMs };
+module.exports = { API_VERSION, DRIVER_VERSION: '1.0.0', runAgent, buildArgs, buildEnv, parseOutput, extractJson, timeoutMs };

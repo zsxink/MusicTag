@@ -245,11 +245,11 @@ driver 启动前必须声明并校验自身能力。角色要求无法满足时�
 
 ### D2 决断链（P2）
 
-- 节点失败 → 路由到 leader 决断节点，决策 schema：
+- 节点失败 → 通过 `driver.runAgent` 路由到显式 leader 决断节点，并对返回值做 `DECISION_SCHEMA` 二次校验，决策 schema：
   ```js
   { action: 'retry'|'reroute'|'escalate'|'abort', node, reason }
   ```
-- `retry` → 重置目标节点 ready（attempts+1，标记 dirty）重跑；`reroute` → 生成 reroute 子节点重派对应开发角色；`escalate`/`abort` → 挂起 run，写挂起报告（节点、原因、候选方案），退出 `suspended`。
+- `retry` → 重置目标节点 ready（attempts+1，标记 dirty）重跑；`reroute` → 生成 reroute 子节点重派对应开发角色；`escalate`/`abort` → 挂起 run，写 `.agents/runs/<change>/suspension-report.json`（节点、原因、decision、problems、candidates），退出 `suspended`。核心调度使用 async/await，兼容同步和 Promise driver。
 - leader 决断节点只做**技术归类**（retry/reroute 不涉及产品方向）；一旦判断需要用户拍板（方向/范围/歧义/CR 三轮不过）→ 立即 `escalate` 挂起，**回主会话**，不自动继续。
 
 > **为什么（P2）**：旧脚本 test/verify/CR 失败直接 `return` 给主会话，无「自动归类 → 重跑 → 上报」中间层；leader 决断节点把可自动修复的技术失败挡在流水线内，只有需人拍板的才挂起。
@@ -272,7 +272,7 @@ driver 启动前必须声明并校验自身能力。角色要求无法满足时�
 - 每个子项在各自 worktree 内跑完整 pipe 子流程（子进程调用 `node run.js <item> --cwd <worktree>`，并以 `PIPE_CORE_REPO_ROOT` 注入主仓库绝对路径）；合并回 main 按依赖拓扑保证前置先合并。
 - **前置合并后 refresh**：前置子项合回 main 后，依赖它的后续 worktree 先 `git rebase main`（或 merge）刷新基准，再跑 `git diff main...HEAD` 与开 PR——保证 PR base 含前置改动，避免合并期冲突。
 - **cursor 处置**：`epic.json` 的 `cursor` 字段随并行模型废弃，推进判定改以 `.agents/runs/<epic>/epic-state.json` 的就绪集/批次为准；`pipe-epic-preflight.sh`/`pipe-epic-status` 同步改按就绪集判定。
-- **并行 checkpoint/崩溃恢复**：每批次（含各 worktree 子项状态）完成后原子落盘 epic-state.json（记录 worktree 路径、批次、子项状态、合并顺序）；崩溃后续跑读该文件恢复未完成子项、不重跑已合并项（对应记忆 `music-tag-branch-switch-during-workflow` 跨机器可恢复教训）。
+- **并行 checkpoint/崩溃恢复**：每批次（含各 worktree 子项状态）完成后原子落盘 epic-state.json（记录 worktree 路径、批次、子项状态、合并顺序）；崩溃后续跑读该文件恢复未完成子项、不重跑已合并项（对应记忆 `music-tag-branch-switch-during-workflow` 跨机器可恢复教训）。failed/suspended 子项只有显式 `run.js --epic <epic> --resume` 才迁移回 pending，保留 done 项与 mergeOrder。
 - epic 并行状态（worktree 路径、批次、合并顺序）写 `.agents/runs/<epic>/epic-state.json`（版本控制外的运行态，`.gitignore`）。
 
 > **为什么（P3）**：epic 只串行浪费 `dependsOn` DAG；但并行必须隔离工作区（同一 main 上并写必然互污染），故以 worktree + 独立分支为隔离单位，状态落盘保证崩溃可恢复；并行上限 ≤3 保守降低冲突面。
@@ -297,11 +297,11 @@ driver 启动前必须声明并校验自身能力。角色要求无法满足时�
 ### D7 角色单源迁移
 
 - 7 角色 system prompt 收敛到 `.agents/tools/pipe-core/roles/`（`{ id, name, systemPrompt, sandbox, allowedTools }`，单文件可注入），**唯一权威源**。
-- **拍板：claude driver 走注入，不用 `--agent`**——`--append-system-prompt` 注入 `roles/<role>.md` 同一份内容，保证两 driver 引用同一份文案；不再把 `.claude/agents/*.md` 当运行时来源（其内容作为 roles/ 迁移的生成参考，迁移完成后不与 roles/ 重复维护）。
+- **拍板：claude driver 走注入，不用 `--agent`**——`--append-system-prompt-file` 注入 `roles/<role>.md` 同一份内容，保证三端 wrapper 引用同一份文案；不再把 `.claude/agents/*.md` 当运行时来源（其内容作为 roles/ 迁移的生成参考，迁移完成后不与 roles/ 重复维护）。
 - codex driver 把 `roles/<role>.md` 内容拼进 exec prompt。
 - 关键：**角色文案只有一份**，两个 driver 各自翻译成对应 CLI 形态。
 
-> **为什么（D7）**：双 driver 各维护一份角色文案必然 prompt 漂移（`config.yaml` workflow 规则明列防漂移）；`roles/` 单源 + `--append-system-prompt` 注入，改一处两 driver 生效。不用 `--agent`：`--agent` 加载的是 `.claude/agents/*.md`，无法与 codex 共享同一份。
+> **为什么（D7）**：多 driver 各维护一份角色文案必然 prompt 漂移（`config.yaml` workflow 规则明列防漂移）；`roles/` 单源 + `--append-system-prompt-file` 注入，改一处各 driver 生效。不用 `--agent`：`--agent` 加载的是 `.claude/agents/*.md`，无法与其他 runtime 共享同一份。
 
 ### D8 命令与脚本改造
 

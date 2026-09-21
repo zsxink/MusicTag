@@ -41,14 +41,14 @@ test('role injection contract: registry.get exposes the manifest capability cons
   }
 });
 
-test('suspended state contract: an escalated node is persisted as suspended, not only returned as suspended', () => {
+test('suspended state contract: an escalated node is persisted as suspended, not only returned as suspended', async () => {
   const repo = tempRepo('workflow-core-suspended-state-');
   const previous = process.env.PIPE_CORE_REPO_ROOT;
   process.env.PIPE_CORE_REPO_ROOT = repo;
   try {
     const change = 'suspended-state';
     const state = stateApi.newState(change, 'mock');
-    const result = core.runPipeline({
+    const result = await core.runPipeline({
       change,
       state,
       defsFn: () => [{

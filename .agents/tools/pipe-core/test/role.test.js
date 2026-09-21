@@ -41,11 +41,11 @@ test('role: 角色文案不在任何 driver/核心源码内二次出现（单源
   }
 });
 
-test('role: claude 用 --append-system-prompt 注入 roleFile，codex 读同一 roles/ 文件拼入 prompt', () => {
+test('role: claude 用 --append-system-prompt-file 注入 roleFile，codex 读同一 roles/ 文件拼入 prompt', () => {
   const claude = require('../drivers/claude.js');
   const args = claude.buildArgs({ prompt: 'P', schema: {} }, { roleFile: path.join(ROLES_DIR, 'leader.md') });
-  assert.ok(args.includes('--append-system-prompt'));
-  const rf = args[args.indexOf('--append-system-prompt') + 1];
+  assert.ok(args.includes('--append-system-prompt-file'));
+  const rf = args[args.indexOf('--append-system-prompt-file') + 1];
   assert.equal(rf, path.join(ROLES_DIR, 'leader.md'));
   // 同一份物理文件存在且可被 codex 读取
   assert.ok(fs.existsSync(rf));

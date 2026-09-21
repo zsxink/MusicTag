@@ -10,7 +10,7 @@ const FAKE_CODEX = path.join(__dirname, 'fixtures', 'fake-codex.js');
 
 const SCHEMA = { type: 'object', properties: { ready: { type: 'boolean' } }, required: ['ready'] };
 
-test('claude: buildArgs 拼装完整（--json-schema + --append-system-prompt + 工具/模型）', () => {
+test('claude: buildArgs 拼装完整（--json-schema + --append-system-prompt-file + 工具/模型）', () => {
   // 子进程工作目录由 spawnSync 的 `cwd` 选项控制（B1 复核：driver cwd 指向 worktree），
   // claude CLI 无 --cwd 参数；拼进去会被 claude 拒为 unknown option（P1-P5 深埋 bug）。
   const args = claude.buildArgs({ prompt: 'P', schema: SCHEMA }, {
@@ -20,7 +20,7 @@ test('claude: buildArgs 拼装完整（--json-schema + --append-system-prompt + 
   assert.deepEqual(args, [
     '-p', 'P', '--output-format', 'json',
     '--json-schema', JSON.stringify(SCHEMA),
-    '--append-system-prompt', '/r/roles/leader.md',
+    '--append-system-prompt-file', '/r/roles/leader.md',
     '--permission-mode', 'acceptEdits',
     '--allowedTools', 'Bash,Read',
     '--model', 'sonnet',

@@ -57,10 +57,10 @@ node .agents/tools/pipe-core/run.js --epic <epic> --driver claude
 | 退出码 | 处理 |
 |--------|------|
 | `0` | 全部子项完成，向用户汇报 |
-| 非零 | 有失败/挂起子项：读 `.agents/runs/<epic>/epic-state.json` 与各 worktree 日志，停下上报用户；修复后重跑（已 done 项不重跑） |
+| 非零 | 有失败/挂起子项：读 `.agents/runs/<epic>/epic-state.json` 与各 worktree 日志，停下上报用户；用户确认后用 `--resume` 重跑（已 done 项不重跑） |
 
 ### ④ 续跑（断点恢复）
-- 重跑 `/pipe:epic <epic>`：读 epic-state.json → 跳过 `done` 项 → 从未完成/失败项续。
+- 用户决策后显式运行 `node .agents/tools/pipe-core/run.js --epic <epic> --driver claude --resume`：读 epic-state.json → 跳过 `done` 项 → 将 `failed`/`suspended` 子项恢复为 pending 后续跑。
 - 中断（Ctrl-C / 崩溃 / 挂起）后天然可续；worktree 残留由执行器 `ensureBranch` + `rebaseMain` 恢复。
 
 ## 确认点

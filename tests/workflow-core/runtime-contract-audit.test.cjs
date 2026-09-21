@@ -47,14 +47,14 @@ test('P6 network/error-code boundary: HTTP 500 is retryable agent failure, not a
   assert.equal(contract.normalizeResult({ ok: false, error: 'HTTP 401 Unauthorized' }).error.kind, 'auth');
 });
 
-test('P6 read-only CR: actual workspace mutation is rejected before semantic success', () => {
+test('P6 read-only CR: actual workspace mutation is rejected before semantic success', async () => {
   const repo = tempRepo();
   const previous = process.env.PIPE_CORE_REPO_ROOT;
   process.env.PIPE_CORE_REPO_ROOT = repo;
   try {
     const state = stateApi.newState('audit', 'mock');
     const schema = { type: 'object', properties: { pass: { type: 'boolean' } }, required: ['pass'] };
-    const result = core.runPipeline({
+    const result = await core.runPipeline({
       change: 'audit',
       state,
       defsFn: () => [{
@@ -82,7 +82,7 @@ test('P6 read-only CR: actual workspace mutation is rejected before semantic suc
   }
 });
 
-test('P1 state machine: a node must persist running before invoking the driver', () => {
+test('P1 state machine: a node must persist running before invoking the driver', async () => {
   const repo = tempRepo();
   const previous = process.env.PIPE_CORE_REPO_ROOT;
   process.env.PIPE_CORE_REPO_ROOT = repo;
@@ -90,7 +90,7 @@ test('P1 state machine: a node must persist running before invoking the driver',
     const change = 'state-machine';
     const state = stateApi.newState(change, 'mock');
     let observedRunning;
-    const result = core.runPipeline({
+    const result = await core.runPipeline({
       change,
       state,
       defsFn: () => [{ id: 'n1', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [] }],

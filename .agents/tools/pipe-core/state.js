@@ -76,6 +76,26 @@ function saveState(change, stateObj) {
   fs.renameSync(tmp, file);
 }
 
+// 挂起交接报告：状态文件记录节点状态，独立报告记录主会话恢复所需的决策上下文。
+function suspensionReportFile(change) {
+  return path.resolve(runsDir(), change, 'suspension-report.json');
+}
+
+function saveSuspensionReport(change, report) {
+  const file = suspensionReportFile(change);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const payload = {
+    schemaVersion: 1,
+    change,
+    createdAt: new Date().toISOString(),
+    ...report,
+  };
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(payload, null, 2));
+  fs.renameSync(tmp, file);
+  return file;
+}
+
 function hash(...parts) {
   return crypto.createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16);
 }
@@ -151,6 +171,8 @@ module.exports = {
   newState,
   loadState,
   saveState,
+  suspensionReportFile,
+  saveSuspensionReport,
   hash,
   cacheKey,
   currentHead,

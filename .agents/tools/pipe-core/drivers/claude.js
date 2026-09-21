@@ -1,6 +1,6 @@
 'use strict';
 // claude driver：把一个 agent 节点翻译成 `claude -p` CLI 子进程 + 解析结构化输出。
-// D7：角色文案经 `--append-system-prompt` 注入 roles/<role>.md 单源内容，不用 `--agent`。
+// D7：角色文案经 `--append-system-prompt-file` 注入 roles/<role>.md 单源内容，不用 `--agent`。
 // runAgent(task, ctx) → { ok, structured?, raw?, sessionId?, exitCode? }
 
 const { spawnSync } = require('node:child_process');
@@ -13,7 +13,7 @@ function buildArgs(task, ctx = {}) {
   const args = ['-p', task.prompt];
   args.push('--output-format', 'json');
   if (task.schema) args.push('--json-schema', JSON.stringify(task.schema));
-  if (ctx.roleFile) args.push('--append-system-prompt', ctx.roleFile);
+  if (ctx.roleFile) args.push('--append-system-prompt-file', ctx.roleFile);
   if (ctx.permissionMode) args.push('--permission-mode', ctx.permissionMode);
   if (ctx.allowedTools && ctx.allowedTools.length) {
     args.push('--allowedTools', ctx.allowedTools.join(','));

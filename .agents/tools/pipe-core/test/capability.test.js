@@ -59,7 +59,6 @@ test('cap: roles.json 的 capabilities 与最小权限一致（角色定义是�
     assert.ok(Array.isArray(entry.capabilities), `角色 ${role} 应声明 capabilities 数组（不再是 allowedTools）`);
     assert.ok(!entry.allowedTools, `角色 ${role} 不应再有 Claude 工具名 allowedTools（D11 约束 3 迁移完成）`);
     const min = cap.minCapabilities(entry.sandbox || 'workspace-write');
-    for (const c of min) assert.ok(entry.capabilities.includes(c), `角色 ${role} 的 ${
-    	c} 能力缺失（不满足 ${entry.sandbox} 最小权限）`);
+    for (const c of min) assert.ok(entry.capabilities.includes(c), `角色 ${role} 的 ${c} 能力缺失（不满足 ${entry.sandbox} 最小权限）`);
   }
 });

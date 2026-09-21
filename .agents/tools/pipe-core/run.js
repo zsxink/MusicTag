@@ -63,7 +63,7 @@ function repoHead(root) {
 }
 
 // 角色单源适配（D7/D11）：按 driver 声明的 roleInjection 能力翻译 role 注入形态——
-// 'system-prompt-file'（claude）→ 传 roleFile，driver 走 --append-system-prompt；
+// 'system-prompt-file'（claude）→ 传 roleFile，driver 走 --append-system-prompt-file；
 // 'prompt-prefix'（codex/opencode）→ 把 roles/<role>.md 内容拼进 prompt 开头。
 // capability 驱动，不含 if (driverName === ...) 分支（D11 约束 1/3）。
 const ROLES_DIR = path.join(__dirname, 'roles');
@@ -127,7 +127,7 @@ async function main() {
       console.error('--epic 需要 --driver claude|codex|opencode（环境无法自动判断）');
       process.exit(2);
     }
-    process.exit(await epicRunner.run(opts.epic, driverName));
+    process.exit(await epicRunner.run(opts.epic, driverName, { resume: opts.resume }));
   }
 
   if (!opts.change) { printUsage(); process.exit(2); }
@@ -179,11 +179,13 @@ async function main() {
     claudeBin: process.env.PIPE_CLAUDE_BIN,
     codexBin: process.env.PIPE_CODEX_BIN,
     opencodeBin: process.env.PIPE_OPENCODE_BIN,
+    opencodeReadOnlyPolicy: process.env.PIPE_OPENCODE_READONLY_POLICY || process.env.PIPE_OPENCODE_READ_ONLY_POLICY,
+    opencodeReadOnlyPolicy: process.env.PIPE_OPENCODE_READ_ONLY_POLICY,
     driverApiVersion: driverInfo.apiVersion,
     driverVersion: driverInfo.driverVersion,
   });
 
-  const result = runPipeline({
+  const result = await runPipeline({
     change: opts.change,
     state,
     defsFn: (s) => pipeline.buildPipeline(s),
@@ -200,6 +202,7 @@ async function main() {
   if (result.status === 'success') { console.log(`✓ ${opts.change} 流水线成功`); process.exit(0); }
   if (result.status === 'suspended') {
     console.error(`✗ ${opts.change} 挂起：${result.decision && result.decision.reason ? result.decision.reason : result.reason}`.trim());
+    if (result.reportPath) console.error(`挂起报告：${result.reportPath}`);
     process.exit(3);
   }
   console.error(`✗ ${opts.change} 失败：${result.reason || '未知原因'}`);

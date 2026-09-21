@@ -24,7 +24,7 @@ const MANIFEST = [
     apiVersion: API_VERSION,
     modulePath: path.join(__dirname, 'claude.js'),
     roleInjection: 'system-prompt-file',
-    help: 'claude       — Claude Code 驱动（claude -p，--append-system-prompt 注入 roles/）',
+    help: 'claude       — Claude Code 驱动（claude -p，--append-system-prompt-file 注入 roles/）',
     envMatchers: {
       // CLAUDECODE 真值（'1'/'true'）→ claude；'0'/空串不误判（复核2 minor）
       truthy: 'CLAUDECODE',

@@ -134,6 +134,7 @@ test('P6 epic OpenCode conformance: three parallel worktrees receive isolated cw
   ].join('\n'));
   const previousRoot = process.env.PIPE_CORE_REPO_ROOT;
   const previousBin = process.env.PIPE_OPENCODE_BIN;
+  const previousPolicy = process.env.PIPE_OPENCODE_READ_ONLY_POLICY;
   try {
     fs.writeFileSync(path.join(main, '.gitignore'), '.worktrees/\n.agents/runs/\n');
     fs.writeFileSync(path.join(main, 'seed.txt'), 'seed');
@@ -152,6 +153,7 @@ test('P6 epic OpenCode conformance: three parallel worktrees receive isolated cw
 
     process.env.PIPE_CORE_REPO_ROOT = main;
     process.env.PIPE_OPENCODE_BIN = fake;
+    process.env.PIPE_OPENCODE_READ_ONLY_POLICY = 'enforced';
     const code = await epic.run('e', 'opencode');
     assert.equal(code, 0);
     const paths = fs.readFileSync(timeline, 'utf8').trim().split('\n').filter(Boolean).map((p) => path.resolve(p));
@@ -168,6 +170,8 @@ test('P6 epic OpenCode conformance: three parallel worktrees receive isolated cw
     else process.env.PIPE_CORE_REPO_ROOT = previousRoot;
     if (previousBin === undefined) delete process.env.PIPE_OPENCODE_BIN;
     else process.env.PIPE_OPENCODE_BIN = previousBin;
+    if (previousPolicy === undefined) delete process.env.PIPE_OPENCODE_READ_ONLY_POLICY;
+    else process.env.PIPE_OPENCODE_READ_ONLY_POLICY = previousPolicy;
     try { execFileSync('git', ['worktree', 'prune'], { cwd: main, stdio: 'ignore' }); } catch (_) { /* cleanup best effort */ }
     fs.rmSync(h.dir, { recursive: true, force: true });
   }

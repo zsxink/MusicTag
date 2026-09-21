@@ -31,6 +31,16 @@ function roleLabel(role) {
   return map[role] || role;
 }
 
+function decisionPrompt(ctx) {
+  const { def, attempts, error, errorKind, result, round, maxRounds } = ctx;
+  return `你是流水线 Leader 决断节点。节点「${def.id}」第 ${round}/${maxRounds} 轮失败，` +
+    `attempt=${attempts}，errorKind=${errorKind || 'unknown'}，失败原因：${error || '未知'}。` +
+    `节点结果：${JSON.stringify(result || null)}。` +
+    `只能返回 JSON：{action:"retry|reroute|escalate|abort",node:"${def.id}",reason:"..."}` +
+    `。retry 仅用于技术性临时失败；reroute 仅用于 CR 的 blocker/major 且需在 reason 外由调用方保留问题；` +
+    `涉及产品方向、范围、歧义或需要用户拍板时必须 escalate/abort。`;
+}
+
 // 决断入口：节点失败后调用。返回 { action, node, reason, ... }。
 // ctx: { def, attempts, error, result, round, maxRounds }
 function decide(ctx) {
@@ -84,4 +94,4 @@ function decide(ctx) {
   };
 }
 
-module.exports = { decide, ownerFor, roleLabel };
+module.exports = { decide, decisionPrompt, ownerFor, roleLabel };

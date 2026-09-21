@@ -3,6 +3,10 @@
 // 用于 run.js / epic.js 的端到端测试（单测无需真模型/真脚本）。FAKE_TESTER_FAIL=1 时 tester 语义失败。
 
 function outputFor(prompt) {
+  if (prompt.includes('Leader 决断节点')) {
+    const match = prompt.match(/节点「([^」]+)」/);
+    return { action: 'escalate', node: match ? match[1] : 'unknown', reason: 'fake leader decision' };
+  }
   if (process.env.FAKE_TESTER_FAIL && prompt.includes('你是测试角色')) {
     return { covered: [], missing: ['tester 语义失败'], smokePassed: false, risks: [] };
   }

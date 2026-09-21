@@ -37,7 +37,7 @@ test('contract boundary: an unknown DriverResult error kind is canonicalized', (
   assert.equal(result.error.retryable, true);
 });
 
-test('core boundary: reroute repair output must pass DEV_SCHEMA before re-review', () => {
+test('core boundary: reroute repair output must pass DEV_SCHEMA before re-review', async () => {
   const core = require('../../.agents/tools/pipe-core/core.js');
   const stateApi = require('../../.agents/tools/pipe-core/state.js');
   const repo = tempRepo('workflow-core-reroute-contract-');
@@ -47,7 +47,7 @@ test('core boundary: reroute repair output must pass DEV_SCHEMA before re-review
 
   try {
     const state = stateApi.newState('reroute-contract', 'mock');
-    const result = core.runPipeline({
+    const result = await core.runPipeline({
       change: 'reroute-contract',
       state,
       defsFn: () => [{
@@ -89,17 +89,17 @@ test('core boundary: reroute repair output must pass DEV_SCHEMA before re-review
   }
 });
 
-test('core boundary: an empty task prompt is rejected before the driver runs', () => {
+test('core boundary: an empty task prompt is rejected before the driver runs', async () => {
   const core = require('../../.agents/tools/pipe-core/core.js');
   const stateApi = require('../../.agents/tools/pipe-core/state.js');
   const repo = tempRepo('workflow-core-empty-task-');
   const previous = process.env.PIPE_CORE_REPO_ROOT;
   process.env.PIPE_CORE_REPO_ROOT = repo;
-  let calls = 0;
+  const calls = [];
 
   try {
     const state = stateApi.newState('empty-task', 'mock');
-    core.runPipeline({
+    await core.runPipeline({
       change: 'empty-task',
       state,
       defsFn: () => [{
@@ -110,8 +110,8 @@ test('core boundary: an empty task prompt is rejected before the driver runs', (
         dependsOn: [],
       }],
       driver: {
-        runAgent() {
-          calls += 1;
+        runAgent(task) {
+          calls.push(task.id);
           return { ok: true, structured: {} };
         },
       },
@@ -124,10 +124,10 @@ test('core boundary: an empty task prompt is rejected before the driver runs', (
     fs.rmSync(repo, { recursive: true, force: true });
   }
 
-  assert.equal(calls, 0, '非法 task 不得先调用 runtime 再由结果兜底');
+  assert.ok(!calls.includes('n1'), '非法 task 不得调用目标 runtime；应只调用 Leader 决断节点');
 });
 
-test('state boundary: a new node persists pending before ready/running', () => {
+test('state boundary: a new node persists pending before ready/running', async () => {
   const core = require('../../.agents/tools/pipe-core/core.js');
   const stateApi = require('../../.agents/tools/pipe-core/state.js');
   const repo = tempRepo('workflow-core-pending-state-');
@@ -142,7 +142,7 @@ test('state boundary: a new node persists pending before ready/running', () => {
       originalSave(change, state);
     };
     const state = stateApi.newState('pending-state', 'mock');
-    core.runPipeline({
+    await core.runPipeline({
       change: 'pending-state',
       state,
       defsFn: () => [{ id: 'n1', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [] }],
@@ -176,7 +176,7 @@ test('Claude driver boundary: exit 0 with damaged JSON is protocol failure', () 
   }
 });
 
-test('read-only boundary: ignored workspace writes are rejected', () => {
+test('read-only boundary: ignored workspace writes are rejected', async () => {
   const core = require('../../.agents/tools/pipe-core/core.js');
   const stateApi = require('../../.agents/tools/pipe-core/state.js');
   const repo = tempRepo('workflow-core-readonly-ignored-');
@@ -188,7 +188,7 @@ test('read-only boundary: ignored workspace writes are rejected', () => {
     execFileSync('git', ['add', '.gitignore'], { cwd: repo });
     execFileSync('git', ['commit', '-qm', 'ignore'], { cwd: repo });
     const state = stateApi.newState('readonly-ignored', 'mock');
-    const result = core.runPipeline({
+    const result = await core.runPipeline({
       change: 'readonly-ignored',
       state,
       defsFn: () => [{ id: 'cr', role: 'cr-agent', prompt: 'review', schema: { type: 'object' }, dependsOn: [] }],

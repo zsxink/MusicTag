@@ -8,6 +8,7 @@ const { validate } = require('./schema.js');
 const stateApi = require('./state.js');
 const decision = require('./decision.js');
 const { DEV_SCHEMA } = require('./pipeline.js');
+const { DECISION_SCHEMA } = require('./pipeline.js');
 const { execSync } = require('node:child_process');
 const contract = require('./drivers/contract.js');
 
@@ -34,7 +35,7 @@ function readOnlyMutation(before, after) {
   return !!before && !!after && (before.head !== after.head || before.status !== after.status);
 }
 
-function runPipeline(opts) {
+async function runPipeline(opts) {
   const {
     change,
     state,
@@ -100,7 +101,7 @@ function runPipeline(opts) {
       stateApi.saveState(change, state);
       state.nodes[def.id] = { status: 'ready', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
       stateApi.saveState(change, state);
-      const res = runNode(def, runCtx, decider);
+      const res = await runNode(def, runCtx, decider);
       if (res.status === 'suspended' || res.status === 'failed') return res;
     }
   }
@@ -113,7 +114,7 @@ function runPipeline(opts) {
 // 单个节点执行：running → succeeded | failed → 决断链（retry 同轮重跑 / reroute 派修复复审 / escalate 挂起）。
 // 语义：round 计复审轮（CR 每次 reroute 修复后进入下一轮）；attempt 计 driver 调用总次数。
 // 技术性失败在同一 round 内 retry，不消耗 round。
-function runNode(def, runCtx, decider) {
+async function runNode(def, runCtx, decider) {
   const { change, state, driver, getHead, log, sleep, results, commitRoot } = runCtx;
   const id = def.id;
   const maxRounds = def.maxRounds || 1;
@@ -146,7 +147,7 @@ function runNode(def, runCtx, decider) {
         res = { ok: false, error: { kind: 'config', message: `task 非法：${taskErrors.join('; ')}`, retryable: false } };
       } else {
         try {
-          res = driver.runAgent(task, { ...runCtx.ctx, nodeId: id });
+          res = await driver.runAgent(task, { ...runCtx.ctx, nodeId: id });
         } catch (e) {
           res = { ok: false, error: String(e) };
         }
@@ -200,43 +201,93 @@ function runNode(def, runCtx, decider) {
       log(`✗ ${id} 失败: ${errText}`);
 
       const decisionCtx = { def, attempts, error: errText, errorKind: res.errorKind, result: res.structured || null, round, maxRounds, ctx: runCtx.ctx };
-      d = decider ? decider(decisionCtx) : decision.decide(decisionCtx);
+      const decisionResult = await resolveDecision(decisionCtx, runCtx, decider);
+      if (!decisionResult.ok) {
+        const reason = `Leader 决断失败：${decisionResult.error}`;
+        return suspend(runCtx, id, reason, {
+          action: 'escalate', node: id, reason,
+          candidates: [], problems: [], decisionError: decisionResult.error,
+        }, errText, 'decision-failed');
+      }
+      d = decisionResult.decision;
 
       if (d.action === 'retry') {
-        if (retryInterval > 0) sleep(retryInterval);
+        if (retryInterval > 0) await sleep(retryInterval);
         continue; // 同一 round 重跑
       }
       break; // reroute / escalate / abort → 退出内层循环处理
     }
 
     if (d.action === 'reroute') {
-      const fixOk = dispatchFixes(d.problems || [], runCtx);
+      const fixOk = await dispatchFixes(d.problems || [], runCtx);
       if (!fixOk) {
-        return {
-          status: 'suspended', stage: 'reroute-fix-failed', node: id,
-          reason: 'reroute 修复子节点执行失败', decision: d, error: errText, results,
-        };
+        return suspend(runCtx, id, 'reroute 修复子节点执行失败', d, errText, 'reroute-fix-failed');
       }
       continue; // 进入下一复审轮
     }
     // escalate / abort → 挂起回主会话
-    state.nodes[id] = {
-      ...(state.nodes[id] || {}),
-      status: 'suspended',
-      updatedAt: new Date().toISOString(),
-    };
-    stateApi.saveState(change, state);
-    return {
-      status: 'suspended', stage: 'decision-escalate', node: id,
-      reason: d.reason, decision: d, error: errText, results,
-    };
+    return suspend(runCtx, id, d.reason, d, errText, 'decision-escalate');
   }
 
-  return { status: 'suspended', stage: 'max-rounds', node: id, reason: `节点 ${id} 超过 maxRounds=${maxRounds}`, results };
+  return suspend(runCtx, id, `节点 ${id} 超过 maxRounds=${maxRounds}`, {
+    action: 'escalate', node: id, reason: `节点 ${id} 超过 maxRounds=${maxRounds}`,
+    candidates: [], problems: [],
+  }, errText, 'max-rounds');
+}
+
+async function resolveDecision(decisionCtx, runCtx, decider) {
+  let raw;
+  try {
+    if (decider) {
+      raw = await decider(decisionCtx);
+    } else {
+      const task = {
+        id: `decision-${decisionCtx.def.id}`,
+        role: 'leader',
+        prompt: decision.decisionPrompt(decisionCtx),
+        schema: DECISION_SCHEMA,
+        decisionContext: decisionCtx,
+      };
+      const result = await runCtx.driver.runAgent(task, { ...runCtx.ctx, nodeId: task.id });
+      if (!result || result.ok !== true) {
+        const error = result && result.error && result.error.message ? result.error.message : (result && result.error) || 'Leader driver 未返回成功结果';
+        return { ok: false, error };
+      }
+      raw = result.structured;
+    }
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+  const checked = validate(DECISION_SCHEMA, raw);
+  if (!checked.valid) return { ok: false, error: `决断结果未通过 DECISION_SCHEMA：${checked.errors.join('; ')}` };
+  return { ok: true, decision: raw };
+}
+
+function suspend(runCtx, node, reason, decisionValue, error, stage) {
+  const { change, state, results } = runCtx;
+  state.nodes[node] = {
+    ...(state.nodes[node] || {}),
+    status: 'suspended',
+    updatedAt: new Date().toISOString(),
+  };
+  stateApi.saveState(change, state);
+  const report = {
+    node,
+    reason,
+    error: error || null,
+    decision: decisionValue || null,
+    problems: decisionValue && Array.isArray(decisionValue.problems) ? decisionValue.problems : [],
+    candidates: decisionValue && Array.isArray(decisionValue.candidates) ? decisionValue.candidates : [],
+  };
+  const reportPath = stateApi.saveSuspensionReport(change, report);
+  return {
+    status: 'suspended', stage, node, reason,
+    decision: decisionValue, error, reportPath, results,
+  };
 }
 
 // reroute：按文件所有权把 CR 问题分组，派对应角色修复子节点（只修该范围，返回 done=true）。
-function dispatchFixes(problems, runCtx) {
+async function dispatchFixes(problems, runCtx) {
   const { driver, log, results } = runCtx;
   const groups = new Map();
   for (const p of problems) {
@@ -255,7 +306,7 @@ function dispatchFixes(problems, runCtx) {
     };
     let res;
     try {
-      res = driver.runAgent(fixTask, { ...runCtx.ctx, nodeId: fixId });
+      res = await driver.runAgent(fixTask, { ...runCtx.ctx, nodeId: fixId });
     } catch (e) {
       res = { ok: false, error: String(e) };
     }
@@ -271,4 +322,4 @@ function dispatchFixes(problems, runCtx) {
   return true;
 }
 
-module.exports = { runPipeline, runNode, dispatchFixes };
+module.exports = { runPipeline, runNode, dispatchFixes, resolveDecision };

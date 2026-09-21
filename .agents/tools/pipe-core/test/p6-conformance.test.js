@@ -56,7 +56,7 @@ test('fake E2E: OpenCode adapter drives the complete infra pipeline in its workt
     execFileSync('git', ['add', '.'], { cwd: repo });
     execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
     const result = execFileSync(process.execPath, [path.join(__dirname, '..', 'run.js'), 'demo', '--driver', 'opencode'], {
-      cwd: repo, encoding: 'utf8', env: { ...process.env, PIPE_CORE_REPO_ROOT: repo, PIPE_OPENCODE_BIN: FAKE_PIPE },
+      cwd: repo, encoding: 'utf8', env: { ...process.env, PIPE_CORE_REPO_ROOT: repo, PIPE_OPENCODE_BIN: FAKE_PIPE, PIPE_OPENCODE_READ_ONLY_POLICY: 'enforced' },
     });
     assert.match(result, /流水线成功/);
     const state = JSON.parse(fs.readFileSync(path.join(repo, '.agents', 'runs', 'demo', 'state.json'), 'utf8'));

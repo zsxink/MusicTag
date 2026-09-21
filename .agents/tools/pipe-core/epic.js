@@ -44,9 +44,9 @@ function saveEpicState(epic, st) {
   fs.renameSync(tmp, file);
 }
 
-// 就绪子项：依赖全部 done 且自身未完成（done/running/failed/suspended 均不进入——D6：失败/挂起
-// 子项不自动重试，由主会话决策后清除状态或重跑）。纯函数，供单测。
-function readyItems(epic, st) {
+// 就绪子项：依赖全部 done 且自身未完成。failed/suspended 只有显式 --resume 才会重新进入就绪集。
+function readyItems(epic, st, options = {}) {
+  const resume = options === true || options.resume === true;
   const items = epic.items || [];
   const statusOf = (name) => {
     if (st.items[name]) return st.items[name].status;
@@ -55,13 +55,14 @@ function readyItems(epic, st) {
   };
   return items.filter((it) => {
     const s = statusOf(it.name);
-    if (s === 'done' || s === 'running' || s === 'failed' || s === 'suspended') return false;
+    if (s === 'done' || s === 'running') return false;
+    if ((s === 'failed' || s === 'suspended') && !resume) return false;
     return (it.dependsOn || []).every((dep) => statusOf(dep) === 'done');
   });
 }
 
 // 执行器入口。返回退出码（0 全部完成 / 非零有失败子项）。
-async function run(epicName, driverName) {
+async function run(epicName, driverName, options = {}) {
   let epic;
   try { epic = loadEpic(epicName); } catch (e) { console.error(e.message); return 1; }
   // 依赖引用校验（复核2 minor：dependsOn 引用未知项名 → 静默退出 1 无诊断）：
@@ -99,6 +100,19 @@ async function run(epicName, driverName) {
     }
   }
 
+  if (options.resume) {
+    const resumed = [];
+    for (const it of epic.items || []) {
+      const rec = st.items[it.name];
+      if (rec && (rec.status === 'failed' || rec.status === 'suspended')) {
+        rec.status = 'pending';
+        rec.error = null;
+        resumed.push(it.name);
+      }
+    }
+    if (resumed.length) console.error(`[epic] 显式 --resume：${resumed.join(', ')} failed/suspended → pending`);
+  }
+
   // 崩溃恢复（D4）：本进程中断/被杀时，批次子项可能正停在 running（状态已落盘但子进程未收尾）。
   // 续跑把 running → pending 重新调度，使其可恢复；已合并项 done 保留不重跑。父进程死后残留的
   // 孤儿子进程可能仍在 worktree 内自行跑 pipe，runItemAsync 的 ensureBranch + rebaseMain 会
@@ -122,7 +136,7 @@ async function run(epicName, driverName) {
   let suspended = null; // 任一子项挂起（exit 3）→ 整 epic 挂起交主会话（D6）
 
   for (;;) {
-    const ready = readyItems(epic, st);
+    const ready = readyItems(epic, st, options);
     if (!ready.length) break;
     const batchItems = ready.slice(0, MAX_CONCURRENCY);
     batch++;

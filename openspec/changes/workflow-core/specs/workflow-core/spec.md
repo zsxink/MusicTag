@@ -27,7 +27,7 @@
 - **THEN** 再次触发带 resume 的同一变更 → 从失败/中断节点续跑，不重跑已通过节点
 
 ### Requirement: 决断链（P2）
-节点失败 SHALL 先路由到 leader 决断节点（按决策 schema `{ action: 'retry'|'reroute'|'escalate'|'abort', node, reason }`），而非直接退出。`retry` 重置目标节点重跑（attempts+1）、`reroute` 重派对应开发角色、`escalate`/`abort` 挂起 run 退出 `suspended`。
+节点失败 SHALL 先通过 `runAgent` 调用 leader 决断节点（按 `DECISION_SCHEMA` 校验 `{ action: 'retry'|'reroute'|'escalate'|'abort', node, reason }`），而非直接调用静态规则或直接退出。`retry` 重置目标节点重跑（attempts+1）、`reroute` 重派对应开发角色、`escalate`/`abort` 挂起 run 退出 `suspended`。
 
 #### Scenario: 自动归类
 - **WHEN** CR/verify 失败且 leader 判定为可自动重试的技术问题
@@ -42,7 +42,7 @@
 
 #### Scenario: 挂起回主会话
 - **WHEN** 流水线遇到需用户决策的情形
-- **THEN** run.js 退出 `suspended`，状态文件完整落盘，当前驱动它的会话作为主会话收到挂起报告
+- **THEN** run.js 退出 `suspended`，状态文件完整落盘，并在 `.agents/runs/<change>/suspension-report.json` 写入节点、失败原因、decision、problems 与 candidates，当前驱动它的会话作为主会话收到报告路径
 
 #### Scenario: 用户决策后续跑
 - **WHEN** 用户在主会话决策后再次触发带 resume 的同一变更
@@ -106,7 +106,7 @@ Architect 判定的变更域 SHALL 扩展为 `['backend','frontend','both','docs
 - **THEN** 只改 `roles/` 一处，claude/codex/opencode 三个 driver 引用同一份，无第二份文案
 
 ### Requirement: Agent Runtime Adapter 契约（P6）
-driver contract SHALL 版本化并统一输入、结果、错误分类、超时、终止和 capability 声明。所有 driver SHALL 返回标准 `DriverResult`；核心 SHALL 不解析宿主 stdout/event，也不得包含按 driverName 分支的角色注入逻辑。
+driver contract SHALL 版本化并统一输入、结果、错误分类、超时、终止和 capability 声明。所有 driver SHALL 返回标准 `DriverResult`；`runAgent(task, ctx)` SHALL 允许返回 `DriverResult` 或 `Promise<DriverResult>`，核心必须 await 两者；核心 SHALL 不解析宿主 stdout/event，也不得包含按 driverName 分支的角色注入逻辑。
 
 #### Scenario: 新增 runtime 不改核心
 - **WHEN** 新增一个满足 contract 的 driver
@@ -135,6 +135,10 @@ OpenCode driver SHALL 使用官方非交互 CLI 执行节点，支持 cwd、mode
 - **WHEN** epic 在三个独立 worktree 并发执行 OpenCode 子进程
 - **THEN** 每个进程的 `--dir` 与节点 `cwd` 都指向对应 worktree，写入不得落到主工作区
 
+#### Scenario: OpenCode 只读能力不足
+- **WHEN** OpenCode 无法可靠施加 `read-only` 沙箱/工具策略
+- **THEN** driver 在启动子进程前返回 `config` 错误，不以 prompt 或环境变量自我声明权限满足
+
 ### Requirement: 产品无关 capability（P6）
 角色 SHALL 通过 `shell/read_files/write_files/search_files/git_read/git_write/network` 等 capability 表达最小权限；每个 driver SHALL 显式声明并映射宿主能力。无法满足所需能力或无法保持 read-only 约束时 SHALL fail-closed 或记录经批准的权限降级，不得静默提权。
 
@@ -157,6 +161,10 @@ OpenCode driver SHALL 使用官方非交互 CLI 执行节点，支持 cwd、mode
 - **WHEN** integrate 节点归档变更
 - **THEN** 调用确定性的 OpenSpec CLI 或 `.agents/commands/archive-change.js`，不要求 runtime 理解 `/opsx:archive`
 
+#### Scenario: 集成命令确定性
+- **WHEN** integrate 节点创建 PR、等待 CI 或合并
+- **THEN** 依次调用 `.agents/commands/create-pr.js`、`wait-ci.js`、`merge-pr.js`，不在 prompt 中直接编排 `gh pr create`/`gh pr merge`/手动删除分支
+
 #### Scenario: 三端入口同核
 - **WHEN** 用户分别从 Claude Code、Codex、OpenCode 入口启动同一变更
 - **THEN** 三个入口最终都执行同一 `run.js`，仅 `--driver` 值不同，退出码与状态文件语义一致
@@ -167,6 +175,10 @@ OpenCode driver SHALL 使用官方非交互 CLI 执行节点，支持 cwd、mode
 #### Scenario: 共享契约回归
 - **WHEN** 修改 contract、角色能力或任一 driver
 - **THEN** claude/codex/opencode 的共享 conformance suite 全部运行，防止只修一个 runtime
+
+#### Scenario: infra 共享测试回归
+- **WHEN** 变更域为 `infra`
+- **THEN** verify SHALL 同时运行 `.agents/tools/pipe-core/test/*.test.js` 与 `tests/workflow-core/*.test.cjs`，并在 `steps` 中记录该合并命令
 
 #### Scenario: 不可用 runtime 不伪绿
 - **WHEN** 本机缺失某 CLI 或认证

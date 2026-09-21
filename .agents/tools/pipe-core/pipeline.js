@@ -61,7 +61,7 @@ const CR_SCHEMA = {
     majors: { type: 'array', items: FINDING },
     minors: { type: 'array', items: FINDING },
   },
-  required: ['pass', 'blockers', 'majors'],
+  required: ['pass', 'blockers', 'majors', 'minors'],
 };
 
 const VERIFY_SCHEMA = {
@@ -119,7 +119,7 @@ function devSpec(change, domain) {
   const selfCheck = CODE_DOMAINS.includes(domain)
     ? 'Rust 侧跑 cargo test --manifest-path src-tauri/Cargo.toml、前端跑 npm run build 与 npm run test，任一失败不得提交。'
     : domain === 'infra'
-      ? '跑对应域验证：`node --test` 编排核心单测 + `run.js --self-check`（如相关）+ openspec validate，任一失败不得提交。'
+      ? '跑对应域验证：`node --test .agents/tools/pipe-core/test/*.test.js tests/workflow-core/*.test.cjs` + `run.js --self-check`（如相关）+ openspec validate，任一失败不得提交。'
       : '跑 openspec validate + 文档一致性审计，任一失败不得提交。';
   return (
     `读取 ${changeDir}/design.md、specs/、tasks.md，按任务实现。遵守 TDD（新逻辑先写失败测试）。` +
@@ -233,7 +233,7 @@ function buildPipeline(state) {
       prompt: (ctx) => {
         if (NON_CODE_DOMAINS.includes(domain)) {
           return `你是验证(CI)角色。变更「${change}」域为 ${domain}，按自适应编排跳过业务编译（P4）：\n` +
-            `按序短路运行：node --test .agents/tools/pipe-core/test/*.test.js → node .agents/tools/pipe-core/run.js --self-check → ` +
+            `按序短路运行：node --test .agents/tools/pipe-core/test/*.test.js tests/workflow-core/*.test.cjs → node .agents/tools/pipe-core/run.js --self-check → ` +
             `openspec validate ${change} --strict --no-interactive。任一 fail 即整体 verify_failed，只验证不修复，失败输出如实上报。\n` +
             `全部通过才 pass=true，并逐项返回 steps（step + status + detail）。`;
         }
@@ -255,9 +255,10 @@ function buildPipeline(state) {
       prompt: (ctx) =>
         `你是流水线 Leader。变更「${change}」已通过验证，现在执行受控集成：\n` +
         `1. 归档：node .agents/commands/archive-change.js ${change}（在分支上执行，规格改动随分支提交）\n` +
-        `2. 提交 PR：git push -u origin ${change} → gh pr create --base main --head ${change} --title "feat(${change}): <变更摘要>" --body "Closes #<issue>"（Issue 号从 openspec/changes/${change}/proposal.md 的「关联 Issue」段取，若无则省略 Closes）\n` +
-        `3. 等 CI required checks 通过 → gh pr merge ${change} --squash\n` +
-        `4. git branch -d ${change} 清理分支\n` +
+        `2. 推送分支：git push -u origin ${change}\n` +
+        `3. 提交 PR：node .agents/commands/create-pr.js ${change} "feat(${change}): <变更摘要>" "Closes #<issue>"（Issue 号从 openspec/changes/${change}/proposal.md 的「关联 Issue」段取，无则省略 Closes；记录 wrapper 输出的 PR URL）\n` +
+        `4. 等 CI required checks 通过：node .agents/commands/wait-ci.js <pr-url-or-number>\n` +
+        `5. 合并并清理分支：node .agents/commands/merge-pr.js <pr-url-or-number>（wrapper 负责 squash 与删除已合并分支）\n` +
         `全部完成返回 archived=true、prUrl、merged=true、summary；任何一步失败返回 merged=false 并附失败原因。`,
     });
   }
