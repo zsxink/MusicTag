@@ -9,8 +9,9 @@
 - **P2 无决断链**：workflow 内无 leader 决断节点，test/verify/CR 失败直接 `return` 给主会话，无「自动归类 → 重跑 → 上报」的中间层。
 - **P3 子变更只串行**：epic 子变更逐个跑，`epic.json` 已含 `dependsOn` DAG 但未利用，无并行。
 - **P5 只认 Claude**：流水线逻辑完全绑定 Workflow 工具（Claude Code 专属），后续会用 Codex 驱动的需求无法满足。
+- **P6 跨 Agent 产品仍未闭环（复核追加）**：当前实现只提供 `claude` / `codex` 两个 CLI driver，核心默认脚本路径仍位于 `.claude/workflows/`，角色权限仍使用 Claude 工具名，集成节点仍依赖 `/opsx:*` 斜杠命令；因此“模型无关”已经成立，但尚不能直接在 OpenCode 等第三方 Agent 产品中复用。
 
-用户拍板：**P1-P5 全做**；后续会用 Codex 继续开发，跨模型通用是硬需求。
+用户拍板：**P1-P5 全做**；后续会用 Codex 继续开发，跨模型通用是硬需求。PR #118 复核后追加 **P6 跨 Agent 产品通用化**：同一核心至少在 Claude Code、Codex、OpenCode 三端可执行，并为其他 CLI Agent 保留稳定扩展契约。
 
 ## What Changes
 
@@ -57,6 +58,18 @@ epic 执行器读 `epic.json` 的 `dependsOn` DAG → 每次推进就绪子项 �
 
 `.claude/commands/pipe*.md`、`.agents/skills/pipe/SKILL.md`（+ `.claude/skills/pipe` symlink）、`.claude/workflows/pipe-preflight.sh` 改调新核心；角色 system prompt 收敛到 `.agents/tools/pipe-core/roles/` 单源；初始化仓库根 `AGENTS.md`（Codex 项目级指令：项目约定 + pipe 入口触发方式），并同步 `.claude/CLAUDE.md` 移除对已删除 Workflow 脚本的引用。
 
+### P6：跨 Agent 产品通用化（复核追加）
+
+在既有模型无关核心上增加稳定的 **Agent Runtime Adapter**，把产品差异限制在 driver 和入口薄壳：
+
+- 新增 `drivers/opencode.js`，通过 `opencode run --format json --dir <cwd>` 执行节点，解析 NDJSON 事件并提取最终 assistant 输出；OpenCode 无原生 output-schema 时，由 prompt JSON envelope + 核心二次 schema 校验保证结构化契约。
+- 抽出 `drivers/contract.js` 与 driver registry，统一 `runAgent(task, ctx)` 输入、标准结果、错误分类、超时/终止语义和能力声明；`run.js` 不再硬编码 driver import、枚举和帮助文本。
+- 将 `roles.json` 的 Claude 工具名改为产品无关 capability（`shell/read_files/write_files/search_files/git_read/git_write/network`），由各 driver 映射为宿主权限；不能满足角色最小能力时 fail-closed。
+- 将 preflight/epic-preflight 从 `.claude/workflows/` 移至 `.agents/workflows/`；核心只调用中立脚本路径，`.claude/` 仅保留兼容薄壳。
+- 核心节点不得依赖 `/opsx:*`、`/pipe` 等宿主斜杠命令；统一调用可执行的 `openspec`、`git`、`gh` 或 `.agents/commands/*.js`，斜杠命令只负责转发核心 CLI。
+- 为 Claude Code、Codex、OpenCode 分别保留入口薄壳；所有入口最终执行同一条 `node .agents/tools/pipe-core/run.js ... --driver <name>`。
+- 增加 driver conformance suite：同一组 fake runtime 用例覆盖结构化输出、权限、cwd、认证失败、超时、SIGTERM、挂起、resume 和 epic worktree 隔离；真实 CLI smoke test 按本机可用性执行，缺失认证必须显式 skip/fail，不得静默换 driver。
+
 ### 决策边界（确立为总原则）
 
 **涉及用户（人）的决策，一律回主会话解决**，流水线内绝不自动拍板、不自我扩张需求：
@@ -66,7 +79,7 @@ epic 执行器读 `epic.json` 的 `dependsOn` DAG → 每次推进就绪子项 �
 ## Capabilities
 
 ### New Capabilities
-- `workflow-core`: 模型无关编排核心——节点 DAG + 状态机 + 断点续跑（P1）+ 决断链（P2）+ epic 并行（P3）+ 自适应编排（P4）+ 跨模型 driver（P5）
+- `workflow-core`: 模型无关编排核心——节点 DAG + 状态机 + 断点续跑（P1）+ 决断链（P2）+ epic 并行（P3）+ 自适应编排（P4）+ 跨模型 driver（P5）+ 跨 Agent 产品通用化（P6）
 
 ### Modified Capabilities
 - `workflow-optimize`（既有）：本变更以 `workflow-core` 取代其 Workflow 工具实现路径；既有门禁（CR 复盘维度、统一验证基线、前置自检）作为新核心的规格基线保留。
@@ -78,8 +91,8 @@ epic 执行器读 `epic.json` 的 `dependsOn` DAG → 每次推进就绪子项 �
 
 ## Impact
 
-- 影响面：开发流程基础设施（新增 `.agents/tools/pipe-core/` + `.agents/skills/pipe/` + `.agents/runs/`；替换 `.claude/workflows/music-tag-run.js`；改 `.claude/commands/pipe*.md`、`.agents/skills/pipe/SKILL.md`、`.claude/skills/pipe`（symlink）、`.claude/workflows/pipe-preflight.sh`、`openspec/config.yaml`）。
-- 与后续变更的关系：本变更合回 main 后，后续所有变更（含 Codex 驱动）走 `node .agents/tools/pipe-core/run.js --driver claude|codex`。
+- 影响面：开发流程基础设施（新增 `.agents/tools/pipe-core/` + `.agents/skills/pipe/` + `.agents/runs/` + `.agents/workflows/`；替换 `.claude/workflows/music-tag-run.js`；改 `.claude/commands/pipe*.md`、`.agents/skills/pipe/SKILL.md`、`.claude/skills/pipe`（symlink）、OpenCode 项目入口、`openspec/config.yaml`）。
+- 与后续变更的关系：本变更合回 main 后，后续所有变更走 `node .agents/tools/pipe-core/run.js --driver claude|codex|opencode`；新增 Agent 只实现 driver contract 与入口薄壳，不复制 pipeline。
 - 不改应用功能：无 Rust/前端业务代码改动；对 `src/`、`src-tauri/` 只做回归验证，不做功能改动。
 - 本变更自身域为 `infra`：开发/验证阶段不跑 cargo/npm（无业务代码变更、不以编译作为门禁），跑核心单测 + 静态自检 + openspec validate；交付前对既有代码跑回归验证确认未破坏构建。
 - 归档时无主规格同步（`openspec/specs/` 无对应 capability 变更），只需归档 change 本体并随分支提交。

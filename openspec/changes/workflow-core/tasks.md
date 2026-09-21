@@ -74,3 +74,22 @@
   - [x] `npm run test` + `npm run build` 通过
 - [x] 8.8 全量 `openspec validate --all` 通过（主规格未动，确认无回归）
 - [x] 8.9 按 Issue #106 提交 PR：`git push -u origin workflow-core` + `gh pr create --base main --head workflow-core --body "Closes #106"`
+
+## 9. P6 跨 Agent 产品通用化（复核追加，待实现）
+
+> 目标：把当前“Claude/Codex 双 driver”升级为“Claude Code/Codex/OpenCode 三端通用 + 其他 runtime 可按契约扩展”。本组未完成前，文档只能宣称“模型无关核心 + Claude/Codex driver”，不能宣称“跨 Agent 通用”。依赖顺序：contract → capability → 中立脚本/命令 → OpenCode driver → 三端入口 → conformance/真实 smoke。
+
+- [ ] 9.1 新增 `drivers/contract.js`：定义 `apiVersion`、`task/ctx/DriverResult` 校验、标准错误分类、超时与 SIGTERM/SIGKILL 宽限期；所有 driver 不再向 core 抛未分类异常
+- [ ] 9.2 新增 `drivers/registry.js`：注册 claude/codex/opencode；`run.js` 从 registry 获取 driver、帮助文本和环境 matcher，移除硬编码 import、`DRIVERS` 枚举及 `if (driverName === ...)` 角色注入
+- [ ] 9.3 把 role prompt 组装移至公共 wrapper；`roles.json` 将 `allowedTools` 改为产品无关 `capabilities`，定义 read-only/workspace-write 最小权限与 driver 映射
+- [ ] 9.4 为只读节点增加落地 diff 审计：记录节点前后 HEAD/status，`cr-agent`/只读节点产生写入即失败；宿主能力降级必须写入 state/result
+- [ ] 9.5 迁移 `.claude/workflows/pipe-preflight.sh`、`pipe-epic-preflight.sh` 的实现到 `.agents/workflows/`；Claude 路径仅保留可选转发壳，core/selfcheck 默认只引用中立路径
+- [ ] 9.6 新增 `.agents/commands/` 确定性 wrapper：OpenSpec 归档、PR 创建、CI 等待、合并；移除 `pipeline.js` 中 `/opsx:*` 和其他宿主 UI 命令依赖
+- [ ] 9.7 新增 `drivers/opencode.js`：构造 `opencode run --format json --dir ...` 参数，支持 model/agent，流式解析 NDJSON，提取最终 assistant JSON envelope，临时文件安全清理并做 schema 二次校验
+- [ ] 9.8 增加 OpenCode 项目级 pipe 入口（command/config 薄壳）与文档；更新 `.agents/skills/pipe/SKILL.md`、`AGENTS.md`、`.claude/CLAUDE.md` 的三端命令和能力边界
+- [ ] 9.9 状态 schema 升级：记录 `driverApiVersion`、`driverVersion`、权限降级；同 driver resume 保持现有语义，显式跨 driver resume 重新做全部 succeeded 节点落地校验且不依赖旧 sessionId
+- [ ] 9.10 建共享 driver conformance suite：claude/codex/opencode 均覆盖 cwd、role/schema、成功输出、spawn/auth/config/timeout/protocol/schema 错误、终止清理、只读权限、挂起/resume
+- [ ] 9.11 增加 OpenCode fake runtime 与全流水线 E2E；epic 三并发断言三个 OpenCode 进程分别位于独立 worktree，状态写盘无竞态
+- [ ] 9.12 增加真实 CLI smoke harness：逐端探测版本/认证；可用时跑最小只读节点和临时 worktree 写节点，不可用时明确 skip 原因，不允许其他 driver 代替
+- [ ] 9.13 更新 `--self-check`：检查所有 registry driver、contract apiVersion、capability 映射、中立 workflow/command 脚本语法，任一缺失 fail-closed
+- [ ] 9.14 验收：原 104 测试保持全绿 + P6 新测试全绿 + `openspec validate workflow-core --strict --no-interactive` + 全量 OpenSpec 校验；三端至少各有一次真实 smoke 证据后才更新 PR 描述为“跨 Agent 通用”

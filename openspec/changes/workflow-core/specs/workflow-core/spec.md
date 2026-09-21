@@ -83,30 +83,97 @@ Architect 判定的变更域 SHALL 扩展为 `['backend','frontend','both','docs
 - **THEN** 各自在独立 worktree（独立分支），互不污染对方工作区
 
 ### Requirement: 跨模型 driver（P5）
-核心 SHALL 通过统一 driver 接口 `runAgent({ role, prompt, schema, cwd, worktreePath, env }) → { ok, structured?, raw?, sessionId?, exitCode? }` 调用模型。Claude 与 Codex SHALL 各实现一个 driver，把「一个 agent 节点」翻译成对应 CLI 子进程命令 + 解析结构化输出。核心与任务定义 SHALL 不绑定任何模型。driver 实现位于 `.agents/tools/pipe-core/drivers/`（claude.js / codex.js），与核心同目录统一管理。
+核心 SHALL 通过统一 driver 接口 `runAgent(task, ctx) → DriverResult` 调用 Agent runtime。Claude、Codex 与 OpenCode SHALL 各实现一个 driver，把「一个 agent 节点」翻译成对应 CLI 子进程命令 + 解析结构化输出。核心与任务定义 SHALL 不绑定任何模型或 Agent 产品。driver 实现位于 `.agents/tools/pipe-core/drivers/`，并通过 registry 注册；新增 driver 不得修改 core/pipeline/state。
 
 #### Scenario: 模型切换
-- **WHEN** 用 `--driver claude` 与 `--driver codex` 分别执行同一变更
-- **THEN** 核心调度逻辑一致，仅 driver 层翻译不同；角色文案（roles/ 单源）两边一致
-- **AND** 若 codex 本机未配置 OpenAI 认证 → 以「claude driver 全绿 + codex driver 命令构造正确（单测断言）」为验收标准；codex driver 显式报「配置缺失」，不静默降级为其他模型
+- **WHEN** 用 `--driver claude`、`--driver codex` 与 `--driver opencode` 分别执行同一变更
+- **THEN** 核心调度逻辑一致，仅 driver 层翻译不同；角色文案（roles/ 单源）三端一致
+- **AND** 某 runtime 未安装或未认证时，driver 显式返回配置/认证错误，不静默降级为其他 runtime；fake conformance test 仍为 CI 必跑
 
 #### Scenario: 环境自动感知
 - **WHEN** 未显式指定 `--driver`
-- **THEN** 核心按当前环境自动选择（Claude 环境 → claude driver；Codex 环境 → codex driver；纯终端无法判断 → 要求显式指定）
+- **THEN** registry 按当前环境自动选择（Claude 环境 → claude；Codex 环境 → codex；OpenCode 环境 → opencode；纯终端或多重匹配无法判断 → 要求显式指定）
 
 #### Scenario: driver 失败上报
 - **WHEN** 某 driver 因环境/认证缺失无法执行
 - **THEN** 该节点失败并显式上报失败原因，不静默降级为其他模型
 
 ### Requirement: 角色单源
-7 个流水线角色（leader/architect/rust-backend/vue-frontend/cr-agent/verify-agent/tester）的 system prompt SHALL 收敛到 `.agents/tools/pipe-core/roles/` 单一来源；claude driver 与 codex driver 各自翻译成对应 CLI 形态（claude 走 `--append-system-prompt` 注入 `roles/<role>.md` 同一份内容，不用 `--agent` 避免双份文案；codex 把 role content 拼进 exec prompt），不重复维护两份角色文案。
+7 个流水线角色（leader/architect/rust-backend/vue-frontend/cr-agent/verify-agent/tester）的 system prompt SHALL 收敛到 `.agents/tools/pipe-core/roles/` 单一来源；公共 wrapper SHALL 组装 role prompt，各 driver 只翻译成对应 CLI 形态，不重复维护角色文案。角色权限 SHALL 使用产品无关 capability，不得在公共角色定义中把 Claude/Codex/OpenCode 工具名作为协议。
 
 #### Scenario: 单源一致
 - **WHEN** 修改某角色描述
-- **THEN** 只改 `roles/` 一处，claude/codex 两个 driver 引用同一份，无第二份文案
+- **THEN** 只改 `roles/` 一处，claude/codex/opencode 三个 driver 引用同一份，无第二份文案
+
+### Requirement: Agent Runtime Adapter 契约（P6）
+driver contract SHALL 版本化并统一输入、结果、错误分类、超时、终止和 capability 声明。所有 driver SHALL 返回标准 `DriverResult`；核心 SHALL 不解析宿主 stdout/event，也不得包含按 driverName 分支的角色注入逻辑。
+
+#### Scenario: 新增 runtime 不改核心
+- **WHEN** 新增一个满足 contract 的 driver
+- **THEN** 仅注册 driver 和入口薄壳即可执行现有 pipeline，`core.js`、`pipeline.js`、`state.js` 无需修改
+
+#### Scenario: 标准错误分类
+- **WHEN** runtime 出现二进制缺失、认证失败、超时、协议错误或 schema 错误
+- **THEN** driver 分别返回 `spawn/auth/timeout/protocol/schema` 标准错误，核心按统一决断链处理
+
+#### Scenario: contract 版本不兼容
+- **WHEN** driver `apiVersion` 与核心要求不兼容
+- **THEN** preflight fail-closed，在任何写入节点前退出
+
+### Requirement: OpenCode driver（P6）
+OpenCode driver SHALL 使用官方非交互 CLI 执行节点，支持 cwd、model、agent 和 JSON 事件输出；SHALL 从 NDJSON 中提取最终 assistant 输出并由核心二次 schema 校验。它 SHALL 与 Claude/Codex 共享相同 role、state、DAG、decision 和 resume 语义。
+
+#### Scenario: OpenCode 成功执行
+- **WHEN** `opencode run --format json --dir <worktree>` 返回合法事件流和符合 schema 的最终 JSON envelope
+- **THEN** driver 返回 `ok=true` 与 `structured`，核心按普通成功节点推进
+
+#### Scenario: OpenCode 协议损坏
+- **WHEN** 事件流无最终 assistant 消息、JSON 行损坏或最终内容不符合 schema
+- **THEN** driver 返回 `protocol` 或 `schema` 错误，不把日志/中间消息误当结果
+
+#### Scenario: OpenCode worktree 隔离
+- **WHEN** epic 在三个独立 worktree 并发执行 OpenCode 子进程
+- **THEN** 每个进程的 `--dir` 与节点 `cwd` 都指向对应 worktree，写入不得落到主工作区
+
+### Requirement: 产品无关 capability（P6）
+角色 SHALL 通过 `shell/read_files/write_files/search_files/git_read/git_write/network` 等 capability 表达最小权限；每个 driver SHALL 显式声明并映射宿主能力。无法满足所需能力或无法保持 read-only 约束时 SHALL fail-closed 或记录经批准的权限降级，不得静默提权。
+
+#### Scenario: 只读 CR
+- **WHEN** `cr-agent` 在任一 runtime 执行
+- **THEN** driver 应用 read-only 沙箱和只读 capability；节点完成后若检测到工作区写入则节点失败
+
+#### Scenario: 能力不足
+- **WHEN** runtime 不支持角色所需的 `write_files` 或 `git_write`
+- **THEN** 节点在启动前返回 `config` 错误，不以 prompt 自我声明代替权限保障
+
+### Requirement: 中立工作流与确定性命令（P6）
+核心 SHALL 只依赖 `.agents/workflows/` 与 `.agents/commands/` 下的中立可执行脚本，pipeline 节点 SHALL 不依赖 `/opsx:*`、`/pipe` 等宿主 UI 命令。Claude/OpenCode 的斜杠命令及 Codex 的 AGENTS 入口 SHALL 仅作为薄壳。
+
+#### Scenario: preflight 路径中立
+- **WHEN** 任一 driver 执行 preflight
+- **THEN** 调用 `.agents/workflows/pipe-preflight.sh`，核心不读取 `.claude/workflows/` 中的实现
+
+#### Scenario: 归档命令可执行
+- **WHEN** integrate 节点归档变更
+- **THEN** 调用确定性的 OpenSpec CLI 或 `.agents/commands/archive-change.js`，不要求 runtime 理解 `/opsx:archive`
+
+#### Scenario: 三端入口同核
+- **WHEN** 用户分别从 Claude Code、Codex、OpenCode 入口启动同一变更
+- **THEN** 三个入口最终都执行同一 `run.js`，仅 `--driver` 值不同，退出码与状态文件语义一致
+
+### Requirement: driver 一致性测试（P6）
+每个 driver SHALL 通过共享 conformance suite，覆盖 cwd、role/schema 注入、结构化输出、错误分类、权限映射、超时终止、挂起/resume 和 epic worktree 隔离。fake runtime 测试 SHALL 为 CI 必跑；真实 CLI smoke SHALL 在二进制与认证存在时执行，否则明确 skip 并记录原因。
+
+#### Scenario: 共享契约回归
+- **WHEN** 修改 contract、角色能力或任一 driver
+- **THEN** claude/codex/opencode 的共享 conformance suite 全部运行，防止只修一个 runtime
+
+#### Scenario: 不可用 runtime 不伪绿
+- **WHEN** 本机缺失某 CLI 或认证
+- **THEN** 真实 smoke 明确标记 skip/不可用，不能以其他 driver 成功替代该 runtime 的验收
 
 ### Requirement: 流程脚本静态自检（沿用既有门禁）
-`run.js` SHALL 提供 `--self-check`：校验角色定义、节点定义、driver 契约完整性。preflight SHALL 保留对流程脚本的静态自检——Node 脚本 `node --check`、shell 脚本 `bash -n`（`pipe-preflight.sh`/`pipe-epic-preflight.sh` 皆然），fail-closed：任一失败即 `ready=false` 阻止写入。
+`run.js` SHALL 提供 `--self-check`：校验角色定义、节点定义、全部已注册 driver 的 contract/capability 完整性。preflight SHALL 保留对 `.agents/workflows/` 流程脚本的静态自检——Node 脚本 `node --check`、shell 脚本 `bash -n`（`pipe-preflight.sh`/`pipe-epic-preflight.sh` 皆然），fail-closed：任一失败即 `ready=false` 阻止写入。
 
 #### Scenario: 自检 fail-closed
 - **WHEN** 角色/节点定义有缺失或不一致

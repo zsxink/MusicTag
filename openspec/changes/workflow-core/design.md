@@ -9,6 +9,7 @@
 - **P2 决断链**：无 leader 决断节点，test/verify/CR 失败直接 `return` 给主会话。
 - **P3 子变更并行**：epic 子变更只串行，`epic.json` 已含 `dependsOn` DAG 未利用。
 - **P5 跨模型**：流水线绑定 Workflow 工具，Codex 无法驱动。
+- **P6 跨 Agent 产品**：复核确认当前核心虽不认识模型，但运行时仍硬编码 Claude/Codex 两个 driver，并保留 `.claude/workflows/`、Claude 工具名和 `/opsx:*` 入口语义，OpenCode 不能作为等价 runtime 接入。
 
 用户拍板（本变更的约束基线）：
 1. **P1-P5 全做**；后续会用 Codex 继续开发，跨模型通用是硬需求。
@@ -17,15 +18,19 @@
 4. **决策边界总原则**：涉及用户（人）的决策一律回主会话解决，流水线内绝不自动拍板、不自我扩张需求。
 5. **本变更组织**：单变更 `workflow-core`（不拆 epic）。P1-P5 全落同一核心模块，拆分必文件冲突；用新 epic 并行器实现自身是循环依赖。
 6. **PRD 初始化**：大变更 `/pipe:init <epic>` 拆子变更、用户批一次总 PRD；中等变更走单变更 `/pipe`。PRD 批准在主会话由用户做。
+7. **P6 复核追加**：在上述模型无关核心上补齐 Claude Code / Codex / OpenCode 三端 Agent Runtime Adapter；公共层不再依赖任一宿主的工具名、目录或斜杠命令。
 
 ## Goals / Non-Goals
 
 **Goals:**
 - 交付 `.agents/tools/pipe-core/` 模型无关编排核心（纯 node、零依赖）：节点 DAG + 状态机 + 断点续跑（P1）+ 决断链（P2）+ epic 并行（P3）+ 自适应编排（P4）+ 跨模型 driver（P5）。
 - 用核心取代 `.claude/workflows/music-tag-run.js`；`/pipe`、`/pipe:epic` 改为调用 `node run.js`。
-- 角色文案收敛 `roles/` 单源；claude/codex 两个 driver 引用同一份。
+- 角色文案收敛 `roles/` 单源；claude/codex/opencode 三个 driver 引用同一份。
 - 保留既有门禁（统一验证基线、CR 复盘三检、前置静态自检）作为新核心规格基线。
 - 跨 Claude / Codex 使用方式一致：Claude 斜杠命令薄壳转发，Codex 对话/自定义指令触发，都跑同一份核心。
+- 跨 Claude Code / Codex / OpenCode 使用方式一致：三端入口都只转发同一核心，runtime 差异只存在于 driver。
+- 定义可测试、可版本化的 Agent Runtime Adapter contract；新增 Agent 不得修改 core/pipeline/state。
+- 用 capability 取代宿主工具名，用中立可执行命令取代宿主斜杠命令。
 
 **Non-Goals:**
 - 不改应用功能：不动 `src/`、`src-tauri/` 业务代码。
@@ -33,6 +38,8 @@
 - 不改 `openspec/specs/` 主规格（本变更无对应 capability，归档只归档 change 本体）。
 - 不引入 CI 系统/平台；沿用本地 verify + GitHub CI required checks。
 - 不保留旧 Workflow 脚本为双轨（删除，留档在归档 commit）。
+- 不承诺一次支持所有 Agent 产品；本期保证 Claude Code、Codex、OpenCode，其他 Agent 以 conformance suite 作为接入门槛。
+- 不使用 ACP 作为首期唯一传输层；OpenCode 首期走稳定 CLI，后续可增加 ACP/HTTP driver 而不改变核心契约。
 
 ## 变更域判定
 
@@ -60,8 +67,13 @@
 │   ├── worktree.js       # P3: git worktree 创建/清理/分支隔离/合并回主
 │   ├── roles/            # 角色定义（单一来源，7 角色）
 │   └── drivers/
+│       ├── contract.js   # driver 接口、标准结果、错误码、能力检查
+│       ├── registry.js   # driver 注册与显式/环境选择
 │       ├── claude.js     # claude -p --output-format json --json-schema ... --append-system-prompt roles/<role>.md ...
-│       └── codex.js      # codex exec --json --output-schema schema.json -o result.json ...
+│       ├── codex.js      # codex exec --json --output-schema schema.json -o result.json ...
+│       └── opencode.js   # opencode run --format json --dir ...；解析 NDJSON final assistant message
+├── workflows/                          # Agent 无关的 preflight / epic-preflight 执行脚本
+├── commands/                           # OpenSpec/archive/PR/CI 等确定性 wrapper
 └── runs/                               # 运行态状态文件（.gitignore）
     ├── <change>/state.json
     └── <epic>/epic-state.json
@@ -147,17 +159,75 @@
 }
 ```
 
-### driver 统一契约
+### Agent Runtime Adapter 统一契约
 
 ```js
-runAgent(task, ctx) → { ok, structured?, raw?, sessionId?, exitCode? }
-ctx = { cwd, worktreePath, env, stateFile, nodeId, prompt, schema, maxTurns, allowedTools, model }
+runAgent(task, ctx) → Promise<DriverResult> | DriverResult
+
+task = { id, role, prompt, schema }
+ctx = {
+  cwd, env, model, timeoutMs, terminationGraceMs,
+  capabilities, sandbox, signal, nodeId
+}
+
+DriverResult = {
+  ok,
+  structured?,
+  raw?,
+  sessionId?,
+  exitCode?,
+  error?: { kind, message, retryable, details? }
+}
 ```
 
-- **claude driver**：`claude -p <prompt> --output-format json --json-schema '<schema>' --append-system-prompt roles/<role>.md [--cwd <dir>] [--permission-mode bypassPermissions|acceptEdits|...] [--allowedTools ...] [--model ...]` → 解析 `.structured_output`。（D7 拍板：不用 `--agent`，角色文案经 `--append-system-prompt` 注入 `roles/` 单源内容。）
-- **codex driver**：`codex exec <prompt> --cd <dir> --sandbox <mode> --output-schema <schemaFile> -o <resultFile> --json [--model ...]` → 读 `resultFile` → 核心二次 schema 校验。
-- 角色单源：`roles/` 定义 `{ id, name, systemPrompt, sandbox, allowedTools }`；claude 用 `--append-system-prompt` 注入同一份 role content，codex 把 role.systemPrompt 拼进 exec prompt；两个 driver 引用同一份文案。
-- 已知坑（有兜底）：模型输出不稳定 → driver 层 schema 重试 + 核心二次校验；子进程超时 → 外部超时 + SIGTERM；断线 → session_id + 工具 resume（上下文保留）；token → `--max-budget-usd` / usage 字段。
+- `contract.js` 负责输入校验、标准错误分类（`spawn/auth/config/timeout/protocol/schema/agent`）、超时与终止；driver 不得抛出未分类异常。
+- **claude driver**：`claude -p <prompt> --output-format json --json-schema '<schema>' --append-system-prompt roles/<role>.md ...` → 解析 structured output。
+- **codex driver**：`codex exec <prompt> --cd <dir> --sandbox <mode> --output-schema <schemaFile> -o <resultFile> --json ...` → 读 result file。
+- **opencode driver**：`opencode run --format json --dir <cwd> [--model <provider/model>] [--agent <agent>] <prompt>` → 逐行解析 NDJSON 事件，只接受当前 session 的最终 assistant text；从 fenced/unfenced JSON envelope 中提取 `structured`。OpenCode CLI 无原生 schema 参数时，schema 作为约束附加到 prompt，最终仍由核心二次校验。
+- 所有 driver 都必须返回同一 `DriverResult`；核心只消费标准结果，不解析宿主事件、不认识二进制参数。
+- driver registry 从 manifest 注册 `{ name, module, envMatchers, capabilities }`；显式 `--driver` 优先，环境检测只作便利入口，歧义时要求显式指定，绝不自动降级到另一 runtime。
+
+### capability 与权限映射
+
+角色定义改为产品无关能力：
+
+```json
+{
+  "cr-agent": {
+    "sandbox": "read-only",
+    "capabilities": ["shell", "read_files", "search_files", "git_read"]
+  },
+  "vue-frontend": {
+    "sandbox": "workspace-write",
+    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_write"]
+  }
+}
+```
+
+| capability | Claude Code | Codex | OpenCode |
+|---|---|---|---|
+| `shell` | `Bash` | sandbox shell | shell permission |
+| `read_files` | `Read` | sandbox read | read permission |
+| `write_files` | `Edit`,`Write` | `workspace-write` | edit/write permission |
+| `search_files` | `Glob`,`Grep` | shell/search | glob/grep permission |
+| `git_read` | Bash + role policy | shell + read-only | shell + deny write policy |
+| `git_write` | Bash + accept edits | workspace-write | shell/edit + project policy |
+| `network` | WebSearch/WebFetch 或 Bash | runtime 配置 | web/network permission |
+
+driver 启动前必须声明并校验自身能力。角色要求无法满足时返回 `config` 错误并 fail-closed；不得把只读角色提升到写权限。宿主无法精确限制某项工具时，采用“宿主沙箱 + system prompt + 落地 diff 审计”三层约束，并在结果中标记降级。
+
+### 中立命令与入口层
+
+- 核心脚本迁移到 `.agents/workflows/pipe-preflight.sh`、`.agents/workflows/pipe-epic-preflight.sh`；`.claude/workflows/*` 如需保留，仅 `exec` 中立脚本，不含业务逻辑。
+- `pipeline.js` 不出现 `/opsx:*`、`/pipe` 等宿主 UI 命令。归档统一执行仓库实际版本支持的 OpenSpec CLI，或 `.agents/commands/archive-change.js <change>`；建 PR、等待 CI、合并均调用确定性 CLI wrapper。
+- Claude Code：`.claude/commands/pipe*.md` 薄壳。
+- Codex：根 `AGENTS.md` 入口约定。
+- OpenCode：项目 command/config 薄壳，最终调用 `node .agents/tools/pipe-core/run.js ... --driver opencode`。
+- 无论入口来自何处，状态目录、退出码、挂起报告、resume 语义完全一致。
+
+### driver conformance suite
+
+每个 driver 必须通过同一套契约测试：cwd/worktree 传递、role/schema 注入、结构化输出、错误分类、超时终止、权限映射、挂起/resume、epic worktree 隔离，以及不可用 runtime 不静默换 driver。fake runtime 测试为 CI 必跑；真实 CLI smoke 仅在对应二进制和认证存在时运行并记录版本，否则显式 skip，不得伪装为通过。
 
 ## Decisions
 
@@ -262,6 +332,25 @@ ctx = { cwd, worktreePath, env, stateFile, nodeId, prompt, schema, maxTurns, all
 
 > **现状核对**：三处补丁已提交在 main（commit `e4a61f3 feat(106): infra domain`），旧脚本 `music-tag-run.js` 工作区干净。D10 的 1.1–1.3 已完成，本变更从「核心骨架」开始即可。
 
+### D11 跨 Agent 产品通用化（P6，复核追加）
+
+采用“稳定核心 + 标准 driver contract + 产品入口薄壳”的扩展方式：
+
+1. core/pipeline/state 只依赖 `runAgent(task, ctx)` 和标准 `DriverResult`，不通过 `if (driverName === ...)` 注入角色或权限。
+2. 角色内容由公共 wrapper 读取一次；driver 只负责把已组装的 task 翻译为宿主协议，避免每新增 runtime 都修改 `run.js`。
+3. capability 是角色需求，宿主工具名是 driver 私有映射；权限不满足则 fail-closed。
+4. OpenCode 首期使用非交互 CLI + NDJSON；不把原始事件流直接暴露给 core。
+5. 工作流动作必须是可执行 CLI/wrapper；斜杠命令只属于入口层，不得成为 DAG 节点依赖。
+6. 状态文件记录 `driverApiVersion` 与 `driverVersion`。同一 run 默认用原 driver resume；显式跨 driver resume 时，核心重新验证所有 succeeded 节点的落地 commit，并从首个未完成节点继续，不能复用宿主 sessionId 作为正确性依据。
+7. driver contract 增加 `apiVersion`；不兼容版本在启动前拒绝，避免运行中才破坏状态。
+
+实施分四步，任何一步都可独立验证：
+
+- A：先抽 contract/registry/capability，不改变 Claude/Codex 行为；现有 104 测试必须保持全绿。
+- B：迁移中立 workflows 和确定性 command wrappers，删除 core 对 `.claude/`、`/opsx:*` 的依赖。
+- C：新增 OpenCode driver、项目入口和 fake conformance tests。
+- D：三端真实 smoke、resume、epic worktree 验证，更新文档后再宣称“跨 Agent 通用”。
+
 ## Risks / Trade-offs
 
 - **方向 A 的成本**：每个节点是独立 CLI 进程（冷启动、节点间无共享会话上下文）。缓解：状态文件 + 续跑，已通过节点复用、失败节点才重跑，重试便宜；claude 侧 `--append-system-prompt` 注入 `roles/` 单源角色文案并配合 `--allowedTools` 控制工具集，能力不缩水。
@@ -273,6 +362,10 @@ ctx = { cwd, worktreePath, env, stateFile, nodeId, prompt, schema, maxTurns, all
 - **决策边界的摩擦**：涉及用户决策一律挂起回主会话，可能比「自动继续」慢。权衡：符合「不自动拍板」原则，且挂起时状态已落盘、一句话决策后续跑，成本可控。
 - **状态文件演进**：`state.json`/`epic-state.json` 全新格式，核心演进期最易改动。缓解：两文件含 `schemaVersion` 字段，迁移兼容处理。
 - **跨环境行为差异**：codex 无 `--agent` 角色加载，靠 prompt 注入；claude 走注入（同 roles/ 单源）。缓解：角色文案单源，driver 各自翻译，行为对齐由 `--self-check` + 单测覆盖。
+- **OpenCode JSON 是事件流而非最终对象**：driver 必须按事件协议提取最终 assistant 消息，并对多消息、缺 final、混入日志分别报 `protocol` 错误；不得直接 `JSON.parse(stdout)`。
+- **能力映射不完全等价**：部分 runtime 无法按工具粒度限制权限；通过宿主沙箱、角色约束和节点后 diff 审计组合补偿，任何降级必须记录在 state/result 中。
+- **CLI 版本漂移**：driver 在启动时探测版本和必需 flags，conformance smoke 固定最低支持版本；不兼容时 fail-fast，不猜测参数。
+- **跨 driver resume**：不同 runtime session 不可移植；正确性只依赖 git 落地和 state，sessionId 仅作可选优化。
 
 ## 任务拆分建议
 
