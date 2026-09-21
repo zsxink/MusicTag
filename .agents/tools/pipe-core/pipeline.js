@@ -250,6 +250,7 @@ function buildPipeline(state) {
       schema: INTEGRATION_SCHEMA,
       dependsOn: ['verify'],
       retry: { max: 1, intervalMs: 0 },
+      resultOk: (r) => r.archived === true && r.merged === true && typeof r.prUrl === 'string' && r.prUrl.length > 0,
       prompt: (ctx) =>
         `你是流水线 Leader。变更「${change}」已通过验证，现在执行受控集成：\n` +
         `1. 归档：node .agents/commands/archive-change.js ${change}（在分支上执行，规格改动随分支提交）\n` +

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-const { spawnSync } = require('node:child_process');
+import { spawnSync } from 'node:child_process';
 const target = process.argv[2];
 if (!target) { console.error('用法: merge-pr.js <pr>'); process.exit(2); }
 const result = spawnSync('gh', ['pr', 'merge', target, '--squash', '--delete-branch'], { stdio: 'inherit' });

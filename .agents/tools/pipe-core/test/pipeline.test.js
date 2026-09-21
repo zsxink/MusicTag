@@ -134,3 +134,9 @@ test('pipeline: integrate 使用确定性 PR/CI/merge wrapper，不直接编排 
   assert.doesNotMatch(p, /gh pr (create|merge)/);
   assert.doesNotMatch(p, /git branch -d/);
 });
+
+test('pipeline: integrate 只有真实 PR 合并才算成功', () => {
+  const integrate = pipeline.buildPipeline(stateWithDomain('infra')).find((d) => d.id === 'integrate');
+  assert.equal(integrate.resultOk({ archived: true, prUrl: '', merged: false, summary: 'PR 创建失败' }), false);
+  assert.equal(integrate.resultOk({ archived: true, prUrl: 'https://github.com/x/y/pull/1', merged: true, summary: 'merged' }), true);
+});

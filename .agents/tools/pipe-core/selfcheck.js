@@ -54,6 +54,8 @@ function run({ repoRoot = process.cwd() } = {}) {
           ? { pass: true, blockers: [], majors: [], steps: [] }
           : d.role === 'verify-agent'
             ? { pass: true, blockers: [], majors: [], steps: [{ step: 'probe', status: 'pass', detail: '' }] }
+          : d.id === 'integrate'
+            ? { archived: true, prUrl: 'https://example.invalid/pr/1', merged: true, summary: '' }
           : { done: true, summary: '', smokePassed: true, covered: [], missing: [], risks: [] };
         if (d.resultOk(probe) !== true) errors.push(`节点 ${d.id} 的 resultOk 语义异常`);
       }
