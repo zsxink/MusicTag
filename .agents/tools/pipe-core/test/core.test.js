@@ -183,13 +183,15 @@ test('core: resume 集成——失败节点重跑、已通过节点复用（落�
 
 // ---------- 失败路径与边界（除 happy-path 外强制审计） ----------
 
-test('core: 核心不认识模型——同一 DAG 内 claude 与 codex 节点走同一调度，仅 driver 层不同', () => {
+test('core: 核心不认识模型——同一 DAG 内 claude/codex/opencode 节点走同一调度，仅 driver 层不同', () => {
   const repo = tmpRepo();
   withRoot(repo, () => {
     const claudeDrv = require('../drivers/claude.js');
     const codexDrv = require('../drivers/codex.js');
+    const opencodeDrv = require('../drivers/opencode.js');
     const FAKE_CLAUDE = path.join(__dirname, 'fixtures', 'fake-claude.js');
     const FAKE_CODEX = path.join(__dirname, 'fixtures', 'fake-codex.js');
+    const FAKE_OPENCODE = path.join(__dirname, 'fixtures', 'fake-opencode.js');
     const SCHEMA = { type: 'object', properties: { v: { type: 'number' } }, required: ['v'] };
     // 复合 driver：n1 走真实 claude driver，n2 走真实 codex driver；核心无模型专属分支
     const composite = {
@@ -197,7 +199,14 @@ test('core: 核心不认识模型——同一 DAG 内 claude 与 codex 节点走
         if (task.id === 'n1') {
           return claudeDrv.runAgent(task, { claudeBin: FAKE_CLAUDE, env: { ...process.env, FAKE_OUTPUT: JSON.stringify({ type: 'result', structured: { v: 1 } }) } });
         }
-        return codexDrv.runAgent(task, { codexBin: FAKE_CODEX, env: { ...process.env, FAKE_OUTPUT: JSON.stringify({ v: 2 }) } });
+        if (task.id === 'n2') {
+          return codexDrv.runAgent(task, { codexBin: FAKE_CODEX, env: { ...process.env, FAKE_OUTPUT: JSON.stringify({ v: 2 }) } });
+        }
+        return opencodeDrv.runAgent(task, {
+          opencodeBin: FAKE_OPENCODE,
+          cwd: repo,
+          env: { ...process.env, FAKE_OPENCODE_OUTPUT: JSON.stringify({ v: 3 }) },
+        });
       },
     };
     const change = 'demo';
@@ -205,13 +214,43 @@ test('core: 核心不认识模型——同一 DAG 内 claude 与 codex 节点走
     const defs = [
       Object.assign(node('n1', [], SCHEMA), { retry: { max: 1, intervalMs: 0 } }),
       Object.assign(node('n2', ['n1'], SCHEMA), { retry: { max: 1, intervalMs: 0 } }),
+      Object.assign(node('n3', ['n2'], SCHEMA), { retry: { max: 1, intervalMs: 0 } }),
     ];
     const res = core.runPipeline({ change, state, defsFn: () => defs, driver: composite });
     assert.equal(res.status, 'success');
     assert.equal(results(res).n1.v, 1);
     assert.equal(results(res).n2.v, 2);
+    assert.equal(results(res).n3.v, 3);
     assert.equal(state.nodes.n1.status, 'succeeded');
     assert.equal(state.nodes.n2.status, 'succeeded');
+    assert.equal(state.nodes.n3.status, 'succeeded');
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('core: 中断时 running 节点续跑会复位并再次执行，不永久卡死', () => {
+  const repo = tmpRepo();
+  withRoot(repo, () => {
+    const change = 'resume-running';
+    const state = stateApi.newState(change, 'mock');
+    state.nodes.n1 = { status: 'running', attempts: 1, updatedAt: new Date().toISOString() };
+    stateApi.saveState(change, state);
+    let calls = 0;
+    const res = core.runPipeline({
+      change,
+      state,
+      defsFn: () => [Object.assign(node('n1', []), { retry: { max: 1, intervalMs: 0 } })],
+      driver: {
+        runAgent: () => {
+          calls++;
+          return { ok: true, structured: { resumed: true } };
+        },
+      },
+    });
+    assert.equal(res.status, 'success');
+    assert.equal(calls, 1);
+    assert.equal(state.nodes.n1.status, 'succeeded');
+    assert.equal(state.nodes.n1.attempts, 2);
   });
   fs.rmSync(repo, { recursive: true, force: true });
 });

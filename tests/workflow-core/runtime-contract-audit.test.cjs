@@ -82,31 +82,30 @@ test('P6 read-only CR: actual workspace mutation is rejected before semantic suc
   }
 });
 
-test('P1 state machine: a node must persist ready before running', () => {
+test('P1 state machine: a node must persist running before invoking the driver', () => {
   const repo = tempRepo();
   const previous = process.env.PIPE_CORE_REPO_ROOT;
   process.env.PIPE_CORE_REPO_ROOT = repo;
   try {
-    const state = stateApi.newState('state-machine', 'mock');
-    const snapshots = [];
-    const originalSave = stateApi.saveState;
-    stateApi.saveState = (change, value) => {
-      snapshots.push(value.nodes.n1 && value.nodes.n1.status);
-      originalSave(change, value);
-    };
-    try {
-      core.runPipeline({
-        change: 'state-machine',
-        state,
-        defsFn: () => [{ id: 'n1', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [] }],
-        driver: { runAgent: () => ({ ok: true, structured: {} }) },
-        commitRoot: repo,
-        getHead: () => execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim(),
-      });
-    } finally {
-      stateApi.saveState = originalSave;
-    }
-    assert.deepEqual(snapshots.slice(0, 2), ['ready', 'running']);
+    const change = 'state-machine';
+    const state = stateApi.newState(change, 'mock');
+    let observedRunning;
+    const result = core.runPipeline({
+      change,
+      state,
+      defsFn: () => [{ id: 'n1', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [] }],
+      driver: {
+        runAgent: () => {
+          observedRunning = JSON.parse(fs.readFileSync(stateApi.stateFile(change), 'utf8')).nodes.n1.status;
+          return { ok: true, structured: {} };
+        },
+      },
+      commitRoot: repo,
+      getHead: () => execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim(),
+    });
+    assert.equal(result.status, 'success');
+    assert.equal(observedRunning, 'running');
+    assert.equal(state.nodes.n1.status, 'succeeded');
   } finally {
     if (previous === undefined) delete process.env.PIPE_CORE_REPO_ROOT;
     else process.env.PIPE_CORE_REPO_ROOT = previous;

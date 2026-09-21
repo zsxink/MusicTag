@@ -251,3 +251,14 @@ test('contract version boundary: module API mismatch is rejected before state cr
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test('DAG boundary: non-positive maxConcurrency must fail closed instead of hanging', () => {
+  const dagFile = path.join(CORE, 'dag.js');
+  const probe = spawnSync(process.execPath, ['-e', [
+    `const { batches } = require(${JSON.stringify(dagFile)});`,
+    "batches([{ id: 'n1', dependsOn: [] }], { nodes: {} }, 0);",
+  ].join('\n')], { encoding: 'utf8', timeout: 300 });
+
+  assert.equal(probe.error, undefined, 'maxConcurrency=0 必须快速拒绝，不能进入无限循环');
+  assert.notEqual(probe.status, 0, '非正并发上限必须返回明确错误');
+});

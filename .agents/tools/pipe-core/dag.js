@@ -60,6 +60,9 @@ function readySet(defs, state) {
 
 // 就绪集按 ≤N 拆并发批次。
 function batches(defs, state, maxConcurrency = 3) {
+  if (!Number.isInteger(maxConcurrency) || maxConcurrency <= 0) {
+    throw new Error(`maxConcurrency 必须是正整数：${maxConcurrency}`);
+  }
   const ready = readySet(defs, state);
   const out = [];
   for (let i = 0; i < ready.length; i += maxConcurrency) {

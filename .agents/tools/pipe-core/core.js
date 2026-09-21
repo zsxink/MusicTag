@@ -50,6 +50,10 @@ function runPipeline(opts) {
     results = {},
   } = opts;
 
+  if (!Number.isInteger(maxConcurrency) || maxConcurrency <= 0) {
+    throw new Error(`maxConcurrency 必须是正整数：${maxConcurrency}`);
+  }
+
   const log = (msg) => { if (logger) logger(msg); };
   const runCtx = { change, ctx, state, driver, getHead, commitRoot, log, sleep, results };
 
