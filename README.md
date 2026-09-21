@@ -4,9 +4,18 @@
 
 # MusicTag
 
+<p align="center">
+  <img src="https://img.shields.io/badge/版本-v0.1.1-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
+  <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
+  <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
+  <img src="https://img.shields.io/badge/License-BUSL%201.1-red.svg" alt="license" />
+  <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
+</p>
+
 ## 项目简介
 
-MusicTag 是一个跨平台桌面应用，为本地音乐文件补全元数据（歌名、作者、专辑、封面、歌词）。
+MusicTag 是一个跨平台桌面工具，**逐首**为本地音乐文件补全元数据（歌名、作者、专辑、封面、歌词）：选中歌曲自动联网搜索候选，点选填入，直接写回原文件。
 
 **这是一个个人学习用途的软件**，用于理解桌面应用开发（Tauri + Rust + Vue）、音频元数据读写与多源网络搜索的工程实践。**禁止用于任何商业用途**。
 
