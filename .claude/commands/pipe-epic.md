@@ -45,7 +45,7 @@ node .agents/tools/pipe-core/run.js --epic <epic> --driver claude
 ### ① 校验状态
 - 读 `epic.json`，确认各子项 `dependsOn` 依赖项状态。
 - 确认 main 干净。
-- 执行 `.claude/workflows/pipe-epic-preflight.sh <epic>`；它机械校验 Epic 状态、sourceRevision、来源文件漂移和子 change artifacts。
+- 执行 `.agents/workflows/pipe-epic-preflight.sh <epic>`；`.claude/workflows/pipe-epic-preflight.sh` 仅作兼容转发壳，它机械校验 Epic 状态、sourceRevision、来源文件漂移和子 change artifacts。
 
 ### ② 运行核心 epic 执行器
 ```bash

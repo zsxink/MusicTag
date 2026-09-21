@@ -81,7 +81,7 @@ git checkout -b <change-name>   # 分支名 = change 名
 ```
 
 ### ③ 运行核心（多 Agent 编排）
-先执行 `.claude/workflows/pipe-preflight.sh <change-name>`（preflight 节点亦只读执行同一脚本，fail-closed）；通过后运行：
+先执行 `.agents/workflows/pipe-preflight.sh <change-name>`（`.claude/workflows/pipe-preflight.sh` 仅为兼容转发壳；preflight 节点亦只读执行中立脚本，fail-closed）；通过后运行：
 
 ```bash
 node .agents/tools/pipe-core/run.js <change> --driver claude
@@ -102,7 +102,7 @@ node .agents/tools/pipe-core/run.js <change> --driver claude
    - 有问题 → 决断链 `reroute` → 派对应开发角色修复 → 复审。
    - **三轮未通过 → 决断链 `escalate` 挂起**，上报用户决策。
 6. **最终验证**：Verify 代理按域短路——代码域跑 `cargo check → cargo test → npm run test → npm run build → openspec validate`；docs/spec/infra 跳过 cargo/npm 改跑脚本静态自检 + openspec validate。失败 → 打回修复续跑。
-7. **integrate**：归档 `/opsx:archive` → push → `gh pr create` → 等 CI → `gh pr merge --squash` → 分支清理。
+7. **integrate**：调用 `.agents/commands/` 确定性 wrapper 归档、push、创建 PR、等待 CI、合并、清理分支。
 
 ### ④ 结果处理
 | run.js 退出码 | 处理 |

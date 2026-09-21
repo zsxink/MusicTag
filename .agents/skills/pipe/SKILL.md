@@ -7,14 +7,15 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 
 把一次开发请求（新功能 / 改行为 / 修 Bug）从**需求确认**一路自动跑到**合并归档**。由**模型无关编排核心** `.agents/tools/pipe-core/`（`node run.js`）驱动多 Agent 协作（Leader 主导、7 角色分工），目标是需求确认后无人值守，只在真卡住/挂起时停下。
 
-**本工作流是项目总入口**。规格产出与实现用 OpenSpec 官方命令（`/opsx:*`），多 Agent 编排由核心 CLI 驱动（Claude 经 `/pipe` 薄壳、Codex 经 `AGENTS.md` 入口识别），质量保障用 superpowers skills，git 流程由核心节点编排。
+**本工作流是项目总入口**。规格产出与实现用 OpenSpec 官方 CLI，多 Agent 编排由核心 CLI 驱动（Claude Code/Codex/OpenCode 都只通过薄入口选择 driver），质量保障用统一验证节点，git 流程由核心节点编排。
 
 **Epic 大变更**（整产品级，如 V1）：不走单变更 `/pipe`，改走 `/pipe:init <epic>`（拆子变更 + 只批一次总 PRD）+ `/pipe:epic <epic>`（并行跑 `/pipe`）。详见命令文件。
 
 ## 入口
 
-- Claude：`/pipe <change>` → `node .agents/tools/pipe-core/run.js <change> --driver claude`；`/pipe:epic <epic>` → `node .agents/tools/pipe-core/run.js --epic <epic> --driver claude`。
-- Codex：会话里说「跑 pipe <change>」→ 根 `AGENTS.md` 项目约定识别入口 → `node .agents/tools/pipe-core/run.js <change> --driver codex`。
+- Claude Code：`/pipe <change>` → `node .agents/tools/pipe-core/run.js <change> --driver claude`。
+- Codex：会话里说「跑 pipe <change>」→ 根 `AGENTS.md` 识别入口 → `node .agents/tools/pipe-core/run.js <change> --driver codex`。
+- OpenCode：项目 command 薄壳 → `node .agents/tools/pipe-core/run.js <change> --driver opencode`。
 - 断点续跑：`node .agents/tools/pipe-core/run.js <change> --resume`（从失败/挂起节点继续，已通过节点复用）。
 
 ## 架构（核心 + 薄 driver）
@@ -24,7 +25,7 @@ description: MusicTag 项目开发流水线（多 Agent 协作）——需求确
 - **决断链**：节点失败 → leader 决断节点 `retry / reroute / escalate / abort`。技术失败自动重试、CR 内容问题按文件所有权 reroute、需人拍板一律 escalate 挂起回主会话。
 - **自适应编排**：Architect 判定变更域 `backend/frontend/both/docs/spec/infra`；docs/spec/infra 跳过业务编译门禁。
 - **子变更并行**（P3）：`/pipe:epic` 按 `dependsOn` DAG 就绪集 ≤3 并行，独立 worktree + 独立分支，合并顺序保证前置先合并。
-- **跨模型 driver**（P5）：claude / codex 两个薄 driver 翻译「一个节点 → CLI 子进程」；角色文案 `roles/` 单源，两端同一份。
+- **跨 Agent driver**（P6）：claude / codex / opencode 三个薄 driver 翻译「一个节点 → CLI 子进程」；角色文案 `roles/` 单源，能力映射与错误契约统一。
 - **环境自动感知**：未显式 `--driver` 时按环境变量判断（CLAUDECODE → claude；AI_AGENT → 对应）；无法判断要求显式。
 
 ## 七角色
@@ -92,8 +93,8 @@ node .agents/tools/pipe-core/run.js <change> --driver claude
    - 无阻断无主要问题 → 通过，进验证
    - 有问题 → 决断链 **reroute** 按文件所有权派对应开发角色修复 → 复审
    - **三轮未通过 → escalate 挂起**，上报用户决策
-6. **最终验证**：Verify 代理在所有 Tester/CR 写入后按域短路——代码域跑 `cargo check` → `cargo test` → `npm run test` → `npm run build` → `openspec validate <change> --strict --no-interactive`；docs/spec/infra 跳过 cargo/npm 改跑脚本静态自检 + openspec validate。任一 fail 即 `verify_failed`，只验证不修复；涉及搜索联动（取词/换源/并发/离线判定）的变更追加**复盘回归清单**并逐项入 `verify.steps`，缺失必选项即 `verify_failed`。
-7. **integrate**：归档 `/opsx:archive` → push → `gh pr create` → 等 CI → `gh pr merge --squash` → 分支清理。
+6. **最终验证**：Verify 代理在所有 Tester/CR 写入后按域短路——代码域跑 `cargo check` → `cargo test` → `npm run test` → `npm run build` → `openspec validate <change> --strict --no-interactive`；docs/spec/infra 跳过 cargo/npm 改跑脚本静态自检 + openspec validate。
+7. **integrate**：调用 `.agents/commands/` 确定性 wrapper 归档、提交 PR、等待 CI、合并；不得把 `/opsx:*` 宿主命令写进核心节点。
 
 ### ④ 结果处理
 | run.js 退出码 | 处理 |

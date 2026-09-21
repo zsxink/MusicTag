@@ -6,7 +6,7 @@ const { outputFor } = require('./fake-pipe-common.js');
 const idx = process.argv.indexOf('-o');
 if (idx !== -1) {
   const file = process.argv[idx + 1];
-  const pIdx = process.argv.indexOf('exec');
+  const pIdx = process.argv.indexOf('--ephemeral');
   const prompt = pIdx !== -1 ? process.argv[pIdx + 1] : '';
   fs.writeFileSync(file, JSON.stringify(outputFor(prompt)));
 }

@@ -129,7 +129,7 @@ function runNode(def, runCtx, decider) {
         schema: def.schema,
       };
       let res;
-      const auditRoot = commitRoot || runCtx.ctx.cwd || process.cwd();
+      const auditRoot = commitRoot || runCtx.ctx.cwd || stateApi.repoRoot();
       const beforeAudit = worktreeSnapshot(auditRoot);
       try {
         res = driver.runAgent(task, { ...runCtx.ctx, nodeId: id });

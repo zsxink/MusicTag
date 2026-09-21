@@ -1,6 +1,6 @@
-# MusicTag — 项目约定与 pipe 入口（Codex 项目级指令）
+# MusicTag — 项目约定与 pipe 入口（Claude Code / Codex / OpenCode）
 
-> 本文件是**跨模型项目约定 + pipe 流水线入口触发方式**（P5 落地闭环）。只放入口指针与项目约定，不承载角色文案——角色文案单一来源在 `.agents/tools/pipe-core/roles/`。
+> 本文件是**跨 Agent 项目约定 + pipe 流水线入口触发方式**（P6 落地闭环）。只放入口指针与项目约定，不承载角色文案——角色文案单一来源在 `.agents/tools/pipe-core/roles/`。
 
 ## 项目是什么
 
@@ -39,15 +39,17 @@ node .agents/tools/pipe-core/run.js <change> --driver codex
 # Epic（按 dependsOn DAG 就绪集 ≤3 并行，worktree 隔离）
 node .agents/tools/pipe-core/run.js --epic <epic> --driver codex
 
-# 断点续跑（从失败/挂起节点继续）
+# 断点续跑（从失败/挂起节点继续；跨 driver 只依赖落地校验）
 node .agents/tools/pipe-core/run.js <change> --driver codex --resume
 
 # 静态自检（fail-closed）
 node .agents/tools/pipe-core/run.js --self-check
 ```
 
-- 角色文案单一来源：`.agents/tools/pipe-core/roles/`（codex driver 拼入 prompt）。
+- Claude Code / Codex / OpenCode 分别使用 `--driver claude|codex|opencode`，共享同一 core、DAG 与 state；OpenCode 由 NDJSON adapter 提取最终 assistant JSON。
+- 角色文案单一来源：`.agents/tools/pipe-core/roles/`，角色只声明产品无关 capability；宿主无法满足最小权限时 fail-closed。
 - 节点状态落盘 `.agents/runs/<change>/state.json`（gitignore）；epic 并行状态 `.agents/runs/<epic>/epic-state.json`。
+- 状态记录 `driverApiVersion`、`driverVersion`、权限降级；显式跨 driver resume 不依赖旧 sessionId。
 - 涉及用户决策（CR 三轮不过 / 验证反复不过 / 需求歧义）→ 退出 `suspended`（exit 3），交主会话决策后 `--resume` 续跑，流水线内不自动拍板。
 
 ## Git / Issue 约定
@@ -55,7 +57,7 @@ node .agents/tools/pipe-core/run.js --self-check
 - **Issue 驱动**：任何变更动手前必须先建 GitHub Issue 作为锚点；PR 描述引用 `Closes #<issue>`。
 - **每变更一分支**：分支名 = change 名（kebab-case），从 main 开；不在 main 上直接开发；merge PR 是回到 main 的唯一方式。
 - 开发期间增量提交 `feat(<change>): <任务>`，进度可追溯、崩溃可恢复。
-- 归档 `/opsx:archive` 在提交 PR 前执行：规格改动进分支，与代码一起进 PR。
+- 归档在提交 PR 前由 `node .agents/commands/archive-change.js <change>` 执行；`/opsx:archive` 仅是入口层命令。
 
 ## 常用命令
 

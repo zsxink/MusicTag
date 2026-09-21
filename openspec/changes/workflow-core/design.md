@@ -353,13 +353,7 @@ driver 启动前必须声明并校验自身能力。角色要求无法满足时�
 
 ### D12 P6 现状核对与任务落点（tasks 组 9 依赖边）
 
-> **现状核对（重开复核，2026-09-21）**：组 1–8（P1–P5）已全部实现并合入本分支——105 核心单测全绿、`openspec validate workflow-core --strict --no-interactive` 通过、跨端回归（cargo/npm）已在组 8 跑通。`AGENTS.md`、`.claude/skills/pipe`（→ `../../.agents/skills/pipe` symlink）、`.claude/commands/pipe*.md` 转发、`.claude/workflows/` preflight 实现均已在位。**唯一待实现 = 组 9（P6，14 项全空）**，代码缺口逐项核实如下（实现前以此为准核对）：
-> - `drivers/contract.js`、`drivers/registry.js`、`drivers/opencode.js` 不存在（`drivers/` 仅 claude.js + codex.js；无标准错误分类 `spawn/auth/config/timeout/protocol/schema`）。
-> - `run.js` 仍硬编码 `DRIVERS` 枚举 + `wrapDriver` 内 `if (driverName === 'claude'|'codex')` 角色注入与能力翻译分支（D11 约束 1/3 未满足）。
-> - `roles/roles.json` 仍用 Claude 工具名 `allowedTools`，无产品无关 `capabilities`（D11 约束 3 未满足）。
-> - `selfcheck.js` 硬编码 `DRIVER_NAMES = ['claude','codex']`、静态自检固定 `.claude/workflows/*.sh` 路径（未走中立路径，D11 约束 5 未满足）。
-> - `pipeline.js` integrate 节点 prompt 仍拼 `/opsx:archive`；preflight 节点默认 `.claude/workflows/pipe-preflight.sh`（宿主路径硬编码）。
-> - `.agents/workflows/`、`.agents/commands/` 目录不存在（preflight 实现逻辑仍在 `.claude/workflows/`）。
+> **实现核对（2026-09-21）**：组 1–8（P1–P5）及组 9（P6）均已实现。新增 `drivers/contract.js`、registry、capability 层与 OpenCode NDJSON adapter；核心默认使用 `.agents/workflows/` 和 `.agents/commands/`，Claude 目录仅保留 exec 转发壳；角色文案仍物理单源，三端入口共享同一 core。P6 的 fake conformance/E2E 与真实 CLI smoke harness 已加入，真实认证 smoke 未在本次本地验证中伪装为通过。
 
 **A/B/C/D 四步 ↔ tasks 组 9 落点**（每步独立可验证；新增 runtime 不越出 A 层 contract 即可接入）：
 

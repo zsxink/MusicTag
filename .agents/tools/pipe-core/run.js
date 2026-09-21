@@ -77,6 +77,7 @@ function wrapDriver(driverName, driverInfo, baseCtx) {
       let t = task;
       if (role) {
         ctx.sandbox = role.sandbox || 'workspace-write';
+        ctx.readOnly = ctx.sandbox === 'read-only';
         const mapped = capability.validateRequested(driverName, role.capabilities || [], ctx.sandbox);
         if (!mapped.ok) {
           return { ok: false, error: { kind: 'config', message: `角色 ${task.role} 能力不足：${mapped.error || '宿主无法满足最小权限'}`, retryable: false } };

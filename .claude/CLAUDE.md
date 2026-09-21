@@ -61,7 +61,7 @@ cargo fmt            # 格式化
 ## 开发流水线（需求确认后自动完成）
 
 - **总入口**：`pipe` skill —— 需求确认后由**模型无关编排核心** `.agents/tools/pipe-core/`（`node run.js`）自动跑完「前置校验 → 架构设计 → 开发 → 测试 → CR → 最终验证 → 归档 → 提交 PR → 合并」。
-- **一键全自动（多 Agent 协作）**：`/pipe <name>` —— 薄壳转发 `node .agents/tools/pipe-core/run.js <name> --driver claude`，核心驱动多 Agent（Leader 主导，7 角色分工），节点状态机 + 断点续跑 + 决断链，完整闭环。
+- **一键全自动（多 Agent 协作）**：`/pipe <name>` —— 薄壳转发 `node .agents/tools/pipe-core/run.js <name> --driver claude`，核心驱动多 Agent（Leader 主导，7 角色分工），节点状态机 + 断点续跑 + 决断链，完整闭环；Codex/OpenCode 分别使用 `--driver codex|opencode`。
 - **兼容单 Agent 流程**：`/opsx:run <name>` —— 仅用于既有变更，且不得绕过 `pipe` 的前置校验、最终验证和 CI 门禁。
 - **Epic 大变更拆分**（如 V1 整个产品，通用可复用 V2）：
   - `/pipe:init <epic> [来源]` —— Architect 自动拆成多个子变更并生成/校验完整 OpenSpec artifacts，**用户只批一次总 PRD**；`openspec/epics/<epic>/epic.json` 受版本控制
@@ -76,9 +76,9 @@ cargo fmt            # 格式化
 
 ## 多 Agent 协作（pipe 流水线）
 
-- **7 角色**：Leader（编排）、Architect（设计+变更域判定）、Rust-Dev（`rust-backend`）、Vue-Dev（`vue-frontend`）、CR（`cr-agent`，只读）、Verify/CI（`verify-agent`）、Tester（`tester`）。角色文案单一来源 `.agents/tools/pipe-core/roles/`（claude 经 `--append-system-prompt` 注入、codex 拼入 prompt，同一份）。
-- **编排**：模型无关核心 `.agents/tools/pipe-core/`，`/pipe <name>` 薄壳转发 `node run.js <name> --driver claude`；节点定义数据（`pipeline.js`）驱动 DAG，不硬编码节点顺序。
-- **断点续跑（P1）**：节点级状态落盘 `.agents/runs/<change>/state.json`（仓库根锚定，gitignore）；失败/挂起节点续跑只重跑、已通过复用；落地校验不信任自报。
+- **7 角色**：Leader（编排）、Architect（设计+变更域判定）、Rust-Dev（`rust-backend`）、Vue-Dev（`vue-frontend`）、CR（`cr-agent`，只读）、Verify/CI（`verify-agent`）、Tester（`tester`）。角色文案单一来源 `.agents/tools/pipe-core/roles/`，由三端 driver 各自翻译注入。
+- **编排**：模型无关核心 `.agents/tools/pipe-core/`，节点定义数据（`pipeline.js`）驱动 DAG，不硬编码节点顺序；三端差异只在 drivers/ 与入口薄壳。
+- **断点续跑（P1/P6）**：节点级状态落盘 `.agents/runs/<change>/state.json`（仓库根锚定，gitignore）；失败/挂起节点续跑只重跑、已通过复用；跨 driver resume 不依赖宿主 session，只做 commit 落地校验。
 - **决断链（P2）**：节点失败 → leader 决断节点 `retry / reroute / escalate / abort`；技术失败自动重试、CR 内容问题按文件所有权 reroute、需人拍板一律 escalate 挂起回主会话。
 - **自适应编排（P4）**：Architect 判定变更域 `backend/frontend/both/docs/spec/infra`；纯后端仅 Rust-Dev、纯前端仅 Vue-Dev、跨前后端按 Rust→Vue 串行、docs/spec/infra 派 leader 流程维护角色（跳过业务编译门禁）。
 - **CR 只读、Leader 中转**：CR 只读审查（不 Edit/Write 代码），问题打回 Leader → Leader 重派对应开发角色修复 → 再复审。
@@ -99,7 +99,7 @@ cargo fmt            # 格式化
 - **每变更一分支**：分支名 = change 名（kebab-case），从 main 开，`git checkout -b <name>`。
 - 不在 main 上直接开发；**merge PR 是回到 main 的唯一方式**。
 - 开发期间**增量提交**（`feat(<name>): <任务>`），进度可追溯、崩溃可恢复。
-- **归档在提交 PR 前**：`/opsx:archive <name>` 的规格改动进分支，与代码一起进 PR，合并后主规格即最新。
+- **归档在提交 PR 前**：核心调用 `node .agents/commands/archive-change.js <name>`，规格改动进分支，与代码一起进 PR，合并后主规格即最新；`/opsx:archive` 仅保留为入口层兼容命令。
 - PR 合并前必须等待 GitHub CI required checks；本地 Verify 不能替代远端门禁。
 - **提交 PR**：`git push -u origin <name>` + `gh pr create --base main --head <name>`；**合并**：`gh pr merge <name> --squash`。
 - 合并后 `git branch -d <name>` 清理已合并分支（`-d` 只删已合并）。

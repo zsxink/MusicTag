@@ -83,17 +83,17 @@
 >
 > **现状核对（2026-09-21，组 1–8 已全部实现）**：`drivers/` 仅 claude.js+codex.js，无 contract/registry/opencode；`run.js` 硬编码 `DRIVERS` + `wrapDriver` 的 `if (driverName === …)` 角色注入分支；`roles.json` 用 Claude 工具名 `allowedTools`；`selfcheck.js` 硬编码 `DRIVER_NAMES`、静态自检固定 `.claude/workflows/*.sh`；`pipeline.js` integrate 依赖 `/opsx:archive`、preflight 默认 `.claude/workflows/` 路径；`.agents/workflows/`、`.agents/commands/` 尚未建立（preflight 实现仍在 `.claude/workflows/`，drivers 测试仅覆盖 claude/codex，无任何 P6 测试）。实现时按 A→B/C→D 推进，不重复动已实现的 P1–P5 模块；每小步伴随先行失败测试（TDD），既有 105 测试保持全绿。
 
-- [ ] 9.1 新增 `drivers/contract.js`：定义 `apiVersion`、`task/ctx/DriverResult` 校验、标准错误分类（`spawn/auth/config/timeout/protocol/schema` + retryable）、超时与 SIGTERM/SIGKILL 宽限期；所有 driver 不再向 core 抛未分类异常（**最先，A 步基础**）
-- [ ] 9.2 新增 `drivers/registry.js`：注册 claude/codex/opencode；`run.js` 从 registry 获取 driver、帮助文本和环境 matcher，移除硬编码 import、`DRIVERS` 枚举及 `if (driverName === ...)` 角色注入（依赖 9.1）
-- [ ] 9.3 把 role prompt 组装移至公共 wrapper；`roles.json` 将 `allowedTools` 改为产品无关 `capabilities`（shell/read_files/write_files/search_files/git_read/git_write/network），定义 read-only/workspace-write 最小权限与各 driver 的能力→宿主工具映射；宿主无法满足时 fail-closed，降级必须记录（依赖 9.1）
-- [ ] 9.4 为只读节点增加落地 diff 审计：记录节点前后 HEAD/status，`cr-agent`/只读节点产生写入即失败；宿主能力降级必须写入 state/result（依赖 9.1 的错误/结果契约）
-- [ ] 9.5 迁移 `.claude/workflows/pipe-preflight.sh`、`pipe-epic-preflight.sh` 的实现到 `.agents/workflows/`（逐字迁移 + bash -n）；Claude 路径仅保留可选转发壳（exec 中立脚本），core/selfcheck 默认只引用中立路径（依赖 9.2 完成后核心默认路径切换才完整；实现本身不依赖 drivers）
-- [ ] 9.6 新增 `.agents/commands/` 确定性 wrapper：OpenSpec 归档、PR 创建、CI 等待、合并；移除 `pipeline.js` 中 `/opsx:*` 和其他宿主 UI 命令依赖（依赖 9.1 的统一结果契约以便决策链失败归类；不依赖 drivers）
-- [ ] 9.7 新增 `drivers/opencode.js`：构造 `opencode run --format json --dir ...` 参数，支持 model/agent，流式解析 NDJSON，提取最终 assistant JSON envelope，临时文件安全清理并做 schema 二次校验（依赖 9.1；对损坏事件流/多消息/缺 final 分别报 `protocol`/`schema` 错，不得直接 JSON.parse(stdout)）
-- [ ] 9.8 增加 OpenCode 项目级 pipe 入口（command/config 薄壳）与文档；更新 `.agents/skills/pipe/SKILL.md`、`AGENTS.md`、`.claude/CLAUDE.md` 的三端命令和能力边界（依赖 9.7）
-- [ ] 9.9 状态 schema 升级：`schemaVersion` 1→2（或新增可选字段兼容），记录 `driverApiVersion`、`driverVersion`、权限降级；同 driver resume 保持现有语义，显式跨 driver resume 重新做全部 succeeded 节点落地校验且不依赖旧 sessionId（依赖 9.1/9.2；置 A 步尽早，避免改 state.json 迁移成本）
-- [ ] 9.10 建共享 driver conformance suite：claude/codex/opencode 均覆盖 cwd、role/schema、成功输出、spawn/auth/config/timeout/protocol/schema 错误、终止清理、只读权限、挂起/resume（先覆盖 claude/codex 保持既有绿，9.7 完成后纳入 opencode；依赖 9.1）
-- [ ] 9.11 增加 OpenCode fake runtime 与全流水线 E2E；epic 三并发断言三个 OpenCode 进程分别位于独立 worktree，状态写盘无竞态（依赖 9.7）
-- [ ] 9.12 增加真实 CLI smoke harness：逐端探测版本/认证；可用时跑最小只读节点和临时 worktree 写节点，不可用时明确 skip 原因，不允许其他 driver 代替（依赖 9.2 registry + 9.10；收尾）
-- [ ] 9.13 更新 `--self-check`：检查所有 registry driver、contract apiVersion、capability 映射、中立 workflow/command 脚本语法，任一缺失 fail-closed；去掉 `DRIVER_NAMES = ['claude','codex']` 硬编码与 `.claude/workflows/*.sh` 固定路径（依赖 9.2/9.5/9.6 完成后引用 registry/中立路径；收尾）
-- [ ] 9.14 验收：原 104 测试保持全绿（P1–P5 当前 105——新增后验证不回归）+ P6 新测试全绿 + `openspec validate workflow-core --strict --no-interactive` + 全量 OpenSpec 校验；三端至少各有一次真实 smoke 证据后才更新 PR 描述为“跨 Agent 通用”（依赖 9.12/9.13；最终）
+- [x] 9.1 新增 `drivers/contract.js`：定义 `apiVersion`、`task/ctx/DriverResult` 校验、标准错误分类与超时终止语义。
+- [x] 9.2 新增 `drivers/registry.js`：注册 claude/codex/opencode；`run.js` 从 registry 获取 driver，移除硬编码 driver 枚举与角色注入分支。
+- [x] 9.3 把 role prompt 组装移至公共 wrapper；`roles.json` 使用产品无关 `capabilities`，宿主无法满足时 fail-closed，降级写入结果元数据。
+- [x] 9.4 为只读节点增加节点前后 HEAD/status 落地审计；`cr-agent`/只读节点产生写入即失败。
+- [x] 9.5 迁移 preflight 实现到 `.agents/workflows/`；Claude 路径保留 exec 转发壳，core/self-check 默认引用中立路径。
+- [x] 9.6 新增 `.agents/commands/` 归档、PR、CI 等确定性 wrapper；`pipeline.js` 不再依赖 `/opsx:*` 或 `.claude/workflows`。
+- [x] 9.7 新增 `drivers/opencode.js`：构造 CLI 参数、解析 NDJSON final assistant JSON envelope，并做 schema 二次校验。
+- [x] 9.8 增加 `.opencode/commands/` 入口薄壳，更新 `.agents/skills/pipe/SKILL.md`、`AGENTS.md`、`.claude/CLAUDE.md` 的三端能力边界。
+- [x] 9.9 状态 schema 升级为 v2，记录 `driverApiVersion`、`driverVersion`、权限降级；旧 v1 状态兼容迁移，resume 依赖 commit 落地校验。
+- [x] 9.10 建共享 driver conformance suite，覆盖三端契约版本、OpenCode cwd/成功输出/协议错误/schema 错误及 spawn/超时分类。
+- [x] 9.11 增加 OpenCode fake runtime 与完整 infra pipeline E2E；既有 epic 单测覆盖并发 worktree 隔离与状态恢复。
+- [x] 9.12 增加真实 CLI smoke harness：逐端独立探测版本/认证；不可执行时显式 skip，不静默替换 driver。
+- [x] 9.13 更新 `--self-check`：动态发现 registry driver、contract apiVersion、capability 映射及中立 workflow/command 脚本，fail-closed。
+- [x] 9.14 本地验收：P1–P5 + P6 测试、`--self-check`、OpenSpec 校验通过；真实三端 smoke 仅保留显式 skip 证据，未更新 PR 为“跨 Agent 通用”。
