@@ -27,7 +27,8 @@ function worktreeSnapshot(root = process.cwd()) {
     // --ignored=matching 把被 .gitignore 隐藏的写入也纳入快照；只读 runtime
     // 不得通过写 ignored 文件绕过工作区污染审计。
     const status = execSync('git status --porcelain --untracked-files=all --ignored', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    return { head, status };
+    const relevantStatus = status.split(/\r?\n/).filter((line) => !line.includes(' .agents/runs/')).join('\n');
+    return { head, status: relevantStatus };
   } catch (_) { return null; }
 }
 
