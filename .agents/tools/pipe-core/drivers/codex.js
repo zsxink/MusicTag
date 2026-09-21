@@ -42,6 +42,9 @@ function runAgent(task, ctx = {}) {
         encoding: 'utf8',
         cwd: ctx.cwd || process.cwd(),
         env: ctx.env || process.env,
+        // prompt 已作为 argv 传入；必须关闭 stdin，否则 codex exec 会继续等待
+        // 追加的管道输入，导致非交互 pipe 节点假性挂起。
+        stdio: ['ignore', 'pipe', 'pipe'],
         timeout: timeoutMs(ctx),
         maxBuffer: 64 * 1024 * 1024,
       });
