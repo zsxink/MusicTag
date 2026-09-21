@@ -253,7 +253,7 @@ function buildPipeline(state) {
       resultOk: (r) => r.archived === true && r.merged === true && typeof r.prUrl === 'string' && r.prUrl.length > 0,
       prompt: (ctx) =>
         `你是流水线 Leader。变更「${change}」已通过验证，现在执行受控集成：\n` +
-        `1. 归档：node .agents/commands/archive-change.js ${change}（在分支上执行，规格改动随分支提交）\n` +
+        `1. 归档：若 openspec/changes/${change} 仍存在则执行 node .agents/commands/archive-change.js ${change}；若已位于 openspec/changes/archive/ 下则视为已归档并幂等跳过（规格改动随分支提交）\n` +
         `2. 推送分支：git push -u origin ${change}\n` +
         `3. 提交 PR：node .agents/commands/create-pr.js ${change} "feat(${change}): <变更摘要>" "Closes #<issue>"（Issue 号从 openspec/changes/${change}/proposal.md 的「关联 Issue」段取，无则省略 Closes；记录 wrapper 输出的 PR URL）\n` +
         `4. 等 CI required checks 通过：node .agents/commands/wait-ci.js <pr-url-or-number>\n` +
