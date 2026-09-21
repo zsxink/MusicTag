@@ -34,10 +34,17 @@ test('claude: 不用 --agent（D7 拍板）', () => {
 });
 
 test('drivers: agent 超时可由 PIPE_AGENT_TIMEOUT_MS 配置，默认仍为 10 分钟', () => {
-  assert.equal(claude.timeoutMs({}), 600000);
-  assert.equal(codex.timeoutMs({}), 600000);
-  assert.equal(claude.timeoutMs({ timeoutMs: 1234 }), 1234);
-  assert.equal(codex.timeoutMs({ timeoutMs: 5678 }), 5678);
+  const previous = process.env.PIPE_AGENT_TIMEOUT_MS;
+  delete process.env.PIPE_AGENT_TIMEOUT_MS;
+  try {
+    assert.equal(claude.timeoutMs({}), 600000);
+    assert.equal(codex.timeoutMs({}), 600000);
+    assert.equal(claude.timeoutMs({ timeoutMs: 1234 }), 1234);
+    assert.equal(codex.timeoutMs({ timeoutMs: 5678 }), 5678);
+  } finally {
+    if (previous === undefined) delete process.env.PIPE_AGENT_TIMEOUT_MS;
+    else process.env.PIPE_AGENT_TIMEOUT_MS = previous;
+  }
 });
 
 test('claude: parseOutput 提取 .structured', () => {
