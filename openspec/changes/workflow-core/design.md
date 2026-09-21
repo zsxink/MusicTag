@@ -351,6 +351,29 @@ driver 启动前必须声明并校验自身能力。角色要求无法满足时�
 - C：新增 OpenCode driver、项目入口和 fake conformance tests。
 - D：三端真实 smoke、resume、epic worktree 验证，更新文档后再宣称“跨 Agent 通用”。
 
+### D12 P6 现状核对与任务落点（tasks 组 9 依赖边）
+
+> **现状核对（重开复核，2026-09-21）**：组 1–8（P1–P5）已全部实现并合入本分支——105 核心单测全绿、`openspec validate workflow-core --strict --no-interactive` 通过、跨端回归（cargo/npm）已在组 8 跑通。`AGENTS.md`、`.claude/skills/pipe`（→ `../../.agents/skills/pipe` symlink）、`.claude/commands/pipe*.md` 转发、`.claude/workflows/` preflight 实现均已在位。**唯一待实现 = 组 9（P6，14 项全空）**，代码缺口逐项核实如下（实现前以此为准核对）：
+> - `drivers/contract.js`、`drivers/registry.js`、`drivers/opencode.js` 不存在（`drivers/` 仅 claude.js + codex.js；无标准错误分类 `spawn/auth/config/timeout/protocol/schema`）。
+> - `run.js` 仍硬编码 `DRIVERS` 枚举 + `wrapDriver` 内 `if (driverName === 'claude'|'codex')` 角色注入与能力翻译分支（D11 约束 1/3 未满足）。
+> - `roles/roles.json` 仍用 Claude 工具名 `allowedTools`，无产品无关 `capabilities`（D11 约束 3 未满足）。
+> - `selfcheck.js` 硬编码 `DRIVER_NAMES = ['claude','codex']`、静态自检固定 `.claude/workflows/*.sh` 路径（未走中立路径，D11 约束 5 未满足）。
+> - `pipeline.js` integrate 节点 prompt 仍拼 `/opsx:archive`；preflight 节点默认 `.claude/workflows/pipe-preflight.sh`（宿主路径硬编码）。
+> - `.agents/workflows/`、`.agents/commands/` 目录不存在（preflight 实现逻辑仍在 `.claude/workflows/`）。
+
+**A/B/C/D 四步 ↔ tasks 组 9 落点**（每步独立可验证；新增 runtime 不越出 A 层 contract 即可接入）：
+
+| 步 | D11 内容 | tasks 落点 |
+|---|---|---|
+| A | 抽 contract/registry/capability，不改 Claude/Codex 行为，既有全量测试保持全绿（当前 105） | 9.1 contract.js（apiVersion/DriverResult/错误分类/超时终止）→ 9.2 registry.js + run.js 去 DRIVERS 硬编码 → 9.3 capabilities 迁移 + 公共 wrapper → 9.4 只读落地 diff 审计 → 9.9 状态 schema 升级（driverApiVersion/driverVersion） |
+| B | 中立 workflows + 确定性 commands，删 core 对 `.claude/`、`/opsx:*` 依赖 | 9.5 `.agents/workflows/`（preflight 实现迁移）→ 9.6 `.agents/commands/`（归档/PR/CI wrapper）+ pipeline.js 改调中性路径 |
+| C | OpenCode driver + 三端入口 + fake conformance | 9.7 opencode.js（NDJSON + JSON envelope + schema 二次校验）→ 9.8 OpenCode 入口薄壳与文档、9.11 fake runtime E2E（epic 三 worktree 隔离） |
+| D | 真实 smoke / resume / epic worktree 验证 + 文档收尾 | 9.10 conformance suite（claude/codex 先行、opencode 在 9.7 后纳入）→ 9.12 真实 CLI smoke（缺认证显式 skip）→ 9.13 `--self-check` 全面化（registry/apiVersion/capability/中立脚本）→ 9.14 验收 |
+
+**组内依赖边**：9.1 → 9.2/9.3/9.4/9.9/9.10（contract 是其余全部输入，最先）；9.2（run.js 去硬编码）→ 9.5/9.6（核心默认引用中立路径后才完整）——但 9.5/9.6 相互独立、均不依赖 drivers，可在 A 完成后与 C 并行；9.7 → 9.8/9.11、9.10（opencode 部分）；9.12/9.13/9.14 收尾依赖前置全部。**A 步优先且 9.1 最先，B 与 C 可并行，D 串行收尾**。状态 schema 升级（9.9）尽早置于 A，避免运行中再改 `state.json` 形态引发迁移成本。
+
+> **为什么（D12）**：D11 四步是架构方向级描述，不落到具体实现项；组 9 缺显式依赖边，实现时易串作或漏并行。现状核对让实现者一眼知道哪些文件已存在、哪些缺口待补，避免对已实现模块（P1–P5）误动手。
+
 ## Risks / Trade-offs
 
 - **方向 A 的成本**：每个节点是独立 CLI 进程（冷启动、节点间无共享会话上下文）。缓解：状态文件 + 续跑，已通过节点复用、失败节点才重跑，重试便宜；claude 侧 `--append-system-prompt` 注入 `roles/` 单源角色文案并配合 `--allowedTools` 控制工具集，能力不缩水。
