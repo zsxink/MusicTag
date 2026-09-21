@@ -42,6 +42,10 @@ function parseOutput(raw) {
   }
 }
 
+function timeoutMs(ctx = {}) {
+  return Number(ctx.timeoutMs || process.env.PIPE_AGENT_TIMEOUT_MS) || 600000;
+}
+
 function runAgent(task, ctx = {}) {
   const bin = ctx.claudeBin || 'claude';
   const args = buildArgs(task, ctx);
@@ -51,7 +55,7 @@ function runAgent(task, ctx = {}) {
       encoding: 'utf8',
       cwd: ctx.cwd || process.cwd(),
       env: ctx.env || process.env,
-      timeout: ctx.timeoutMs || 600000,
+      timeout: timeoutMs(ctx),
       maxBuffer: 64 * 1024 * 1024,
     });
   } catch (e) {
@@ -66,4 +70,4 @@ function runAgent(task, ctx = {}) {
   return { ok: true, ...parseOutput(res.stdout), exitCode: 0 };
 }
 
-module.exports = { runAgent, buildArgs, parseOutput };
+module.exports = { runAgent, buildArgs, parseOutput, timeoutMs };

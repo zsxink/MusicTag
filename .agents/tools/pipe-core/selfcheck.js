@@ -40,7 +40,9 @@ function run({ repoRoot = process.cwd() } = {}) {
       if (ve.length) errors.push(`节点 ${d.id}: ${ve.join('; ')}`);
       if (!rolesJson[d.role]) errors.push(`节点 ${d.id} 引用未定义角色 ${d.role}`);
       if (typeof d.resultOk === 'function') {
-        const probe = d.role === 'cr-agent' || d.role === 'verify-agent'
+        const probe = d.id === 'preflight'
+          ? { ready: true }
+          : d.role === 'cr-agent' || d.role === 'verify-agent'
           ? { pass: true, blockers: [], majors: [], steps: [] }
           : { done: true, summary: '', smokePassed: true, covered: [], missing: [], risks: [] };
         if (d.resultOk(probe) !== true) errors.push(`节点 ${d.id} 的 resultOk 语义异常`);

@@ -60,6 +60,12 @@ test('pipeline: architect 未判定前仅 preflight+architect 两个节点', () 
   assert.deepEqual(defs.map((d) => d.id).sort(), ['architect', 'preflight']);
 });
 
+test('pipeline: preflight ready=false 不得进入 architect（fail-closed）', () => {
+  const preflight = pipeline.buildPipeline({ change: 'demo', nodes: {} }).find((d) => d.id === 'preflight');
+  assert.equal(preflight.resultOk({ ready: true }), true);
+  assert.equal(preflight.resultOk({ ready: false }), false);
+});
+
 test('pipeline: 完整 DAG 拓扑顺序 preflight→architect→dev→tester→cr→verify→integrate', () => {
   const defs = pipeline.buildPipeline(stateWithDomain('infra'));
   const ids = defs.map((d) => d.id);

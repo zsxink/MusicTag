@@ -21,6 +21,10 @@ function buildArgs(task, ctx = {}) {
   return args;
 }
 
+function timeoutMs(ctx = {}) {
+  return Number(ctx.timeoutMs || process.env.PIPE_AGENT_TIMEOUT_MS) || 600000;
+}
+
 function runAgent(task, ctx = {}) {
   const bin = ctx.codexBin || 'codex';
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-codex-'));
@@ -38,7 +42,7 @@ function runAgent(task, ctx = {}) {
         encoding: 'utf8',
         cwd: ctx.cwd || process.cwd(),
         env: ctx.env || process.env,
-        timeout: ctx.timeoutMs || 600000,
+        timeout: timeoutMs(ctx),
         maxBuffer: 64 * 1024 * 1024,
       });
     } catch (e) {
@@ -73,4 +77,4 @@ function runAgent(task, ctx = {}) {
   }
 }
 
-module.exports = { runAgent, buildArgs };
+module.exports = { runAgent, buildArgs, timeoutMs };

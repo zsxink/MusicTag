@@ -33,6 +33,13 @@ test('claude: 不用 --agent（D7 拍板）', () => {
   assert.ok(!args.includes('--agent'));
 });
 
+test('drivers: agent 超时可由 PIPE_AGENT_TIMEOUT_MS 配置，默认仍为 10 分钟', () => {
+  assert.equal(claude.timeoutMs({}), 600000);
+  assert.equal(codex.timeoutMs({}), 600000);
+  assert.equal(claude.timeoutMs({ timeoutMs: 1234 }), 1234);
+  assert.equal(codex.timeoutMs({ timeoutMs: 5678 }), 5678);
+});
+
 test('claude: parseOutput 提取 .structured', () => {
   const parsed = claude.parseOutput(JSON.stringify({ type: 'result', structured: { ready: true } }));
   assert.deepEqual(parsed.structured, { ready: true });

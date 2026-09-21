@@ -165,6 +165,7 @@ function buildPipeline(state) {
       schema: PREFLIGHT_SCHEMA,
       dependsOn: [],
       retry: { max: 1, intervalMs: 0 },
+      resultOk: (r) => r.ready === true,
       prompt: (ctx) =>
         `只读执行 ${ctx.preflightScript || '.claude/workflows/pipe-preflight.sh'} ${change}；不得以人工判断替代脚本。` +
         `脚本退出码非零时 ready=false，并逐项写入 issues；仅脚本成功且 branch=${change} 时 ready=true。`,
