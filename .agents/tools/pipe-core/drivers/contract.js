@@ -85,7 +85,7 @@ function validateTask(task) {
   if (!task || typeof task !== 'object') return ['task 必须是非空对象'];
   if (!task.id) errors.push('task 缺 id');
   if (!task.role) errors.push('task 缺 role');
-  if (task.prompt === undefined || task.prompt === null) errors.push('task 缺 prompt');
+  if (task.prompt === undefined || task.prompt === null || (typeof task.prompt === 'string' && !task.prompt.trim())) errors.push('task 缺 prompt');
   return errors;
 }
 

@@ -50,7 +50,7 @@ const FINDING = {
     specReference: { type: 'string' },
     suggestion: { type: 'string' },
   },
-  required: ['severity', 'file', 'issue'],
+    required: ['severity', 'file', 'issue', 'specReference', 'suggestion'],
 };
 
 const CR_SCHEMA = {
@@ -199,7 +199,7 @@ function buildPipeline(state) {
       schema: TESTER_SCHEMA,
       dependsOn: devIds,
       retry: { max: 1, intervalMs: 0 },
-      resultOk: (r) => r.smokePassed === true,
+      resultOk: (r) => r.smokePassed === true && Array.isArray(r.missing) && r.missing.length === 0,
       prompt: (ctx) =>
         `你是测试角色。对变更「${change}」做覆盖审计、补齐缺失测试并跑核心链路冒烟。\n` +
         `对照 openspec/changes/${change}/specs/ 的 scenarios；除 happy-path 外，强制审计失败路径与边界（错误分支、空/越界输入、并发/竞态、网络失败与错误码、状态复位）。\n` +
@@ -213,7 +213,7 @@ function buildPipeline(state) {
       dependsOn: ['tester'],
       maxRounds: 3,
       retry: { max: 1, intervalMs: 0 },
-      resultOk: (r) => r.pass === true,
+      resultOk: (r) => r.pass === true && (!Array.isArray(r.blockers) || r.blockers.length === 0) && (!Array.isArray(r.majors) || r.majors.length === 0),
       prompt: (ctx) =>
         `你是 CR（只读，不改代码）。审查变更「${change}」当前分支相对 main 的改动（git diff main...HEAD），\n` +
         `对照 openspec/changes/${change}/specs/、design.md、docs/V1-PRD.md、docs/design/design.md。\n` +
@@ -229,7 +229,7 @@ function buildPipeline(state) {
       schema: VERIFY_SCHEMA,
       dependsOn: ['cr'],
       retry: { max: 1, intervalMs: 0 },
-      resultOk: (r) => r.pass === true,
+      resultOk: (r) => r.pass === true && Array.isArray(r.steps) && r.steps.length > 0 && r.steps.every((step) => step.status === 'pass'),
       prompt: (ctx) => {
         if (NON_CODE_DOMAINS.includes(domain)) {
           return `你是验证(CI)角色。变更「${change}」域为 ${domain}，按自适应编排跳过业务编译（P4）：\n` +

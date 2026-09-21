@@ -50,8 +50,10 @@ function run({ repoRoot = process.cwd() } = {}) {
       if (typeof d.resultOk === 'function') {
         const probe = d.id === 'preflight'
           ? { ready: true }
-          : d.role === 'cr-agent' || d.role === 'verify-agent'
+          : d.role === 'cr-agent'
           ? { pass: true, blockers: [], majors: [], steps: [] }
+          : d.role === 'verify-agent'
+            ? { pass: true, blockers: [], majors: [], steps: [{ step: 'probe', status: 'pass', detail: '' }] }
           : { done: true, summary: '', smokePassed: true, covered: [], missing: [], risks: [] };
         if (d.resultOk(probe) !== true) errors.push(`节点 ${d.id} 的 resultOk 语义异常`);
       }
