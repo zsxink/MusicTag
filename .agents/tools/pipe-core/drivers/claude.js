@@ -4,6 +4,7 @@
 // runAgent(task, ctx) → { ok, structured?, raw?, sessionId?, exitCode? }
 
 const { spawnSync } = require('node:child_process');
+const { API_VERSION } = require('./contract.js');
 
 // 纯函数：拼装 claude CLI 参数（供单测断言，不 spawn）。
 // 注意：claude CLI 无 `--cwd` 参数（那是 codex 的 `--cd`）；指定工作目录走 spawnSync 的
@@ -70,4 +71,4 @@ function runAgent(task, ctx = {}) {
   return { ok: true, ...parseOutput(res.stdout), exitCode: 0 };
 }
 
-module.exports = { runAgent, buildArgs, parseOutput, timeoutMs };
+module.exports = { API_VERSION, DRIVER_VERSION: '1.0.0', runAgent, buildArgs, parseOutput, timeoutMs };

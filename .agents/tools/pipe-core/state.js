@@ -8,7 +8,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execSync } = require('node:child_process');
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 // 仓库根判定：① PIPE_CORE_REPO_ROOT（主编排器派生 worktree 子进程时注入主仓库绝对路径）
 // → ② git rev-parse --show-toplevel（普通直跑）→ ③ 报错退出。
@@ -34,12 +34,15 @@ function stateFile(change) {
   return path.resolve(runsDir(), change, 'state.json');
 }
 
-function newState(change, driver) {
+function newState(change, driver, driverApiVersion = null, driverVersion = null) {
   const now = new Date().toISOString();
   return {
     schemaVersion: SCHEMA_VERSION,
     change,
     driver,
+    driverApiVersion,
+    driverVersion,
+    permissionDegraded: [],
     startedAt: now,
     updatedAt: now,
     nodes: {},
@@ -50,6 +53,13 @@ function loadState(change) {
   const file = stateFile(change);
   if (!fs.existsSync(file)) return null;
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (raw.schemaVersion === 1) {
+    // P1–P5 状态可安全迁移：旧节点不含 runtime 元数据，正确性仍由 commit 落地校验保证。
+    raw.schemaVersion = SCHEMA_VERSION;
+    raw.driverApiVersion = raw.driverApiVersion || null;
+    raw.driverVersion = raw.driverVersion || null;
+    raw.permissionDegraded = raw.permissionDegraded || [];
+  }
   if (raw.schemaVersion !== SCHEMA_VERSION) {
     throw new Error(`state.json schemaVersion 不兼容：${raw.schemaVersion} !== ${SCHEMA_VERSION}`);
   }

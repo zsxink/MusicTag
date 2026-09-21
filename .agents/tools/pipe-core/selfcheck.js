@@ -8,14 +8,22 @@ const path = require('node:path');
 const { execSync } = require('node:child_process');
 const { validateNode, topoSort } = require('./dag.js');
 const pipeline = require('./pipeline.js');
+const registry = require('./drivers/registry.js');
+const contract = require('./drivers/contract.js');
+const capability = require('./capability.js');
 
 const REQUIRED_ROLES = ['leader', 'architect', 'rust-backend', 'vue-frontend', 'cr-agent', 'verify-agent', 'tester'];
-const DRIVER_NAMES = ['claude', 'codex'];
 
 // 返回 { ok, errors[] }。ok=false 即 fail-closed。
 function run({ repoRoot = process.cwd() } = {}) {
   const errors = [];
   const dir = __dirname;
+  // 旧测试传入 `<repo>/.agents` 作为 repoRoot；兼容该调用形态，实际资产根仍是仓库根。
+  const requestedRoot = path.resolve(repoRoot);
+  const root = path.basename(requestedRoot) === '.agents' && !fs.existsSync(path.join(requestedRoot, 'openspec'))
+    ? path.dirname(requestedRoot) : requestedRoot;
+  const NEUTRAL_WORKFLOW_DIR = '.agents/workflows';
+  const NEUTRAL_COMMAND_DIR = '.agents/commands';
 
   // ① 角色定义完整性（D7 单源）
   let rolesJson;
@@ -51,27 +59,45 @@ function run({ repoRoot = process.cwd() } = {}) {
     try { topoSort(defs); } catch (e) { errors.push(`domain=${domain} 拓扑非法: ${e.message}`); }
   }
 
-  // ③ driver 契约完整性（P5 统一接口 runAgent/buildArgs）
-  for (const name of DRIVER_NAMES) {
-    let mod;
-    try { mod = require(path.join(dir, 'drivers', `${name}.js`)); }
-    catch (e) { errors.push(`driver ${name} 加载失败: ${e.message}`); continue; }
-    if (typeof mod.runAgent !== 'function') errors.push(`driver ${name} 缺 runAgent 函数`);
-    if (typeof mod.buildArgs !== 'function') errors.push(`driver ${name} 缺 buildArgs 函数`);
+  // ③ registry + versioned driver contract + capability 映射（新增 runtime 自动发现）
+  for (const entry of registry.MANIFEST) {
+    if (entry.apiVersion !== contract.API_VERSION) errors.push(`driver ${entry.name} manifest apiVersion 不兼容`);
+    const info = registry.get(entry.name);
+    if (!info || !info.available) { errors.push(`driver ${entry.name} 加载失败: ${info && info.loadError || '不可用'}`); continue; }
+    if (info.module.API_VERSION !== contract.API_VERSION) errors.push(`driver ${entry.name} apiVersion 不兼容`);
+    if (typeof info.module.runAgent !== 'function' || typeof info.module.buildArgs !== 'function') errors.push(`driver ${entry.name} 缺 runAgent/buildArgs 函数`);
   }
-
-  // ④ 静态自检：Node `node --check`（核心全部顶层 .js）+ shell `bash -n`（.claude/workflows/*.sh）
-  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
-    try { execSync(`node --check "${path.join(dir, f)}"`, { stdio: 'ignore' }); }
-    catch (_) { errors.push(`node --check 失败: pipe-core/${f}`); }
-  }
-  const wfDir = path.resolve(repoRoot, '.claude', 'workflows');
-  if (fs.existsSync(wfDir)) {
-    for (const sh of fs.readdirSync(wfDir).filter((f) => f.endsWith('.sh'))) {
-      try { execSync(`bash -n "${path.join(wfDir, sh)}"`, { stdio: 'ignore' }); }
-      catch (_) { errors.push(`bash -n 失败: .claude/workflows/${sh}`); }
+  for (const name of Object.keys(capability.capabilities())) {
+    for (const driver of registry.names()) {
+      const mapped = capability.hostTools(driver, [name]);
+      if (!Array.isArray(mapped) && mapped.failClosed && name !== 'write_files') errors.push(`capability ${name} 无法映射到 ${driver}`);
     }
   }
+
+  // ④ 静态自检：核心/commands 全部 Node 文件 + 中立 workflow；兼容壳也检查，fail-closed。
+  const jsFiles = [];
+  const walk = (root) => {
+    if (!fs.existsSync(root)) return;
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      const file = path.join(root, entry.name);
+      if (entry.isDirectory()) walk(file);
+      else if (entry.name.endsWith('.js')) jsFiles.push(file);
+    }
+  };
+  walk(dir);
+  walk(path.resolve(root, NEUTRAL_COMMAND_DIR));
+  for (const file of jsFiles) {
+    try { execSync(`node --check "${file}"`, { stdio: 'ignore' }); }
+    catch (_) { errors.push(`node --check 失败: ${path.relative(repoRoot, file)}`); }
+  }
+  for (const wfDir of [path.resolve(root, NEUTRAL_WORKFLOW_DIR), path.resolve(root, '.claude', 'workflows')]) {
+    if (!fs.existsSync(wfDir)) { if (wfDir === path.resolve(root, NEUTRAL_WORKFLOW_DIR)) errors.push(`中立 workflow 目录缺失: ${wfDir}`); continue; }
+    for (const sh of fs.readdirSync(wfDir).filter((f) => f.endsWith('.sh'))) {
+      try { execSync(`bash -n "${path.join(wfDir, sh)}"`, { stdio: 'ignore' }); }
+      catch (_) { errors.push(`bash -n 失败: ${path.relative(root, path.join(wfDir, sh))}`); }
+    }
+  }
+  if (!fs.existsSync(path.resolve(root, NEUTRAL_COMMAND_DIR))) errors.push('中立 command 目录缺失');
 
   return { ok: errors.length === 0, errors };
 }

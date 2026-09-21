@@ -33,7 +33,7 @@ const KINDS = {
 function classify(result) {
   if (result.error && typeof result.error === 'object' && result.error.kind) return result.error.kind;
   const msg = String((result.error && result.error.message) || result.error || '').toLowerCase();
-  if (result.timeout || /timedout|timeout|etimedout/i.test(msg)) return 'timeout';
+  if (result.timeout || /timedout|time(?:d)?[ -]?out|etimedout/i.test(msg)) return 'timeout';
   if (/enoent|spawn|not found|no such file/i.test(msg)) return 'spawn';
   // auth 只认「认证失败」语义（401/403/unauthorized/invalid credentials）；
   // 「API key 未配置」是环境配置缺失，归 config，不在此匹配。

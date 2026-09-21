@@ -11,6 +11,7 @@
 // 新增 runtime = 往 manifest 加一条 + 实现对应 driver 模块；core/pipeline/state 零改动。
 
 const path = require('node:path');
+const { API_VERSION } = require('./contract.js');
 
 // 三端注册表。opencode 模块在 9.7 实现前 available=false（惰性 require 兜底）。
 // roleInjection：driver 翻译角色单源文案的宿主形态——
@@ -20,6 +21,7 @@ const path = require('node:path');
 const MANIFEST = [
   {
     name: 'claude',
+    apiVersion: API_VERSION,
     modulePath: path.join(__dirname, 'claude.js'),
     roleInjection: 'system-prompt-file',
     help: 'claude       — Claude Code 驱动（claude -p，--append-system-prompt 注入 roles/）',
@@ -31,6 +33,7 @@ const MANIFEST = [
   },
   {
     name: 'codex',
+    apiVersion: API_VERSION,
     modulePath: path.join(__dirname, 'codex.js'),
     roleInjection: 'prompt-prefix',
     help: 'codex       — Codex 驱动（codex exec，读 result 文件 + 核心 schema 二次校验）',
@@ -41,6 +44,7 @@ const MANIFEST = [
   },
   {
     name: 'opencode',
+    apiVersion: API_VERSION,
     modulePath: path.join(__dirname, 'opencode.js'),
     roleInjection: 'prompt-prefix',
     help: 'opencode    — OpenCode 驱动（opencode run --format json，解析 NDJSON 事件流）',
@@ -83,6 +87,8 @@ function get(name) {
   }
   return {
     name,
+    apiVersion: entry.apiVersion,
+    driverVersion: mod && mod.DRIVER_VERSION || null,
     module: mod,
     available: !!mod && typeof mod.runAgent === 'function',
     loadError,
@@ -91,7 +97,7 @@ function get(name) {
 }
 
 function list() {
-  return MANIFEST.map((e) => ({ name: e.name, help: e.help }));
+  return MANIFEST.map((e) => ({ name: e.name, help: e.help, apiVersion: e.apiVersion }));
 }
 
 function names() {

@@ -18,6 +18,7 @@ const selfcheck = require('./selfcheck.js');
 const epicRunner = require('./epic.js');
 const registry = require('./drivers/registry.js');
 const contract = require('./drivers/contract.js');
+const capability = require('./capability.js');
 
 // D5 环境自动感知：委托 registry.detect（按注册的 envMatchers 匹配，歧义要求显式）。
 function detectDriver(env) { return registry.detect(env || process.env); }
@@ -75,8 +76,13 @@ function wrapDriver(driverName, driverInfo, baseCtx) {
       const roleFile = path.join(ROLES_DIR, `${task.role}.md`);
       let t = task;
       if (role) {
-        ctx.allowedTools = role.allowedTools || [];
         ctx.sandbox = role.sandbox || 'workspace-write';
+        const mapped = capability.validateRequested(driverName, role.capabilities || [], ctx.sandbox);
+        if (!mapped.ok) {
+          return { ok: false, error: { kind: 'config', message: `角色 ${task.role} 能力不足：${mapped.error || '宿主无法满足最小权限'}`, retryable: false } };
+        }
+        ctx.permissionDegraded = mapped.degraded || [];
+        ctx.allowedTools = mapped.tools;
         if (driverInfo.roleInjection === 'system-prompt-file') {
           ctx.roleFile = roleFile;
           ctx.permissionMode = role.sandbox === 'read-only' ? 'read-only' : 'acceptEdits';
@@ -156,7 +162,7 @@ async function main() {
       console.error(`状态文件已存在：${stateFile}\n如需续跑请用 --resume；确认重跑请先删除该文件。`);
       process.exit(2);
     }
-    state = stateApi.newState(opts.change, driverName);
+    state = stateApi.newState(opts.change, driverName, driverInfo.apiVersion, driverInfo.driverVersion);
   }
 
   // 测试/CI 可注入 fake driver 二进制（未设置时回退 claude/codex 本体，行为不变）。
@@ -170,6 +176,9 @@ async function main() {
     bin: process.env[`PIPE_${driverName.toUpperCase()}_BIN`],
     claudeBin: process.env.PIPE_CLAUDE_BIN,
     codexBin: process.env.PIPE_CODEX_BIN,
+    opencodeBin: process.env.PIPE_OPENCODE_BIN,
+    driverApiVersion: driverInfo.apiVersion,
+    driverVersion: driverInfo.driverVersion,
   });
 
   const result = runPipeline({

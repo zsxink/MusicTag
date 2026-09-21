@@ -172,7 +172,7 @@ function buildPipeline(state) {
       retry: { max: 1, intervalMs: 0 },
       resultOk: (r) => r.ready === true,
       prompt: (ctx) =>
-        `只读执行 ${ctx.preflightScript || '.claude/workflows/pipe-preflight.sh'} ${change}；不得以人工判断替代脚本。` +
+        `只读执行 ${ctx.preflightScript || '.agents/workflows/pipe-preflight.sh'} ${change}；不得以人工判断替代脚本。` +
         `脚本退出码非零时 ready=false，并逐项写入 issues；仅脚本成功且 branch=${change} 时 ready=true。`,
     },
     {
@@ -254,7 +254,7 @@ function buildPipeline(state) {
       retry: { max: 1, intervalMs: 0 },
       prompt: (ctx) =>
         `你是流水线 Leader。变更「${change}」已通过验证，现在执行受控集成：\n` +
-        `1. 归档：/opsx:archive ${change}（在分支上执行，规格改动随分支提交）\n` +
+        `1. 归档：node .agents/commands/archive-change.js ${change}（在分支上执行，规格改动随分支提交）\n` +
         `2. 提交 PR：git push -u origin ${change} → gh pr create --base main --head ${change} --title "feat(${change}): <变更摘要>" --body "Closes #<issue>"（Issue 号从 openspec/changes/${change}/proposal.md 的「关联 Issue」段取，若无则省略 Closes）\n` +
         `3. 等 CI required checks 通过 → gh pr merge ${change} --squash\n` +
         `4. git branch -d ${change} 清理分支\n` +

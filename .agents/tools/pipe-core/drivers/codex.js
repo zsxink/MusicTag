@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { validate } = require('../schema.js');
+const { API_VERSION } = require('./contract.js');
 
 // 纯函数：拼装 codex exec CLI 参数（供单测断言，不 spawn）。
 // schemaFile/resultFile 由 runAgent 在临时目录生成。
@@ -104,4 +105,4 @@ function runAgent(task, ctx = {}) {
   }
 }
 
-module.exports = { runAgent, buildArgs, codexSchema, timeoutMs };
+module.exports = { API_VERSION, DRIVER_VERSION: '1.0.0', runAgent, buildArgs, codexSchema, timeoutMs };

@@ -8,12 +8,28 @@ const { validate } = require('./schema.js');
 const stateApi = require('./state.js');
 const decision = require('./decision.js');
 const { DEV_SCHEMA } = require('./pipeline.js');
+const { execSync } = require('node:child_process');
+const contract = require('./drivers/contract.js');
 
 // 同步调度器内的退避等待（CLI 场景可阻塞；intervalMs=0 时零开销）。
 function sleepSync(ms) {
   if (!ms) return;
   const end = Date.now() + ms;
   while (Date.now() < end) { /* busy wait */ }
+}
+
+// 只读角色（尤其 CR）不能依赖宿主自报权限；用节点前后 HEAD/status 做落地审计。
+// read-only 节点产生工作区写入即失败，防止无法精确限制工具的 runtime 静默污染分支。
+function worktreeSnapshot(root = process.cwd()) {
+  try {
+    const head = execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const status = execSync('git status --porcelain', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return { head, status };
+  } catch (_) { return null; }
+}
+
+function readOnlyMutation(before, after) {
+  return !!before && !!after && (before.head !== after.head || before.status !== after.status);
 }
 
 function runPipeline(opts) {
@@ -88,7 +104,7 @@ function runPipeline(opts) {
 // 语义：round 计复审轮（CR 每次 reroute 修复后进入下一轮）；attempt 计 driver 调用总次数。
 // 技术性失败在同一 round 内 retry，不消耗 round。
 function runNode(def, runCtx, decider) {
-  const { change, state, driver, getHead, log, sleep, results } = runCtx;
+  const { change, state, driver, getHead, log, sleep, results, commitRoot } = runCtx;
   const id = def.id;
   const maxRounds = def.maxRounds || 1;
   const retryInterval = (def.retry && def.retry.intervalMs) || 0;
@@ -113,11 +129,19 @@ function runNode(def, runCtx, decider) {
         schema: def.schema,
       };
       let res;
+      const auditRoot = commitRoot || runCtx.ctx.cwd || process.cwd();
+      const beforeAudit = worktreeSnapshot(auditRoot);
       try {
         res = driver.runAgent(task, { ...runCtx.ctx, nodeId: id });
       } catch (e) {
         res = { ok: false, error: String(e) };
       }
+      const afterAudit = worktreeSnapshot(auditRoot);
+      if (readOnlyMutation(beforeAudit, afterAudit) && (def.role === 'cr-agent' || runCtx.ctx.readOnly === true)) {
+        res = { ok: false, error: { kind: 'config', message: `read-only 节点 ${id} 产生工作区写入`, retryable: false } };
+      }
+      if (res && res.error && typeof res.error === 'object') res.errorKind = res.error.kind || contract.classify(res);
+      else if (res && !res.ok) res.errorKind = contract.classify(res);
 
       // 核心二次 schema 校验（不信任模型自报结构）
       if (res.ok && res.structured && def.schema) {
@@ -138,6 +162,9 @@ function runNode(def, runCtx, decider) {
             result: res.structured,
             commitSha: head,
             cacheKey: stateApi.cacheKey(id, def.schema ? JSON.stringify(def.schema) : '', head),
+            driverApiVersion: res.driverApiVersion || runCtx.ctx.driverApiVersion || null,
+            driverVersion: res.driverVersion || runCtx.ctx.driverVersion || null,
+            permissionDegraded: runCtx.ctx.permissionDegraded || [],
           };
           stateApi.saveState(change, state);
           results[id] = res.structured;
@@ -147,10 +174,11 @@ function runNode(def, runCtx, decider) {
       }
 
       // 失败（技术性或语义性）→ 决断链
-      errText = res.error || `driver 失败（exitCode=${res.exitCode}）`;
+      errText = res.error && typeof res.error === 'object' ? res.error.message : (res.error || `driver 失败（exitCode=${res.exitCode}）`);
       state.nodes[id] = {
-        status: 'failed', attempts, error: errText,
+        status: 'failed', attempts, error: errText, errorKind: res.errorKind || null,
         result: res.structured || null, updatedAt: new Date().toISOString(),
+        permissionDegraded: runCtx.ctx.permissionDegraded || [],
       };
       stateApi.saveState(change, state);
       log(`✗ ${id} 失败: ${errText}`);
