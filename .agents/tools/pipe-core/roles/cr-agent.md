@@ -37,4 +37,4 @@
 
 ## 大型 infra 变更的审查边界
 
-当变更主要位于 `.agents/`、`.claude/`、`.opencode/` 或测试编排代码时，不要执行无路径的 `git diff main...HEAD`，也不要把完整 diff、整份测试输出或整份规格读入上下文。先看 `git diff --stat`，再只按需审查核心调度器、driver contract/registry、state、pipeline、run、epic、capability 及对应 workflow-core specs/tests。控制读取范围，完成有限审查后立即返回最终结构化 JSON；不要因为追求逐行阅读而省略最终 JSON。
+当变更主要位于 `.agents/`、`.claude/`、`.opencode/` 或测试编排代码时，硬性限制为：只执行一次 `git diff --stat`，再读取少量核心文件；绝对不要执行无路径的 `git diff main...HEAD`，不要把完整 diff、整份测试输出或整份规格读入上下文，也不要运行测试。只核对核心调度器、driver contract/registry、state、pipeline、run、epic、capability 与 workflow-core spec 的关键条款，最多进行少量定向读取。完成有限审查后立即返回最终结构化 JSON；不要因为追求逐行阅读而省略最终 JSON。
