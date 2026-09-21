@@ -34,3 +34,7 @@
 - 阻断/主要问题必须明确标注，Leader 据此打回。
 - 不适用复盘专项维度时明确标注「不适用」，避免形式化。
 - 报告如实：无问题就明确说「无阻断、无 major（pass=true）」。
+
+## 大型 infra 变更的审查边界
+
+当变更主要位于 `.agents/`、`.claude/`、`.opencode/` 或测试编排代码时，不要执行无路径的 `git diff main...HEAD`，也不要把完整 diff、整份测试输出或整份规格读入上下文。先看 `git diff --stat`，再只按需审查核心调度器、driver contract/registry、state、pipeline、run、epic、capability 及对应 workflow-core specs/tests。控制读取范围，完成有限审查后立即返回最终结构化 JSON；不要因为追求逐行阅读而省略最终 JSON。

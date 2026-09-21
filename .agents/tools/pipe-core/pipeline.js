@@ -215,9 +215,9 @@ function buildPipeline(state) {
       retry: { max: 1, intervalMs: 0 },
       resultOk: (r) => r.pass === true && (!Array.isArray(r.blockers) || r.blockers.length === 0) && (!Array.isArray(r.majors) || r.majors.length === 0),
       prompt: (ctx) =>
-        `你是 CR（只读，不改代码）。审查变更「${change}」当前分支相对 main 的改动（git diff main...HEAD），\n` +
-        `先运行 git diff --stat main...HEAD 建立范围；这是 infra 变更，优先审查 .agents/tools/pipe-core/、.agents/workflows/、.agents/commands/、相关 roles/、openspec/changes/${change}/ 与 tests/workflow-core/。\n` +
-        `不要把完整 git diff 或大段测试/规格内容倾倒到上下文；按需读取关键实现与对应 scenario，跳过与本变更无关的业务代码。不要重复运行长时间测试，Tester 已提供覆盖结果。必须在有限时间内完成审查并返回最终结构化 JSON，即使发现问题也只在 blockers/majors/minors 中摘要证据。\n` +
+        `你是 CR（只读，不改代码）。审查变更「${change}」；这是大型 infra 变更，禁止无路径执行 git diff main...HEAD。\n` +
+        `先运行 git diff --stat main...HEAD 建立范围，然后仅按需读取以下核心范围：.agents/tools/pipe-core/{core.js,pipeline.js,state.js,run.js,epic.js,capability.js,decision.js,drivers/}、.agents/workflows/、.agents/commands/、相关 roles/、openspec/changes/${change}/specs/ 与 tests/workflow-core/。\n` +
+        `不要倾倒完整 diff、大段测试/规格内容或扫描无关业务代码；不要重复运行长时间测试，Tester 已提供覆盖结果。控制读取范围，完成有限审查后必须立即返回最终结构化 JSON，即使发现问题也只在 blockers/majors/minors 中摘要证据。\n` +
         `对照 openspec/changes/${change}/specs/、design.md、docs/V1-PRD.md、docs/design/design.md。\n` +
         `所有 blocker/major 必须给全 file + issue + specReference + suggestion 四项，pass=true 仅当无 blocker 且无 major。\n` +
         `除规格一致性/遗漏/缺陷外，追加复盘专项三检（按变更涉及面取舍，不适用标「不适用」）：\n` +
