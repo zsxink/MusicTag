@@ -214,6 +214,27 @@ test('epic: readyItems 排除 suspended（挂起子项不自动重试，复核2/
   });
 });
 
+test('epic: 显式 resume 才恢复 failed/suspended，且保留 done 项', () => {
+  withRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-epic-resume-')), () => {
+    const def = {
+      name: 'resume-gate',
+      items: [
+        { name: 'A', dependsOn: [], status: 'pending' },
+        { name: 'B', dependsOn: [], status: 'pending' },
+        { name: 'C', dependsOn: ['A'], status: 'pending' },
+      ],
+    };
+    const st = {
+      schemaVersion: epic.EPIC_SCHEMA_VERSION,
+      items: { A: { status: 'failed' }, B: { status: 'suspended' }, C: { status: 'done', mergeOrder: 1 } },
+    };
+    assert.deepEqual(epic.readyItems(def, st).map((i) => i.name), [], '未显式 resume 不得自动重试');
+    assert.deepEqual(epic.readyItems(def, st, { resume: true }).map((i) => i.name), ['A', 'B']);
+    assert.equal(st.items.C.status, 'done');
+    assert.equal(st.items.C.mergeOrder, 1);
+  });
+});
+
 test('epic: 子项挂起（exit 3）→ epic.run 返回 3，不折叠为 failed（复核2 major）', async () => {
   // fake driver 通过注入 PIPE_CLAUDE_BIN 让子项在 tester 语义失败 → run.js 退出 3。
   // 用真实 run.js + fake driver + 真实 git worktree，断言 epic.run 返回 3 且子项状态 suspended。

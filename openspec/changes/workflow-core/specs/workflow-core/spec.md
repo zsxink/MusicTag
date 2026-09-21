@@ -83,7 +83,7 @@ Architect 判定的变更域 SHALL 扩展为 `['backend','frontend','both','docs
 - **THEN** 各自在独立 worktree（独立分支），互不污染对方工作区
 
 ### Requirement: 跨模型 driver（P5）
-核心 SHALL 通过统一 driver 接口 `runAgent(task, ctx) → DriverResult` 调用 Agent runtime。Claude、Codex 与 OpenCode SHALL 各实现一个 driver，把「一个 agent 节点」翻译成对应 CLI 子进程命令 + 解析结构化输出。核心与任务定义 SHALL 不绑定任何模型或 Agent 产品。driver 实现位于 `.agents/tools/pipe-core/drivers/`，并通过 registry 注册；新增 driver 不得修改 core/pipeline/state。
+核心 SHALL 通过统一 driver 接口 `runAgent(task, ctx) → DriverResult | Promise<DriverResult>` 调用 Agent runtime。Claude、Codex 与 OpenCode SHALL 各实现一个 driver，把「一个 agent 节点」翻译成对应 CLI 子进程命令 + 解析结构化输出。核心与任务定义 SHALL 不绑定任何模型或 Agent 产品。driver 实现位于 `.agents/tools/pipe-core/drivers/`，并通过 registry 注册；新增 driver 不得修改 core/pipeline/state。
 
 #### Scenario: 模型切换
 - **WHEN** 用 `--driver claude`、`--driver codex` 与 `--driver opencode` 分别执行同一变更

@@ -16,7 +16,7 @@
 
 - [x] 2.1 建 `.agents/` 资产根 + `.agents/tools/pipe-core/` 目录 + 模块脚手架（run.js / core.js / state.js / schema.js / dag.js / decision.js / worktree.js / roles/ / drivers/）
 - [x] 2.2 `roles/`：7 角色定义单源（leader/architect/rust-backend/vue-frontend/cr-agent/verify-agent/tester，systemPrompt + sandbox + allowedTools）；**迁移来源**：`.claude/agents/*.md` 既有定义作为生成参考，迁移完成后不再作为运行时来源、不与 roles/ 重复维护（D7）
-- [x] 2.3 `drivers/claude.js`：`claude -p --output-format json --json-schema ... --append-system-prompt roles/<role>.md [--cwd] [--permission-mode] [--allowedTools] [--model]` → 解析 `.structured_output`（D7：不用 `--agent`）
+- [x] 2.3 `drivers/claude.js`：`claude -p --output-format json --json-schema ... --append-system-prompt-file roles/<role>.md [--cwd] [--permission-mode] [--allowedTools] [--model]` → 解析 `.structured_output`（D7：不用 `--agent`）
 - [x] 2.4 `drivers/codex.js`：`codex exec --cd --sandbox --output-schema -o --json [--model]` → 读 `resultFile` + 核心二次校验
 - [x] 2.5 `schema.js`：自研轻量 JSON Schema 校验（type/required/enum/items/properties/anyOf 子集）
 - [x] 2.6 `state.js`：节点状态机 + 状态文件读写（原子写盘，仓库根锚定 `.agents/runs/<change>/state.json`）+ 缓存键 + dirty 失效 + commit SHA 落地校验 + `repoRoot()` 仓库根判定（`PIPE_CORE_REPO_ROOT` → `git rev-parse --show-toplevel` → 报错）
@@ -97,3 +97,12 @@
 - [x] 9.12 增加真实 CLI smoke harness：逐端独立探测版本/认证；不可执行时显式 skip，不静默替换 driver。
 - [x] 9.13 更新 `--self-check`：动态发现 registry driver、contract apiVersion、capability 映射及中立 workflow/command 脚本，fail-closed。
 - [x] 9.14 本地验收：P1–P5 + P6 测试、`--self-check`、OpenSpec 校验通过；真实三端 smoke 仅保留显式 skip 证据，未更新 PR 为“跨 Agent 通用”。
+
+## 10. CR 修复回归（2026-09-21）
+
+- [x] 10.1 core 调度与 reroute 支持同步/Promise driver，并由 run.js await；失败经 Leader driver 决断且校验 `DECISION_SCHEMA`
+- [x] 10.2 所有挂起路径写 `.agents/runs/<change>/suspension-report.json`，run.js 输出报告路径
+- [x] 10.3 Claude 使用 `--append-system-prompt-file`；OpenCode 传递 capability policy，无法可靠只读时启动前返回 config
+- [x] 10.4 integrate prompt 调用 `.agents/commands/create-pr.js`、`wait-ci.js`、`merge-pr.js`
+- [x] 10.5 Epic `--resume` 显式恢复 failed/suspended 子项；infra verify 纳入 `tests/workflow-core/*.test.cjs`
+- [x] 10.6 补充 async driver、Leader 决断/schema、挂起报告、只读 fail-closed、Epic resume 与确定性 wrapper 回归测试

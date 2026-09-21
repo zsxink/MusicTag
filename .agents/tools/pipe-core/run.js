@@ -179,7 +179,6 @@ async function main() {
     claudeBin: process.env.PIPE_CLAUDE_BIN,
     codexBin: process.env.PIPE_CODEX_BIN,
     opencodeBin: process.env.PIPE_OPENCODE_BIN,
-    opencodeReadOnlyPolicy: process.env.PIPE_OPENCODE_READONLY_POLICY || process.env.PIPE_OPENCODE_READ_ONLY_POLICY,
     opencodeReadOnlyPolicy: process.env.PIPE_OPENCODE_READ_ONLY_POLICY,
     driverApiVersion: driverInfo.apiVersion,
     driverVersion: driverInfo.driverVersion,

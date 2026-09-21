@@ -71,7 +71,7 @@ async function runPipeline(opts) {
 
     // 失败节点级联失效（DVC，spec「失败节点缓存失效」）：状态加载/落地校验后标记 failed 的节点，
     // 其依赖它的已通过节点也被标记 dirty → 续跑强制真实重跑，不复用被污染的旧结果；
-    // 未受污染的已通过节点保持 succeeded 直接复用。同步调度（runNode 不让出循环）下无 running 窗口。
+    // 未受污染的已通过节点保持 succeeded 直接复用。单变更仍按 DAG 串行推进，但 driver 可异步返回。
     // 落地校验在 resume 路径由 run.js 调用 validateLandings（commitRoot 判定根）完成；此处透传供单测。
     for (const d of defs) {
       const s = state.nodes[d.id];
@@ -260,6 +260,7 @@ async function resolveDecision(decisionCtx, runCtx, decider) {
   }
   const checked = validate(DECISION_SCHEMA, raw);
   if (!checked.valid) return { ok: false, error: `决断结果未通过 DECISION_SCHEMA：${checked.errors.join('; ')}` };
+  if (raw.node !== decisionCtx.def.id) return { ok: false, error: `决断结果 node=${raw.node} 与失败节点 ${decisionCtx.def.id} 不一致` };
   return { ok: true, decision: raw };
 }
 

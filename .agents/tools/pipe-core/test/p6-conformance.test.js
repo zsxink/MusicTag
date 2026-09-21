@@ -46,6 +46,27 @@ test('conformance: every registered driver exports the same contract version', (
   }
 });
 
+test('OpenCode read-only capability 不可可靠施加时启动前 fail-closed', () => {
+  const opencode = require('../drivers/opencode.js');
+  const result = opencode.runAgent({ id: 'cr', role: 'cr-agent', prompt: 'P' }, {
+    sandbox: 'read-only', opencodeBin: '/definitely-missing-opencode',
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.kind, 'config');
+  assert.match(result.error.message, /read-only/);
+});
+
+test('OpenCode 将 sandbox/permission/capability policy 传入 runtime 环境', () => {
+  const opencode = require('../drivers/opencode.js');
+  const env = opencode.buildEnv({
+    env: { BASE: '1' }, sandbox: 'workspace-write', permissionMode: 'acceptEdits', allowedTools: ['shell', 'read'],
+  });
+  assert.equal(env.BASE, '1');
+  assert.equal(env.PIPE_OPENCODE_SANDBOX, 'workspace-write');
+  assert.equal(env.PIPE_OPENCODE_PERMISSION_MODE, 'acceptEdits');
+  assert.equal(env.PIPE_OPENCODE_ALLOWED_TOOLS, 'shell,read');
+});
+
 test('fake E2E: OpenCode adapter drives the complete infra pipeline in its worktree cwd', () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-opencode-e2e-'));
   try {

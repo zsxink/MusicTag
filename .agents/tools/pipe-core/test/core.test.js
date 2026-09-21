@@ -347,6 +347,41 @@ test('core: 落地校验失效后依赖它的已通过节点续跑被污染（�
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
+test('core: await Promise driver → Leader 决断经 schema 校验并持久化挂起报告', async () => {
+  const repo = tmpRepo();
+  await withRoot(repo, async () => {
+    const change = 'promise-decision';
+    const state = stateApi.newState(change, 'mock');
+    const calls = [];
+    const driver = {
+      async runAgent(task) {
+        calls.push(task.id);
+        if (task.id === 'n1') return Promise.resolve({ ok: false, error: { kind: 'config', message: '需要主会话决策' } });
+        assert.equal(task.role, 'leader');
+        assert.ok(task.schema, 'Leader 决断 task 必须携带 DECISION_SCHEMA');
+        return Promise.resolve({ ok: true, structured: {
+          action: 'escalate', node: 'n1', reason: '请用户确认范围', candidates: ['修复后续跑', '终止变更'],
+        } });
+      },
+    };
+    const result = await core.runPipeline({
+      change,
+      state,
+      defsFn: () => [{ id: 'n1', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [], retry: { max: 0 } }],
+      driver,
+    });
+    assert.equal(result.status, 'suspended');
+    assert.deepEqual(calls, ['n1', 'decision-n1']);
+    assert.equal(result.decision.action, 'escalate');
+    assert.ok(fs.existsSync(result.reportPath));
+    const report = JSON.parse(fs.readFileSync(result.reportPath, 'utf8'));
+    assert.equal(report.node, 'n1');
+    assert.equal(report.reason, '请用户确认范围');
+    assert.deepEqual(report.candidates, ['修复后续跑', '终止变更']);
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
 // 从调度结果提取结果的辅助（core 把结果放进传入的 results 对象）
 function results(res) {
   return res.results || {};

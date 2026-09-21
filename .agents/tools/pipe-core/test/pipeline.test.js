@@ -88,6 +88,7 @@ test('pipeline: verify prompt 对 infra 域跳过 cargo/npm，执行短路基线
   const p = verify.prompt({});
   assert.match(p, /自适应编排跳过业务编译/);
   assert.match(p, /node --test/);
+  assert.match(p, /tests\/workflow-core\/\*\.test\.cjs/);
   assert.ok(!p.includes('cargo check'));
 });
 
@@ -96,7 +97,7 @@ test('pipeline: infra 域 verify 测试命令必须 glob 形式（目录形式�
   const verify = defs.find((d) => d.id === 'verify');
   const p = verify.prompt({});
   // 必须是 glob test/*.test.js，不是目录 .agents/tools/pipe-core/（该目录形式实测 exit 1）
-  assert.match(p, /node --test \.agents\/tools\/pipe-core\/test\/\*\.test\.js/);
+  assert.match(p, /node --test \.agents\/tools\/pipe-core\/test\/\*\.test\.js tests\/workflow-core\/\*\.test\.cjs/);
   assert.doesNotMatch(p, /node --test \.agents\/tools\/pipe-core\/(?!test)/);
 });
 
@@ -124,4 +125,12 @@ test('pipeline: CR 复盘专项三检（跨模块状态/竞态与串扰/网络�
   assert.match(p, /网络与离线判定/);
   assert.match(p, /specReference/);
   assert.match(p, /pass=true 仅当无 blocker 且无 major/);
+});
+
+test('pipeline: integrate 使用确定性 PR/CI/merge wrapper，不直接编排 gh', () => {
+  const integrate = pipeline.buildPipeline(stateWithDomain('infra')).find((d) => d.id === 'integrate');
+  const p = integrate.prompt({});
+  for (const command of ['create-pr.js', 'wait-ci.js', 'merge-pr.js']) assert.match(p, new RegExp(`\\.agents/commands/${command}`));
+  assert.doesNotMatch(p, /gh pr (create|merge)/);
+  assert.doesNotMatch(p, /git branch -d/);
 });

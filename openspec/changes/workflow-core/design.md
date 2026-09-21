@@ -14,7 +14,7 @@
 用户拍板（本变更的约束基线）：
 1. **P1-P5 全做**；后续会用 Codex 继续开发，跨模型通用是硬需求。
 2. **核心架构原则**：工作流编排是核心能力——**单一模型无关编排核心 + 薄 driver 适配层**，基于核心适配 claude、适配 codex，**不写两套、不维护两套**。
-3. **方向 A（已确认）**：外部 node 核心 + CLI 驱动（`claude -p` / `codex exec`），而非宿主原生编排（Claude Workflow 工具 + codex 另写一套）。理由：Codex 无可编程 pipeline 原语，要共享同一份流水线，唯一干净的路是 node 核心 + CLI 驱动。（注：此处原提 claude 侧复用原生 `--agent` 角色，已由 D7 拍板改为 `--append-system-prompt` 注入 roles/ 单源文案，避免双份维护——见 D7。）
+3. **方向 A（已确认）**：外部 node 核心 + CLI 驱动（`claude -p` / `codex exec`），而非宿主原生编排（Claude Workflow 工具 + codex 另写一套）。理由：Codex 无可编程 pipeline 原语，要共享同一份流水线，唯一干净的路是 node 核心 + CLI 驱动。（注：此处原提 claude 侧复用原生 `--agent` 角色，已由 D7 拍板改为 `--append-system-prompt-file` 注入 roles/ 单源文案，避免双份维护——见 D7。）
 4. **决策边界总原则**：涉及用户（人）的决策一律回主会话解决，流水线内绝不自动拍板、不自我扩张需求。
 5. **本变更组织**：单变更 `workflow-core`（不拆 epic）。P1-P5 全落同一核心模块，拆分必文件冲突；用新 epic 并行器实现自身是循环依赖。
 6. **PRD 初始化**：大变更 `/pipe:init <epic>` 拆子变更、用户批一次总 PRD；中等变更走单变更 `/pipe`。PRD 批准在主会话由用户做。
@@ -69,7 +69,7 @@
 │   └── drivers/
 │       ├── contract.js   # driver 接口、标准结果、错误码、能力检查
 │       ├── registry.js   # driver 注册与显式/环境选择
-│       ├── claude.js     # claude -p --output-format json --json-schema ... --append-system-prompt roles/<role>.md ...
+│       ├── claude.js     # claude -p --output-format json --json-schema ... --append-system-prompt-file roles/<role>.md ...
 │       ├── codex.js      # codex exec --json --output-schema schema.json -o result.json ...
 │       └── opencode.js   # opencode run --format json --dir ...；解析 NDJSON final assistant message
 ├── workflows/                          # Agent 无关的 preflight / epic-preflight 执行脚本
@@ -118,7 +118,7 @@
 | `tester` | tester | dev-* | 覆盖审计 + 补测试 + 冒烟；missing 非空或 smokePassed=false → 失败 |
 | `cr` | cr-agent | tester | 只读，≤maxRounds=3 轮；blocker/major 定向打回；三轮不过 → decision.js escalate |
 | `verify` | verify-agent | cr | 按 domain 短路基线（代码域 5 步 / docs/spec/infra 跳过 cargo/npm） |
-| `integrate` | leader | verify | 归档 `/opsx:archive` → push → `gh pr create` → 等 CI → `gh pr merge --squash` → 分支清理 |
+| `integrate` | leader | verify | `archive-change.js` → push → `create-pr.js` → `wait-ci.js` → `merge-pr.js`（wrapper 负责 squash/删除已合并分支） |
 
 **条件边**：`cr`/`verify` 失败不直接退出 → 路由 `decision.js` 决断节点（D2）：`retry` 重置目标节点、`reroute` 生成修复子节点、`escalate`/`abort` 挂起。`integrate` 失败（integration_failed）→ 决策路由或上报主会话。
 
@@ -181,7 +181,7 @@ DriverResult = {
 ```
 
 - `contract.js` 负责输入校验、标准错误分类（`spawn/auth/config/timeout/protocol/schema/agent`）、超时与终止；driver 不得抛出未分类异常。
-- **claude driver**：`claude -p <prompt> --output-format json --json-schema '<schema>' --append-system-prompt roles/<role>.md ...` → 解析 structured output。
+- **claude driver**：`claude -p <prompt> --output-format json --json-schema '<schema>' --append-system-prompt-file roles/<role>.md ...` → 解析 structured output。
 - **codex driver**：`codex exec <prompt> --cd <dir> --sandbox <mode> --output-schema <schemaFile> -o <resultFile> --json ...` → 读 result file。
 - **opencode driver**：`opencode run --format json --dir <cwd> [--model <provider/model>] [--agent <agent>] <prompt>` → 逐行解析 NDJSON 事件，只接受当前 session 的最终 assistant text；从 fenced/unfenced JSON envelope 中提取 `structured`。OpenCode CLI 无原生 schema 参数时，schema 作为约束附加到 prompt，最终仍由核心二次校验。
 - 所有 driver 都必须返回同一 `DriverResult`；核心只消费标准结果，不解析宿主事件、不认识二进制参数。
@@ -339,7 +339,7 @@ driver 启动前必须声明并校验自身能力。角色要求无法满足时�
 1. core/pipeline/state 只依赖 `runAgent(task, ctx)` 和标准 `DriverResult`，不通过 `if (driverName === ...)` 注入角色或权限。
 2. 角色内容由公共 wrapper 读取一次；driver 只负责把已组装的 task 翻译为宿主协议，避免每新增 runtime 都修改 `run.js`。
 3. capability 是角色需求，宿主工具名是 driver 私有映射；权限不满足则 fail-closed。
-4. OpenCode 首期使用非交互 CLI + NDJSON；不把原始事件流直接暴露给 core。
+4. OpenCode 首期使用非交互 CLI + NDJSON；不把原始事件流直接暴露给 core。若无法可靠施加只读策略，driver 在启动前返回 `config` 错误；只有显式配置并由 runtime policy adapter 证明可执行时才允许只读节点启动，工作区前后审计仍保留为第二层防线。
 5. 工作流动作必须是可执行 CLI/wrapper；斜杠命令只属于入口层，不得成为 DAG 节点依赖。
 6. 状态文件记录 `driverApiVersion` 与 `driverVersion`。同一 run 默认用原 driver resume；显式跨 driver resume 时，核心重新验证所有 succeeded 节点的落地 commit，并从首个未完成节点继续，不能复用宿主 sessionId 作为正确性依据。
 7. driver contract 增加 `apiVersion`；不兼容版本在启动前拒绝，避免运行中才破坏状态。
@@ -370,7 +370,7 @@ driver 启动前必须声明并校验自身能力。角色要求无法满足时�
 
 ## Risks / Trade-offs
 
-- **方向 A 的成本**：每个节点是独立 CLI 进程（冷启动、节点间无共享会话上下文）。缓解：状态文件 + 续跑，已通过节点复用、失败节点才重跑，重试便宜；claude 侧 `--append-system-prompt` 注入 `roles/` 单源角色文案并配合 `--allowedTools` 控制工具集，能力不缩水。
+- **方向 A 的成本**：每个节点是独立 CLI 进程（冷启动、节点间无共享会话上下文）。缓解：状态文件 + 续跑，已通过节点复用、失败节点才重跑，重试便宜；claude 侧 `--append-system-prompt-file` 注入 `roles/` 单源角色文案并配合 `--allowedTools` 控制工具集，能力不缩水。
 - **codex `--output-schema` 强制力不确定**：核心对落盘结果做二次 schema 校验，失败按节点失败处理（已设计）。
 - **codex 本机可用但可能无 OpenAI 认证**：P5 完整验收依赖本机认证；未配置则 codex driver 显式报「配置缺失」，验收以 claude driver 全绿 + **codex driver 命令构造正确（单测断言参数拼装与输出解析，任务化落地）** 为准。
 - **新核心首次实战回归风险**：保留旧脚本归档 commit 可回溯；本变更自身走旧 pipe 验证新核心测试全绿再切换；合回后首个真实 `/pipe` 变更以 `--self-check` + 手工盯跑过渡。
