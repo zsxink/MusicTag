@@ -86,7 +86,9 @@ function wrapDriver(driverName, driverInfo, baseCtx) {
         ctx.allowedTools = mapped.tools;
         if (driverInfo.roleInjection === 'system-prompt-file') {
           ctx.roleFile = roleFile;
-          ctx.permissionMode = role.sandbox === 'read-only' ? 'read-only' : 'acceptEdits';
+          // Claude Code uses `plan` for its read-only permission mode; the
+          // pipeline's neutral capability vocabulary remains `read-only`.
+          ctx.permissionMode = role.sandbox === 'read-only' ? 'plan' : 'acceptEdits';
         } else if (driverInfo.roleInjection === 'prompt-prefix' && fs.existsSync(roleFile)) {
           t = { ...task, prompt: `${fs.readFileSync(roleFile, 'utf8')}\n\n${task.prompt}` };
         }

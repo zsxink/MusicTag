@@ -28,6 +28,14 @@ test('claude: buildArgs 拼装完整（--json-schema + --append-system-prompt-fi
   assert.ok(!args.includes('--cwd'), 'claude CLI 无 --cwd 参数，不得拼入');
 });
 
+test('claude: 只读角色使用 Claude CLI 的 plan 权限模式', () => {
+  const args = claude.buildArgs({ prompt: 'P' }, {
+    roleFile: '/r/roles/cr-agent.md', permissionMode: 'plan', allowedTools: ['Read'],
+  });
+  assert.ok(args.includes('--permission-mode'));
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
+});
+
 test('claude: 不用 --agent（D7 拍板）', () => {
   const args = claude.buildArgs({ prompt: 'P', schema: SCHEMA }, { roleFile: '/r/roles/leader.md' });
   assert.ok(!args.includes('--agent'));
