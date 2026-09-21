@@ -88,6 +88,7 @@ function get(name) {
   return {
     name,
     apiVersion: entry.apiVersion,
+    roleInjection: entry.roleInjection,
     driverVersion: mod && mod.DRIVER_VERSION || null,
     module: mod,
     available: !!mod && typeof mod.runAgent === 'function',

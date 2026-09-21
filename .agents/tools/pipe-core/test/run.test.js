@@ -106,7 +106,7 @@ test('run.js: tester 语义失败（smokePassed=false）→ 决断链 escalate �
   assert.equal(res.status, 3, `stderr=${res.stderr}`);
   assert.match(res.stderr, /挂起/);
   const state = JSON.parse(fs.readFileSync(path.join(repo, '.agents', 'runs', 'demo', 'state.json'), 'utf8'));
-  assert.equal(state.nodes.tester.status, 'failed');
+  assert.equal(state.nodes.tester.status, 'suspended');
   // 挂起前已通过节点完整落盘（preflight/architect/dev 已 succeeded）
   assert.equal(state.nodes.preflight.status, 'succeeded');
   assert.equal(state.nodes.architect.status, 'succeeded');

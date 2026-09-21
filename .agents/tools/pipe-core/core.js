@@ -220,6 +220,12 @@ function runNode(def, runCtx, decider) {
       continue; // 进入下一复审轮
     }
     // escalate / abort → 挂起回主会话
+    state.nodes[id] = {
+      ...(state.nodes[id] || {}),
+      status: 'suspended',
+      updatedAt: new Date().toISOString(),
+    };
+    stateApi.saveState(change, state);
     return {
       status: 'suspended', stage: 'decision-escalate', node: id,
       reason: d.reason, decision: d, error: errText, results,

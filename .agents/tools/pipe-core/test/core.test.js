@@ -162,7 +162,7 @@ test('core: resume 集成——失败节点重跑、已通过节点复用（落�
     });
     assert.equal(res1.status, 'suspended');
     assert.equal(state.nodes.n1.status, 'succeeded');
-    assert.equal(state.nodes.n2.status, 'failed');
+    assert.equal(state.nodes.n2.status, 'suspended');
 
     // 修复 n2，resume：复用已通过 n1，只重跑失败 n2 + 依赖 n3
     n2fails = false;

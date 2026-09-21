@@ -96,7 +96,7 @@ test('suspended workflow: failed tester persists a complete handoff state for th
     assert.equal(result.status, 3, result.stderr);
     const stateFile = path.join(repo, '.agents', 'runs', 'demo', 'state.json');
     const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-    assert.equal(state.nodes.tester.status, 'failed');
+    assert.equal(state.nodes.tester.status, 'suspended');
     assert.equal(typeof state.nodes.tester.error, 'string');
     assert.ok(state.nodes.tester.error.length > 0);
     assert.equal(state.nodes.preflight.status, 'succeeded');
