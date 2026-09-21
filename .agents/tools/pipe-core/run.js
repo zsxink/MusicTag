@@ -14,28 +14,13 @@ const { execSync } = require('node:child_process');
 const { runPipeline } = require('./core.js');
 const pipeline = require('./pipeline.js');
 const stateApi = require('./state.js');
-const claudeDriver = require('./drivers/claude.js');
-const codexDriver = require('./drivers/codex.js');
 const selfcheck = require('./selfcheck.js');
 const epicRunner = require('./epic.js');
+const registry = require('./drivers/registry.js');
+const contract = require('./drivers/contract.js');
 
-const DRIVERS = { claude: claudeDriver, codex: codexDriver };
-const ROLES_DIR = path.join(__dirname, 'roles');
-let rolesIndex = {};
-try {
-  rolesIndex = JSON.parse(fs.readFileSync(path.join(ROLES_DIR, 'roles.json'), 'utf8'));
-} catch (_) { /* 角色定义缺失时 wrapDriver 退化为无角色注入 */ }
-
-// D5 环境自动感知。
-function detectDriver() {
-  // CLAUDECODE 按真值判断（'1'/'true' 等）；'0'/空串不误判为 claude（复核2 minor）
-  const cc = String(process.env.CLAUDECODE || '').toLowerCase();
-  if (cc === '1' || cc === 'true') return 'claude';
-  const agent = process.env.AI_AGENT || '';
-  if (/claude/i.test(agent)) return 'claude';
-  if (/codex/i.test(agent)) return 'codex';
-  return null;
-}
+// D5 环境自动感知：委托 registry.detect（按注册的 envMatchers 匹配，歧义要求显式）。
+function detectDriver(env) { return registry.detect(env || process.env); }
 
 function parseArgs(argv) {
   const opts = { driver: null, resume: false, selfCheck: false, epic: null, change: null, cwd: null };
@@ -56,11 +41,11 @@ function parseArgs(argv) {
 function printUsage() {
   console.error(
     '用法:\n' +
-    '  node run.js <change> --driver claude|codex [--resume] [--self-check]\n' +
-    '  node run.js --epic <epic> --driver claude|codex [--resume]\n' +
+    '  node run.js <change> --driver claude|codex|opencode [--resume] [--self-check]\n' +
+    '  node run.js --epic <epic> --driver claude|codex|opencode [--resume]\n' +
     '  node run.js --self-check\n' +
     '选项:\n' +
-    '  --driver claude|codex   执行后端（未指定时按环境自动感知）\n' +
+    `  --driver\n    ${registry.helpText().split('\n').join('\n    ')}\n` +
     '  --epic <epic>           epic 并行执行器（P3）\n' +
     '  --resume                续跑已存在状态（从失败/挂起节点继续）\n' +
     '  --self-check            静态自检（角色/节点定义/driver 契约/脚本语法），fail-closed\n' +
@@ -76,9 +61,13 @@ function repoHead(root) {
   }
 }
 
-// 角色单源适配（D7）：claude 走 --append-system-prompt 注入 roles/<role>.md；
-// codex 把 role 内容拼进 exec prompt。工具集/沙箱同样来自 roles.json（角色单源）。
-function wrapDriver(driverName, driver, baseCtx) {
+// 角色单源适配（D7/D11）：按 driver 声明的 roleInjection 能力翻译 role 注入形态——
+// 'system-prompt-file'（claude）→ 传 roleFile，driver 走 --append-system-prompt；
+// 'prompt-prefix'（codex/opencode）→ 把 roles/<role>.md 内容拼进 prompt 开头。
+// capability 驱动，不含 if (driverName === ...) 分支（D11 约束 1/3）。
+const ROLES_DIR = path.join(__dirname, 'roles');
+function wrapDriver(driverName, driverInfo, baseCtx) {
+  const rolesIndex = loadRolesIndex();
   return {
     runAgent(task, extraCtx = {}) {
       const ctx = { ...baseCtx, ...extraCtx };
@@ -88,17 +77,22 @@ function wrapDriver(driverName, driver, baseCtx) {
       if (role) {
         ctx.allowedTools = role.allowedTools || [];
         ctx.sandbox = role.sandbox || 'workspace-write';
-        if (driverName === 'claude') {
+        if (driverInfo.roleInjection === 'system-prompt-file') {
           ctx.roleFile = roleFile;
           ctx.permissionMode = role.sandbox === 'read-only' ? 'read-only' : 'acceptEdits';
-        }
-        if (driverName === 'codex' && fs.existsSync(roleFile)) {
+        } else if (driverInfo.roleInjection === 'prompt-prefix' && fs.existsSync(roleFile)) {
           t = { ...task, prompt: `${fs.readFileSync(roleFile, 'utf8')}\n\n${task.prompt}` };
         }
       }
-      return driver.runAgent(t, ctx);
+      return driverInfo.module.runAgent(t, ctx);
     },
   };
+}
+
+function loadRolesIndex() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(ROLES_DIR, 'roles.json'), 'utf8'));
+  } catch (_) { return {}; /* 角色定义缺失时 wrapDriver 退化为无角色注入 */ }
 }
 
 async function main() {
@@ -123,7 +117,7 @@ async function main() {
   if (opts.epic) {
     const driverName = opts.driver || detectDriver();
     if (!driverName) {
-      console.error('--epic 需要 --driver claude|codex（环境无法自动判断）');
+      console.error('--epic 需要 --driver claude|codex|opencode（环境无法自动判断）');
       process.exit(2);
     }
     process.exit(await epicRunner.run(opts.epic, driverName));
@@ -133,10 +127,19 @@ async function main() {
 
   const driverName = opts.driver || detectDriver();
   if (!driverName) {
-    console.error('无法自动判断 driver（环境无 CLAUDECODE/AI_AGENT 标记）。请用 --driver claude|codex 显式指定。');
+    console.error('无法自动判断 driver（环境无 CLAUDECODE/AI_AGENT 标记）。请用 --driver claude|codex|opencode 显式指定。');
     process.exit(2);
   }
-  if (!DRIVERS[driverName]) { console.error(`未知 driver: ${driverName}（可选 claude|codex）`); process.exit(2); }
+  const driverInfo = registry.get(driverName);
+  if (!driverInfo) { console.error(`未知 driver: ${driverName}（可选 claude|codex|opencode）`); process.exit(2); }
+  if (!driverInfo.available) {
+    console.error(`driver ${driverName} 不可用：${driverInfo.loadError || '模块未实现 runAgent'}。不可用 runtime 不静默换 driver（D5/D11）。`);
+    process.exit(2);
+  }
+  if (driverInfo.apiVersion && driverInfo.apiVersion !== contract.API_VERSION) {
+    console.error(`driver ${driverName} 契约版本不兼容（driver=${driverInfo.apiVersion} !== contract=${contract.API_VERSION}），启动前拒绝（D11 约束 7）。`);
+    process.exit(2);
+  }
 
   const root = stateApi.repoRoot();
   const stateFile = stateApi.stateFile(opts.change);
@@ -160,9 +163,11 @@ async function main() {
   // B1（独立复核）：driver 的 cwd 必须取实际工作目录（epic worktree 场景下为 --cwd 注入的 worktree），
   // 而非 repoRoot——否则 claude/codex agent 会在主仓库工作区/分支上干活，P3 worktree 隔离被架空。
   const workDir = opts.cwd || root;
-  const driver = wrapDriver(driverName, DRIVERS[driverName], {
+  const driver = wrapDriver(driverName, driverInfo, {
     cwd: workDir,
     model: process.env.PIPE_MODEL || undefined,
+    // 仅透传本 driver 关心的二进制覆盖（fake driver 注入场景），其余 driver 忽略
+    bin: process.env[`PIPE_${driverName.toUpperCase()}_BIN`],
     claudeBin: process.env.PIPE_CLAUDE_BIN,
     codexBin: process.env.PIPE_CODEX_BIN,
   });
