@@ -21,6 +21,79 @@
 - 不构建通用 CI 平台；runner 只服务当前 pipe-core 的确定性步骤。
 - 不自动解决真正的 Git 冲突、需求歧义或产品决策。
 
+## Change Domain and Validation Scope
+
+- **Domain: `infra`**。
+- 变更仅涉及 `.agents/tools/pipe-core/`、`.agents/commands/`、`.agents/workflows/`、角色提示词、流程测试与本 change 的 OpenSpec artifact；不修改 `src-tauri/`、`src/`、MusicTag 产品行为或 Tauri command 契约。
+- 因此本变更不触发 cargo/npm 业务编译门禁。最终验证固定执行 Node/shell 静态检查、pipe-core 与 workflow-core 全量测试、`run.js --self-check` 和本 change 的 OpenSpec strict validate。
+- `backend`、`frontend`、`both` 的验证计划仍需由新 Verify runner 支持并通过 fake fixture 验证，但那是编排器能力测试，不会把本变更判成业务代码域。
+
+## Technical Design
+
+### 模块边界
+
+| 层 | 文件/目录 | 职责 | 不负责 |
+|---|---|---|---|
+| CLI 与装配 | `.agents/tools/pipe-core/run.js`、`pipeline.js` | 解析参数，构造节点定义，选择 driver，装配 runner/adapters | 不执行节点业务，不直接编排 GitHub 副作用 |
+| DAG 状态机 | `core.js`、`dag.js`、`schema.js`、`decision.js` | 拓扑推进、executor 选择、schema 校验、dirty 传播、重试/挂起决断 | 不硬编码节点顺序，不直接拼 shell 命令 |
+| 确定性执行基础 | 新增 `command-runner.js`、错误分类与工作区快照模块 | 异步命令、heartbeat、取消/超时、脱敏证据、HEAD/路径差异审计 | 不理解具体 driver 或产品代码 |
+| 持久化 | `state.js` | state v3 迁移、attempt 追加、checkpoint、summary、原子写盘、落地事实复核 | 不执行外部副作用 |
+| 确定性节点 | bootstrap/spec-gate runner、新增 `verify.js`、`integrate.js` | 固定检查、按域验证、集成 checkpoint 推进 | 不调用模型，不自由改变步骤顺序 |
+| Agent 适配 | `drivers/`、`capability.js`、`roles/` | 三端 driver 契约、最小权限、动态 prompt 与结构化结果 | 不提交、不执行 verify/integrate |
+| 中立命令 | `.agents/workflows/`、`.agents/commands/` | 可单测的 bootstrap/spec-gate 与 archive/PR/CI/merge 原子操作 | 不维护跨步骤状态机 |
+| 测试 | `.agents/tools/pipe-core/test/`、`tests/workflow-core/` | 单元、契约、旧 state fixture、临时 git 仓库与 fake Git/GitHub 端到端验收 | 不依赖真实网络完成核心回归 |
+
+所有新模块继续使用 CommonJS 与 Node 内建模块，保持 pipe-core 零运行时依赖。Git、OpenSpec、GitHub 操作均以 `command + argv` 或注入 adapter 表达，生产 adapter 调真实命令，测试 adapter 记录调用并返回确定性事实。
+
+### 节点数据流与写入边界
+
+```text
+CLI/change/driver
+  → bootstrap：基础事实与启动许可
+  → architect：design/tasks + domain=infra
+  → spec-gate：strict spec/preflight 证据
+  → dev：实现差异 + scoped test 证据 → core 审计并提交
+  → tester：scenario 覆盖 + 测试差异 → core 审计并提交
+  → cr：当前 specs/design/tester/diff/SHA → 只读结论
+  → verify：同一 HEAD 的按域命令证据 + 不可变性快照
+  → integrate：逐 checkpoint 的本地/远端事实
+  → state v3：attempt history + summary + 最终状态
+```
+
+| 阶段 | 允许写入 | 成功输出/下游依赖 |
+|---|---|---|
+| bootstrap | 仅运行状态/事件 | 分支、工作区、Issue、proposal/spec、driver/self-check 事实；architect 依赖 |
+| architect | 当前 change 的 `design.md`、`tasks.md` 及运行状态 | domain 与设计产物；spec-gate 依赖 |
+| spec-gate | 仅运行状态/事件 | 完整 preflight 与 OpenSpec strict 证据；所有开发节点依赖 |
+| dev/tester/fix | 节点声明的 `writeScopes`；`.git` 仅 core 可写 | scoped tests、审计结果、core 生成的 commit SHA；后续节点依赖该 SHA |
+| cr | 只读源码、规格、state 与 diff | 结构化 findings/pass；不得改变 HEAD 或工作区 |
+| verify | `target/`、`dist/`、显式 cache/tmp 与运行状态 | 同一 HEAD 的完整验证 steps、cache 证据、前后快照 |
+| integrate | 归档规格、git/远端状态、运行 checkpoint | archive commit、唯一 PR、required CI、merge 与远端核验事实 |
+
+工作区快照以“节点启动前已有差异”为基线，只审计该节点新增/改变的路径；这样不会把 Architect 已批准的 design/tasks 写入误归属给 Dev。任何 Agent 改 HEAD、CR 写文件、或节点产生白名单外差异都 fail-closed，且 core 不自动清理用户文件。
+
+### Requirement 覆盖
+
+| Spec requirement | 设计支撑 | 任务 |
+|---|---|---|
+| 模型无关编排核心 | 决策 1–2，单状态机 + 双 executor | 2.1–2.3 |
+| 节点状态机与断点续跑 | 决策 4，state v3 与落地事实校验 | 1.2、2.1、7.3 |
+| 决断链 | 决策 5，确定性分类优先 | 1.3、4.2 |
+| 中立工作流与确定性命令 | 模块边界、决策 2–3、8 | 1.1、2.2–2.3、5.2、6.1–6.5 |
+| 统一验证基线 | 决策 7、10 | 4.3、5.1–5.3、8.2–8.3 |
+| CR 复盘专项维度 | 决策 9 | 4.1–4.2 |
+| 异步确定性命令执行器 | 决策 3 | 1.1 |
+| Verify 构建可写且源码不可变 | 决策 7 | 5.1–5.3 |
+| 幂等集成 checkpoint 状态机 | 决策 8 | 6.1–6.5、7.3 |
+| Core 统一提交与文件范围审计 | 决策 6 | 3.1–3.3 |
+| 分层测试去重 | 决策 7、10 | 4.3、5.2–5.3 |
+| 逐 attempt 可观测性与运行摘要 | 决策 3–5、10 | 1.1–1.3、7.1、7.4 |
+| 单变更无人值守验收 | 完整 DAG 与端到端 fixture | 7.2–7.4、8.2–8.3 |
+
+### 实现依赖顺序
+
+默认在当前单一 worktree 串行实施，任务组硬依赖为 `1 → 2 → 3 → 4 → 5 → 6 → 7 → 8`。不得因模块看似独立而让多个写入 Agent 并行修改同一 worktree；只有外层显式建立隔离 worktree 时才可并行。运行时的 Rust/前端 Verify lane 并行属于被实现能力，与本变更开发并行无关。
+
 ## Decisions
 
 ### 1. 节点定义增加 `kind`，执行适配保持单一状态机
@@ -65,9 +138,9 @@ retry 预算以 state 中累计 attempt 数为准，resume 不重置。CLI 新�
 
 ### 6. Core 以快照差异执行文件所有权审计并统一提交
 
-Agent 节点前记录 HEAD 与 porcelain 状态，节点后计算新增差异。pipeline 为 dev/tester/fix 节点声明 `writeScopes` 与确定性 commit message。Agent prompt 明确禁止 git 写入；core 检查 HEAD 未变、变更路径均落在 scopes、节点结果与测试证据合格后，使用 argv 形式执行 `git add -- <paths>` 和 `git commit`。
+Agent 节点前记录 HEAD、tracked/untracked/ignored 的 porcelain 基线，节点后计算相对该基线的新增差异。pipeline 为 dev/tester/fix 节点声明 `writeScopes` 与确定性 commit message。Agent prompt 明确禁止 git 写入；core 检查 HEAD 未变、变更路径均落在 scopes、节点结果与测试证据合格后，只对本节点新增且获授权的路径使用 argv 形式执行 `git add -- <paths>` 和 `git commit`，不得顺带提交节点启动前已有差异。
 
-如果 Agent 自行改变 HEAD 或修改越权文件，节点失败且不提交；CR/architect 等只读或文档写入节点继续使用对应快照策略。选择 core 提交而不是扩大 driver 的 `.git` 权限，可以让所有 runtime 行为一致，并让 commit SHA 成为可靠落地证据。
+如果 Agent 自行改变 HEAD 或修改越权文件，节点失败且不提交；CR 使用严格只读快照，architect 只允许当前 change 的 `design.md`/`tasks.md`，其写入由后续归档提交收敛而不得混入 Dev/Tester 提交。选择 core 提交而不是扩大 driver 的 `.git` 权限，可以让所有 runtime 行为一致，并让 commit SHA 成为可靠落地证据。
 
 ### 7. Verify 用“受控写目录 + 前后源码清单”实现不可变性
 
@@ -110,9 +183,10 @@ Dev 的自验证命令由变更域和受影响文件推导，只运行相关测�
 ## Migration Plan
 
 1. 先添加 command runner、错误分类、state v3 与兼容迁移测试，尚不改变现有 DAG。
-2. 添加 core commit、verify 和 integrate 模块及 fake adapters；用单元/fixture 测试覆盖副作用边界。
-3. 更新 pipeline/roles/prompts，切换 deterministic 节点与新 DAG，保留旧脚本兼容入口。
-4. 更新 wrappers、自检和文档，运行 pipe-core/workflow-core 全量回归与本变更 OpenSpec strict 校验。
-5. 通过端到端 fixture 和真实分支集成验证后归档、创建唯一 PR 并合并。
+2. 扩展 core/schema/self-check，加入双 executor、bootstrap/spec-gate 与新 DAG，但用兼容开关/fixture 保持旧入口可验证。
+3. 加入工作区审计、core commit、动态 CR 与分层测试，收紧 Agent 权限和 prompt。
+4. 添加 verify、integrate 模块及 fake adapters，按固定依赖顺序接入 DAG；用单元/fixture 覆盖副作用边界。
+5. 更新 wrappers、skill/AGENTS/roles/workflow 注释，运行 pipe-core/workflow-core 全量回归与本变更 OpenSpec strict 校验。
+6. 通过端到端 fixture 和真实分支集成验证后归档、创建唯一 PR 并合并。
 
 回滚时可回退切换 DAG 的提交，v3 state 仍保留兼容字段；旧代码若无法读取 v3，使用迁移前分支和保存的 v2 fixture 恢复，不删除运行历史。
