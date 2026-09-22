@@ -5,5 +5,6 @@
 
 pub mod cover;
 pub mod folder;
+pub mod missing;
 pub mod search;
 pub mod song;
