@@ -8,6 +8,7 @@ pub mod cover;
 pub mod fs_atomic;
 pub mod lyrics;
 pub mod meta;
+pub mod missing;
 pub mod reader;
 pub mod rename;
 pub mod searcher;

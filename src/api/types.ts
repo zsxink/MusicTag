@@ -8,6 +8,24 @@ export type MusicSourceId = 'netease' | 'qqmusic' | 'kugou' | 'lrclib' | 'itunes
 /** 歌词来源：内嵌 / 同名单曲 lrc / 无 */
 export type LyricsSource = 'embedded' | 'sidecar' | 'none'
 
+/** 查漏扫描维度（与 Rust MissingField 的 snake_case serde 名称一致）。 */
+export type MissingField = 'title' | 'artist' | 'album' | 'cover' | 'lyrics'
+
+export interface MissingSong {
+  path: string
+  missing: MissingField[]
+}
+
+export interface MissingScanError {
+  path: string
+  reason: string
+}
+
+export interface MissingScanResult {
+  songs: MissingSong[]
+  errors: MissingScanError[]
+}
+
 /** 与 Rust Song struct 对齐（open_song 返回 / save_song 提交）。 */
 export interface Song {
   path: string

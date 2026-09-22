@@ -104,4 +104,19 @@ describe('SongRow — select 走 dirty 拦截门（spec: 无修改直接切 / �
     expect(songStore.current?.title).toBe('改过') // 不重读不丢编辑
     expect(mockInvoke).not.toHaveBeenCalled()
   })
+
+  it('缺失字段存在时显示稳定顺序的具体 badge', () => {
+    const w = mount(SongRow, {
+      props: {
+        song: makeSummary('/a/one.flac'),
+        missing: ['cover', 'title', 'lyrics'],
+      },
+    })
+
+    expect(w.findAll('.missing-badge').map((x) => x.text())).toEqual([
+      '缺歌名',
+      '缺封面',
+      '缺歌词',
+    ])
+  })
 })

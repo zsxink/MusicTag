@@ -8,6 +8,7 @@
 // - `search_song` / `fetch_lyric` / `download_cover`（v1-search-backend，五源并发搜索）
 // - `search_source`（v1-search-fixes，单源搜索：C2 换源绕过聚合去重）
 // - `get_last_dir` / `save_last_dir`（dir-memory，config.json 记住上次打开目录）
+// - `scan_missing`（missing-fields-filter，按需只读扫描缺失维度）
 // 后续子变更在此逐个追加 `tauri::generate_handler![...]`。
 //
 // 模块声明必须 `pub`：`src-tauri/tests/` 集成测试经 `app_lib::` 访问
@@ -25,6 +26,7 @@ pub fn run() {
             commands::folder::list_songs,
             commands::folder::get_last_dir,
             commands::folder::save_last_dir,
+            commands::missing::scan_missing,
             commands::song::open_song,
             commands::song::save_song,
             commands::song::rename_song,

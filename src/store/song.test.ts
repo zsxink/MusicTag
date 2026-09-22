@@ -31,7 +31,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }))
 
-import type { CoverInput, MusicSourceId, SearchResult, Song, SongCandidate, SongSummary } from '../api/types'
+import type { CoverInput, MissingScanResult, MusicSourceId, SearchResult, Song, SongCandidate, SongSummary } from '../api/types'
 import { searchSongs as mockedSearchSongs } from '../api/search'
 import {
   activateFolder,
@@ -48,6 +48,10 @@ import {
   requestSwitch,
   resolvePending,
   save,
+  closeMissingFilter,
+  openMissingFilter,
+  scanMissing,
+  setMissingChecks,
   selectSong,
   setCover,
   setPendingRename,
@@ -81,6 +85,159 @@ describe('songStore 骨架（SongEditor 形态占位）', () => {
     expect(songStore.original).toBeNull()
     expect(songStore.dirty).toBe(false)
     expect(songStore.lyricsSource).toBe('none')
+  })
+})
+
+describe('songStore — 缺失筛选状态与扫描竞态', () => {
+  beforeEach(() => {
+    songStore.folderPath = '/music'
+    songStore.songs = [s('/music/a.flac', 'A', 'AA'), s('/music/b.flac', 'B', 'BB')]
+    songStore.missingFilterEnabled = false
+    songStore.missingChecks = ['title', 'artist', 'album', 'cover', 'lyrics']
+    songStore.missingByPath = {}
+    songStore.missingScanErrors = []
+    songStore.missingScanState = 'idle'
+    songStore.missingScanError = ''
+  })
+
+  it('打开筛选默认五维并扫描，结果按 path 建立缺失映射', async () => {
+    const result: MissingScanResult = {
+      songs: [{ path: '/music/b.flac', missing: ['cover', 'title'] }],
+      errors: [{ path: '/music/a.flac', reason: '读取失败' }],
+    }
+    const scan = vi.fn(async () => result)
+
+    await openMissingFilter(scan)
+
+    expect(songStore.missingFilterEnabled).toBe(true)
+    expect(songStore.missingChecks).toEqual(['title', 'artist', 'album', 'cover', 'lyrics'])
+    expect(scan).toHaveBeenCalledWith('/music', ['title', 'artist', 'album', 'cover', 'lyrics'])
+    expect(songStore.missingByPath).toEqual({ '/music/b.flac': ['cover', 'title'] })
+    expect(songStore.missingScanErrors).toEqual(result.errors)
+    expect(songStore.missingScanState).toBe('done')
+  })
+
+  it('全不选时关闭筛选且不发起 IPC', async () => {
+    const scan = vi.fn(async () => ({ songs: [], errors: [] }))
+
+    await setMissingChecks([], scan)
+
+    expect(scan).not.toHaveBeenCalled()
+    expect(songStore.missingFilterEnabled).toBe(false)
+    expect(songStore.missingByPath).toEqual({})
+    expect(songStore.missingScanState).toBe('idle')
+  })
+
+  it('旧目录或旧维度扫描完成后不得覆盖当前结果', async () => {
+    let resolveOld!: (result: MissingScanResult) => void
+    const oldScan = vi.fn(() => new Promise<MissingScanResult>((resolve) => { resolveOld = resolve }))
+    const newScan = vi.fn(async () => ({
+      songs: [{ path: '/music/b.flac', missing: ['lyrics'] }],
+      errors: [],
+    }))
+
+    void openMissingFilter(oldScan)
+    await Promise.resolve()
+    expect(songStore.missingScanState).toBe('scanning')
+
+    songStore.folderPath = '/other'
+    await setMissingChecks(['cover'], newScan)
+    expect(songStore.missingByPath).toEqual({ '/music/b.flac': ['lyrics'] })
+
+    resolveOld({ songs: [{ path: '/music/a.flac', missing: ['title'] }], errors: [] })
+    await Promise.resolve()
+    expect(songStore.missingByPath).toEqual({ '/music/b.flac': ['lyrics'] })
+    expect(songStore.missingScanState).toBe('done')
+  })
+
+  it('关闭筛选会作废在途响应，但不改变当前编辑态', async () => {
+    let resolveScan!: (result: MissingScanResult) => void
+    const scan = vi.fn(() => new Promise<MissingScanResult>((resolve) => { resolveScan = resolve }))
+    songStore.current = { ...makeSong({ title: '正在编辑' }) }
+    songStore.original = { ...makeSong() }
+
+    void openMissingFilter(scan)
+    await Promise.resolve()
+    closeMissingFilter()
+    resolveScan({ songs: [{ path: '/music/a.flac', missing: ['title'] }], errors: [] })
+    await Promise.resolve()
+
+    expect(songStore.missingFilterEnabled).toBe(false)
+    expect(songStore.current?.title).toBe('正在编辑')
+    expect(songStore.missingByPath).toEqual({})
+  })
+
+  it('命令级失败进入错误态并保留当前编辑状态', async () => {
+    songStore.current = { ...makeSong({ title: '正在编辑' }) }
+    songStore.original = { ...makeSong() }
+
+    await openMissingFilter(async () => {
+      throw new Error('扫描不可用')
+    })
+
+    expect(songStore.missingScanState).toBe('error')
+    expect(songStore.missingScanError).toBe('扫描不可用')
+    expect(songStore.current?.title).toBe('正在编辑')
+    expect(songStore.original?.title).toBe('歌名')
+  })
+
+  it('命令级失败后重试可恢复结果，不污染当前编辑态', async () => {
+    songStore.current = { ...makeSong({ title: '正在编辑' }) }
+    songStore.original = { ...makeSong() }
+    let attempts = 0
+    const scan = vi.fn(async () => {
+      attempts++
+      if (attempts === 1) throw new Error('临时不可用')
+      return {
+        songs: [{ path: '/music/a.flac', missing: ['lyrics'] }],
+        errors: [],
+      }
+    })
+
+    await openMissingFilter(scan)
+    expect(songStore.missingScanState).toBe('error')
+    await scanMissing(scan)
+
+    expect(attempts).toBe(2)
+    expect(songStore.missingScanState).toBe('done')
+    expect(songStore.missingByPath).toEqual({ '/music/a.flac': ['lyrics'] })
+    expect(songStore.current?.title).toBe('正在编辑')
+    expect(songStore.original?.title).toBe('歌名')
+  })
+
+  it('同一目录重选维度时，旧扫描结果不得覆盖最新条件', async () => {
+    let resolveOld!: (result: MissingScanResult) => void
+    const oldScan = vi.fn(() => new Promise<MissingScanResult>((resolve) => { resolveOld = resolve }))
+    const newScan = vi.fn(async () => ({
+      songs: [{ path: '/music/b.flac', missing: ['cover'] }],
+      errors: [],
+    }))
+
+    void openMissingFilter(oldScan)
+    await Promise.resolve()
+    await setMissingChecks(['cover'], newScan)
+    resolveOld({ songs: [{ path: '/music/a.flac', missing: ['title'] }], errors: [] })
+    await Promise.resolve()
+
+    expect(songStore.missingChecks).toEqual(['cover'])
+    expect(songStore.missingByPath).toEqual({ '/music/b.flac': ['cover'] })
+  })
+
+  it('真实换目录会复位查漏状态，旧目录响应不得串入新目录', async () => {
+    let resolveOld!: (result: MissingScanResult) => void
+    const oldScan = vi.fn(() => new Promise<MissingScanResult>((resolve) => { resolveOld = resolve }))
+
+    void openMissingFilter(oldScan)
+    await Promise.resolve()
+    await activateFolder('/new', async () => [s('/new/new.flac', 'New', 'Artist')])
+    resolveOld({ songs: [{ path: '/music/a.flac', missing: ['title'] }], errors: [] })
+    await Promise.resolve()
+
+    expect(songStore.folderPath).toBe('/new')
+    expect(songStore.songs).toEqual([s('/new/new.flac', 'New', 'Artist')])
+    expect(songStore.missingFilterEnabled).toBe(false)
+    expect(songStore.missingByPath).toEqual({})
+    expect(songStore.missingScanState).toBe('idle')
   })
 })
 

@@ -14,6 +14,42 @@ pub struct SongSummary {
     pub artist: String,
 }
 
+/// 缺失字段筛选维度（missing-fields-filter）。
+///
+/// 序列化字面量是前端 IPC 契约的一部分；业务检查顺序由 service 层固定为
+/// `title → artist → album → cover → lyrics`，不取决于调用方传入顺序。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MissingField {
+    Title,
+    Artist,
+    Album,
+    #[serde(rename = "cover")]
+    Cover,
+    Lyrics,
+}
+
+/// 单首歌曲的缺失字段结果。只返回路径和维度，不携带完整 Song、封面或歌词正文。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissingSong {
+    pub path: String,
+    pub missing: Vec<MissingField>,
+}
+
+/// 缺失扫描中的单文件错误。错误文件不会被伪造为命中或已补全。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissingScanError {
+    pub path: String,
+    pub reason: String,
+}
+
+/// 缺失字段扫描结果。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissingScanResult {
+    pub songs: Vec<MissingSong>,
+    pub errors: Vec<MissingScanError>,
+}
+
 /// 歌词来源（design.md D1 契约形状：`"embedded" | "sidecar" | "none"`）。
 ///
 /// serde 默认会把 enum 序列化成 `{"Embedded":null}` 对象形状，破坏 TS 契约，

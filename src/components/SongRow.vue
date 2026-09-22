@@ -3,14 +3,30 @@
 // 选中态用 design.md `--active` 琥珀底 + 歌名变琥珀。
 // v1-song-read：选中即触发 `open_song` 读全量（spec「选中读取完整标签」）。
 // v1-ux-settings：select() 改走 requestSwitch（dirty 拦截门——有未保存修改时弹三选一）。
+import { computed } from 'vue'
+
 import { openSong } from '../api/songs'
-import type { Song, SongSummary } from '../api/types'
+import type { MissingField, Song, SongSummary } from '../api/types'
 import { artistText, titleText } from '../store/selectors'
 import { requestSwitch, songStore } from '../store/song'
 
 const props = defineProps<{
   song: SongSummary
+  missing?: MissingField[]
 }>()
+
+const missingLabels: Record<MissingField, string> = {
+  title: '缺歌名',
+  artist: '缺歌手',
+  album: '缺专辑',
+  cover: '缺封面',
+  lyrics: '缺歌词',
+}
+const missingBadges = computed(() =>
+  (['title', 'artist', 'album', 'cover', 'lyrics'] as MissingField[])
+    .filter((field) => props.missing?.includes(field))
+    .map((field) => missingLabels[field]),
+)
 
 /** 该行是否被选中（store 比对 path）。 */
 const isSelected = () => songStore.selectedPath === props.song.path
@@ -35,6 +51,7 @@ function select() {
   >
     <span class="row-artist">{{ artistText(song) }}</span>
     <span class="row-title">{{ titleText(song) }}</span>
+    <span v-for="badge in missingBadges" :key="badge" class="missing-badge">{{ badge }}</span>
   </li>
 </template>
 
@@ -72,5 +89,15 @@ function select() {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.missing-badge {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 1.2;
 }
 </style>
