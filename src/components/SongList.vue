@@ -131,7 +131,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     <div v-if="songStore.missingFilterEnabled" class="missing-panel" data-testid="missing-panel">
       <div class="missing-panel-head">
         <span>缺失字段</span>
-        <button class="missing-close-btn" type="button" @click="closeMissingFilter">关闭</button>
+        <span class="missing-head-actions">
+          <!-- 刷新：常驻入口，复用 retryMissingScan → scanMissing（missing-filter-refresh #129）。
+               禁挂 .missing-close-btn class（songlist.test.ts 唯一选择器要求）。 -->
+          <button
+            class="missing-refresh-btn"
+            type="button"
+            data-testid="missing-refresh-btn"
+            @click="retryMissingScan"
+          >
+            刷新
+          </button>
+          <button class="missing-close-btn" type="button" @click="closeMissingFilter">关闭</button>
+        </span>
       </div>
       <label v-for="field in MISSING_FIELDS" :key="field" class="missing-check">
         <input
@@ -238,7 +250,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 .missing-filter-btn,
 .missing-close-btn,
-.missing-retry-btn {
+.missing-retry-btn,
+.missing-refresh-btn {
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -250,7 +263,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 .missing-filter-btn:hover:not(:disabled),
 .missing-close-btn:hover,
-.missing-retry-btn:hover {
+.missing-retry-btn:hover,
+.missing-refresh-btn:hover {
   color: var(--text);
   background: var(--hover);
 }
@@ -281,6 +295,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   color: var(--text);
   font-size: 12px;
   font-weight: 600;
+}
+
+.missing-head-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .missing-check {
