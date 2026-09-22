@@ -78,12 +78,14 @@ test('epic: 崩溃恢复——已 done 项不重跑；失败项等主会话决�
 
 test('epic: 崩溃恢复——中断时 running 的子项续跑重置为 pending（可重新调度，不永久卡死）', async () => {
   const main = tmpMainRepo();
+  const fake = fakeCommands({ verify: true, gitRemote: true, ghFlat: true });
   const def = { name: 'e', items: [{ name: 'A', dependsOn: [], status: 'pending' }] };
   fs.mkdirSync(path.join(main, 'openspec', 'epics', 'e'), { recursive: true });
   fs.writeFileSync(path.join(main, 'openspec', 'epics', 'e', 'epic.json'), JSON.stringify(def));
   execSync('git add openspec && git commit -qm "add epic.json"', { cwd: main });
   // 模拟中断瞬间：A 已置 running（批次开始即落盘），但子进程尚未收尾 → epic-state.json 永久停留 running
   process.env.PIPE_CORE_REPO_ROOT = main;
+  process.env.PIPE_FAKE_CMDS = fake.dir;
   epic.saveEpicState('e', { schemaVersion: epic.EPIC_SCHEMA_VERSION, epic: 'e', items: { A: { status: 'running', worktree: null } } });
   assert.deepEqual(epic.readyItems(def, epic.loadEpicState('e')).map((i) => i.name), [], 'running 不进就绪集（readyItems 语义保持）');
   // 续跑：run() 内部把 running → pending 重新调度 → 就绪集恢复 → A 完整跑通
@@ -98,10 +100,12 @@ test('epic: 崩溃恢复——中断时 running 的子项续跑重置为 pending
   } finally {
     delete process.env.PIPE_CORE_REPO_ROOT;
     delete process.env.PIPE_CLAUDE_BIN;
+    delete process.env.PIPE_FAKE_CMDS;
     delete process.env.CLAUDECODE;
     execSync('git worktree prune', { cwd: main, stdio: 'ignore' });
     fs.rmSync(path.join(main, '.worktrees'), { recursive: true, force: true });
     fs.rmSync(main, { recursive: true, force: true });
+    fake.cleanup();
   }
 });
 
@@ -269,6 +273,7 @@ test('epic: B2 自动 --resume——子项已存在 state.json 时续跑自动�
   // 若 runItemAsync 不自动 --resume，子进程 run.js 会 exit 2 → 子项 failed。
   // 断言最终子项 done（说明自动 --resume 生效，从既有状态续跑而非被挡死）。
   const main = tmpMainRepo();
+  const fake = fakeCommands({ verify: true, gitRemote: true, ghFlat: true });
   const def = { name: 'resume2', items: [{ name: 'R', dependsOn: [], status: 'pending', issue: 1 }] };
   fs.mkdirSync(path.join(main, 'openspec', 'epics', 'resume2'), { recursive: true });
   fs.writeFileSync(path.join(main, 'openspec', 'epics', 'resume2', 'epic.json'), JSON.stringify(def));
@@ -278,6 +283,7 @@ test('epic: B2 自动 --resume——子项已存在 state.json 时续跑自动�
   fs.writeFileSync(path.join(main, '.agents', 'runs', 'R', 'state.json'),
     JSON.stringify({ schemaVersion: 1, change: 'R', driver: 'claude', startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), nodes: {} }));
   process.env.PIPE_CORE_REPO_ROOT = main;
+  process.env.PIPE_FAKE_CMDS = fake.dir;
   process.env.PIPE_CLAUDE_BIN = FAKE_CLAUDE;
   process.env.CLAUDECODE = '1';
   delete process.env.AI_AGENT;
@@ -289,10 +295,12 @@ test('epic: B2 自动 --resume——子项已存在 state.json 时续跑自动�
   } finally {
     delete process.env.PIPE_CORE_REPO_ROOT;
     delete process.env.PIPE_CLAUDE_BIN;
+    delete process.env.PIPE_FAKE_CMDS;
     delete process.env.CLAUDECODE;
     execSync('git worktree prune', { cwd: main, stdio: 'ignore' });
     fs.rmSync(path.join(main, '.worktrees'), { recursive: true, force: true });
     fs.rmSync(main, { recursive: true, force: true });
+    fake.cleanup();
   }
 });
 
@@ -300,12 +308,15 @@ test('epic: B2 自动 --resume——子项已存在 state.json 时续跑自动�
 
 const FAKE_CLAUDE = path.join(__dirname, 'fixtures', 'fake-pipe-claude.js');
 const FAKE_CONCURRENCY = path.join(__dirname, 'fixtures', 'fake-pipe-concurrency.js');
+const { seedWorkflows } = require('./seed.js');
+const { fakeCommands } = require('./fixtures/fake-pipe-commands.js');
 
 function tmpMainRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-epic-e2e-'));
   execSync('git init -q', { cwd: dir });
   execSync('git config user.email t@t && git config user.name t', { cwd: dir });
   fs.writeFileSync(path.join(dir, '.gitignore'), '.worktrees/\n.agents/runs/\n');
+  seedWorkflows(dir);
   fs.writeFileSync(path.join(dir, 'a.txt'), 'hello');
   execSync('git add . && git commit -qm init', { cwd: dir });
   return dir;
@@ -313,6 +324,7 @@ function tmpMainRepo() {
 
 test('epic: 3 个无依赖子项一批 ≤3，各在独立 worktree 跑完整子流程并清理（真实 git + subprocess）', async () => {
   const main = tmpMainRepo();
+  const fake = fakeCommands({ verify: true, gitRemote: true, ghFlat: true });
   const epicDef = {
     name: 'e2e',
     items: ['A', 'B', 'C'].map((n) => ({ name: n, dependsOn: [], status: 'pending', issue: 1 })),
@@ -321,6 +333,7 @@ test('epic: 3 个无依赖子项一批 ≤3，各在独立 worktree 跑完整子
   fs.writeFileSync(path.join(main, 'openspec', 'epics', 'e2e', 'epic.json'), JSON.stringify(epicDef));
   execSync('git add openspec && git commit -qm "add epic.json"', { cwd: main });
   process.env.PIPE_CORE_REPO_ROOT = main;
+  process.env.PIPE_FAKE_CMDS = fake.dir;
   process.env.PIPE_CLAUDE_BIN = FAKE_CLAUDE;
   process.env.CLAUDECODE = '1';
   delete process.env.AI_AGENT;
@@ -337,15 +350,18 @@ test('epic: 3 个无依赖子项一批 ≤3，各在独立 worktree 跑完整子
   } finally {
     delete process.env.PIPE_CORE_REPO_ROOT;
     delete process.env.PIPE_CLAUDE_BIN;
+    delete process.env.PIPE_FAKE_CMDS;
     delete process.env.CLAUDECODE;
     execSync('git worktree prune', { cwd: main, stdio: 'ignore' });
     fs.rmSync(path.join(main, '.worktrees'), { recursive: true, force: true });
     fs.rmSync(main, { recursive: true, force: true });
+    fake.cleanup();
   }
 });
 
 test('epic: 依赖保证顺序——B dependsOn A，A 未 done 时 B 不进就绪集', async () => {
   const main = tmpMainRepo();
+  const fake = fakeCommands({ verify: true, gitRemote: true, ghFlat: true });
   const epicDef = {
     name: 'order',
     items: [
@@ -356,6 +372,7 @@ test('epic: 依赖保证顺序——B dependsOn A，A 未 done 时 B 不进就�
   fs.mkdirSync(path.join(main, 'openspec', 'epics', 'order'), { recursive: true });
   fs.writeFileSync(path.join(main, 'openspec', 'epics', 'order', 'epic.json'), JSON.stringify(epicDef));
   process.env.PIPE_CORE_REPO_ROOT = main;
+  process.env.PIPE_FAKE_CMDS = fake.dir;
   process.env.PIPE_CLAUDE_BIN = FAKE_CLAUDE;
   process.env.CLAUDECODE = '1';
   try {
@@ -369,10 +386,12 @@ test('epic: 依赖保证顺序——B dependsOn A，A 未 done 时 B 不进就�
   } finally {
     delete process.env.PIPE_CORE_REPO_ROOT;
     delete process.env.PIPE_CLAUDE_BIN;
+    delete process.env.PIPE_FAKE_CMDS;
     delete process.env.CLAUDECODE;
     execSync('git worktree prune', { cwd: main, stdio: 'ignore' });
     fs.rmSync(path.join(main, '.worktrees'), { recursive: true, force: true });
     fs.rmSync(main, { recursive: true, force: true });
+    fake.cleanup();
   }
 });
 
@@ -386,11 +405,13 @@ test('epic: 批次内子项并发执行（P3）——三个无依赖子项的子
   fs.writeFileSync(path.join(main, 'openspec', 'epics', 'par', 'epic.json'), JSON.stringify(epicDef));
   execSync('git add openspec && git commit -qm "add epic.json"', { cwd: main });
 
-  // 并发证明：每个子项子进程的 preflight 都 sleep FAKE_PIPE_DELAY_MS（共享时间线文件追加 start/end）。
-  // 若串行（spawnSync for-loop），preflight-end 会早于另一个 preflight-start；并发时三者 start 重叠。
+  // 并发证明：每个子项子进程的首个 agent 节点 architect 都 sleep FAKE_PIPE_DELAY_MS（共享时间线文件追加 start/end）。
+  // 若串行（spawnSync for-loop），architect-end 会早于另一个 architect-start；并发时三者 start 重叠。
   const timeline = path.join(main, 'timeline.txt');
   const delay = 500;
+  const fake = fakeCommands({ verify: true, gitRemote: true, ghFlat: true });
   process.env.PIPE_CORE_REPO_ROOT = main;
+  process.env.PIPE_FAKE_CMDS = fake.dir;
   process.env.PIPE_CLAUDE_BIN = FAKE_CONCURRENCY;
   process.env.PIPE_TIMELINE = timeline;
   process.env.FAKE_TIMELINE = timeline;
@@ -405,22 +426,24 @@ test('epic: 批次内子项并发执行（P3）——三个无依赖子项的子
     assert.ok(fs.existsSync(timeline), '时间线文件应被写入');
 
     const lines = fs.readFileSync(timeline, 'utf8').trim().split('\n').filter(Boolean);
-    const starts = lines.filter((l) => l.includes('preflight-start')).map((l) => Number(l.split(' ')[1]));
-    const ends = lines.filter((l) => l.includes('preflight-end')).map((l) => Number(l.split(' ')[1]));
-    assert.equal(starts.length, 3, '应有 3 次 preflight-start');
-    assert.equal(ends.length, 3, '应有 3 次 preflight-end');
+    const starts = lines.filter((l) => l.includes('architect-start')).map((l) => Number(l.split(' ')[1]));
+    const ends = lines.filter((l) => l.includes('architect-end')).map((l) => Number(l.split(' ')[1]));
+    assert.equal(starts.length, 3, '应有 3 次 architect-start');
+    assert.equal(ends.length, 3, '应有 3 次 architect-end');
 
-    // 并发证明（主断言，抗慢 CI）：至少两个 preflight 在第一个 preflight-end 前已 start（重叠存活区间）。
+    // 并发证明（主断言，抗慢 CI）：至少两个 architect 在第一个 architect-end 前已 start（重叠存活区间）。
     // 串行下 starts=[t0,t500,t1000]、ends=[t500,t1000,t1500]，首个 end 前只有 1 个 start → 必失败；只依赖相对时序，不受机器快慢影响。
     const firstEnd = Math.min(...ends);
     const overlapping = starts.filter((s) => s < firstEnd).length;
-    assert.ok(overlapping >= 2, `并发：至少 2 个 preflight 在首个 end 前已 start（实际重叠=${overlapping}）`);
-    // 宽松 sanity bound（非并发证明，仅防病态挂起）：串行基线 3×sleep=1500ms，取 delay*4 留足慢 CI 启动/清理余量，
-    // 真实并发 ~sleep+overhead 远低于此；不再用 tight 耗时断言（慢 CI 会误报 flake）。
-    assert.ok(elapsed < delay * 4, `批次并发总耗时应远低于串行基线（sanity），实际 ${elapsed}ms`);
+    assert.ok(overlapping >= 2, `并发：至少 2 个 architect 在首个 end 前已 start（实际重叠=${overlapping}）`);
+    // 宽松 sanity bound（非并发证明，仅防病态挂起）：并发下总耗时 ≈ 单条流水线（含确定性
+    // verify/integrate 的多次 spawn，约 3–6s），串行 ≈ 3×单条（≥9s）。取 delay*4+10s 留足慢 CI
+    // 余量、仍远低于串行与 90min 单项超时；真正的并发证明是上面的重叠区间断言（串行必失败）。
+    assert.ok(elapsed < delay * 4 + 10000, `批次并发总耗时应远低于串行基线（sanity），实际 ${elapsed}ms`);
   } finally {
     delete process.env.PIPE_CORE_REPO_ROOT;
     delete process.env.PIPE_CLAUDE_BIN;
+    delete process.env.PIPE_FAKE_CMDS;
     delete process.env.PIPE_TIMELINE;
     delete process.env.FAKE_TIMELINE;
     delete process.env.FAKE_PIPE_DELAY_MS;
@@ -428,5 +451,6 @@ test('epic: 批次内子项并发执行（P3）——三个无依赖子项的子
     execSync('git worktree prune', { cwd: main, stdio: 'ignore' });
     fs.rmSync(path.join(main, '.worktrees'), { recursive: true, force: true });
     fs.rmSync(main, { recursive: true, force: true });
+    fake.cleanup();
   }
 });

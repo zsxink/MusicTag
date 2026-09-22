@@ -45,6 +45,33 @@ test('pipeline: both 域 → rust→vue 串行（vue dependsOn dev-rust）', () 
   assert.deepEqual(devs[1].dependsOn, ['dev-rust']);
 });
 
+test('pipeline: Agent 写入节点声明最小 writeScopes 和 core commit，prompt 禁止自行提交', () => {
+  const both = pipeline.buildPipeline(stateWithDomain('both'));
+  const rust = both.find((d) => d.id === 'dev-rust');
+  const vue = both.find((d) => d.id === 'dev-vue');
+  const tester = both.find((d) => d.id === 'tester');
+  assert.deepEqual(rust.writeScopes, ['src-tauri/']);
+  assert.deepEqual(vue.writeScopes, ['src/']);
+  assert.deepEqual(tester.writeScopes, ['src-tauri/', 'src/']);
+  for (const def of [rust, vue, tester]) {
+    assert.match(def.commitMessage, /^feat\(demo\):/);
+    assert.match(def.prompt({}), /不得执行 git add 或 git commit/);
+  }
+
+  const infra = pipeline.buildPipeline(stateWithDomain('infra'));
+  const infraDev = infra.find((d) => d.id === 'dev');
+  assert.deepEqual(infraDev.writeScopes, ['.agents/', '.claude/', '.opencode/', 'openspec/', 'tests/workflow-core/', 'AGENTS.md']);
+});
+
+test('pipeline: Architect 只可写当前 change 的 design/tasks 且不单独提交', () => {
+  const architect = pipeline.buildPipeline({ change: 'demo', nodes: {} }).find((d) => d.id === 'architect');
+  assert.deepEqual(architect.writeScopes, [
+    'openspec/changes/demo/design.md',
+    'openspec/changes/demo/tasks.md',
+  ]);
+  assert.equal(architect.coreCommit, false);
+});
+
 test('pipeline: docs/spec/infra 域 → leader 开发节点（自适应编排不触发业务编译门禁）', () => {
   for (const domain of ['docs', 'spec', 'infra']) {
     const defs = pipeline.buildPipeline(stateWithDomain(domain));
@@ -122,6 +149,8 @@ test('pipeline: devSpec infra 域自验证只跑 node/openspec，不跑 cargo/np
   const p = pipeline.devSpec('demo', 'infra');
   assert.match(p, /node --test/);
   assert.ok(!p.includes('cargo test'));
+  assert.doesNotMatch(p, /git add \+ commit/);
+  assert.match(p, /提交由 core 统一完成/);
 });
 
 test('pipeline: CR 复盘专项三检（跨模块状态/竞态与串扰/网络与离线判定）在新核心保留', () => {

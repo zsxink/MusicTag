@@ -21,9 +21,19 @@ test('cap: read-only 与 workspace-write 最小权限基线', () => {
   assert.ok(!ro.includes('git_write'));
   assert.ok(ro.includes('read_files'));
   assert.ok(ro.includes('search_files'));
-  // workspace-write 含写
+  // workspace-write 只允许工作区文件写入；.git 写入由 core 独占
   assert.ok(rw.includes('write_files'));
-  assert.ok(rw.includes('git_write'));
+  assert.ok(!rw.includes('git_write'));
+});
+
+test('cap: Agent 角色均无 git_write，CR 保持只读', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const roles = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'roles', 'roles.json'), 'utf8'));
+  for (const [name, role] of Object.entries(roles)) {
+    assert.ok(!role.capabilities.includes('git_write'), `${name} 不得直接写 .git`);
+  }
+  assert.equal(roles['cr-agent'].sandbox, 'read-only');
 });
 
 test('cap: 宿主工具映射——claude/codex/opencode 三端翻译一致（read_files→Read/sandbox read/read）', () => {

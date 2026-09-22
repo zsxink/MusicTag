@@ -123,10 +123,19 @@ function devSpec(change, domain) {
       : '跑 openspec validate + 文档一致性审计，任一失败不得提交。';
   return (
     `读取 ${changeDir}/design.md、specs/、tasks.md，按任务实现。遵守 TDD（新逻辑先写失败测试）。` +
-    `完成自验证后方可提交：${selfCheck}` +
-    `增量提交 git add + commit（feat(${change}): 任务），阶段粒度、崩溃可恢复。` +
+    `完成自验证后方可交付：${selfCheck}` +
+    `不得执行 git add 或 git commit；提交由 core 统一完成（feat(${change}): 任务）。` +
     `实现完成后返回 done/summary/filesChanged/tests。`
   );
+}
+
+function domainWriteScopes(domain) {
+  if (domain === 'backend') return ['src-tauri/'];
+  if (domain === 'frontend') return ['src/'];
+  if (domain === 'both') return ['src-tauri/', 'src/'];
+  if (domain === 'docs') return ['docs/', 'openspec/', 'README.md', 'AGENTS.md'];
+  if (domain === 'spec') return ['openspec/', 'docs/', 'AGENTS.md'];
+  return ['.agents/', '.claude/', '.opencode/', 'openspec/', 'tests/workflow-core/', 'AGENTS.md'];
 }
 
 function buildDevDefs(change, domain) {
@@ -136,17 +145,18 @@ function buildDevDefs(change, domain) {
     schema: DEV_SCHEMA,
     retry: { max: 1, intervalMs: 0 },
     resultOk: (r) => r.done === true,
+    commitMessage: `feat(${change}): implement scoped development tasks`,
   };
   if (domain === 'backend') {
-    return [{ ...base, id: 'dev-rust', role: 'rust-backend', prompt: (ctx) => `你是 Rust 开发。${devSpec(change, domain)}\n只负责 src-tauri/ 下 Rust 侧任务。` }];
+    return [{ ...base, id: 'dev-rust', role: 'rust-backend', writeScopes: ['src-tauri/'], prompt: (ctx) => `你是 Rust 开发。${devSpec(change, domain)}\n只负责 src-tauri/ 下 Rust 侧任务。` }];
   }
   if (domain === 'frontend') {
-    return [{ ...base, id: 'dev-vue', role: 'vue-frontend', prompt: (ctx) => `你是 Vue 开发。${devSpec(change, domain)}\n只负责 src/ 下前端任务；跨端时先使用已落地的 Rust 契约。` }];
+    return [{ ...base, id: 'dev-vue', role: 'vue-frontend', writeScopes: ['src/'], prompt: (ctx) => `你是 Vue 开发。${devSpec(change, domain)}\n只负责 src/ 下前端任务；跨端时先使用已落地的 Rust 契约。` }];
   }
   if (domain === 'both') {
     return [
-      { ...base, id: 'dev-rust', role: 'rust-backend', prompt: (ctx) => `你是 Rust 开发。${devSpec(change, domain)}\n只负责 src-tauri/ 下 Rust 侧任务。` },
-      { ...base, id: 'dev-vue', role: 'vue-frontend', dependsOn: ['dev-rust'], prompt: (ctx) => `你是 Vue 开发。${devSpec(change, domain)}\n只负责 src/ 下前端任务；跨端时先使用已落地的 Rust 契约。` },
+      { ...base, id: 'dev-rust', role: 'rust-backend', writeScopes: ['src-tauri/'], prompt: (ctx) => `你是 Rust 开发。${devSpec(change, domain)}\n只负责 src-tauri/ 下 Rust 侧任务。` },
+      { ...base, id: 'dev-vue', role: 'vue-frontend', writeScopes: ['src/'], dependsOn: ['dev-rust'], prompt: (ctx) => `你是 Vue 开发。${devSpec(change, domain)}\n只负责 src/ 下前端任务；跨端时先使用已落地的 Rust 契约。` },
     ];
   }
   // docs / spec / infra：leader 流程维护角色，不派 rust-backend/vue-frontend
@@ -154,6 +164,7 @@ function buildDevDefs(change, domain) {
     ...base,
     id: 'dev',
     role: 'leader',
+    writeScopes: domainWriteScopes(domain),
     prompt: (ctx) => `你是流水线 Leader（流程维护）。你是 ${domain} 域开发。${devSpec(change, domain)}\n只负责 .agents/、.claude/、openspec/、AGENTS.md 等流程/文档资产，不碰 src/、src-tauri/。`,
   }];
 }
@@ -181,6 +192,11 @@ function buildPipeline(state) {
       schema: ARCHITECT_SCHEMA,
       dependsOn: ['bootstrap'],
       retry: { max: 1, intervalMs: 0 },
+      writeScopes: [
+        `openspec/changes/${change}/design.md`,
+        `openspec/changes/${change}/tasks.md`,
+      ],
+      coreCommit: false,
       prompt: (ctx) =>
         `你是 MusicTag 架构设计师。为已批准的变更「${change}」细化技术设计。\n` +
         `读取 openspec/changes/${change}/proposal.md、design.md、specs/、tasks.md、docs/V1-PRD.md、docs/design/design.md。\n` +
@@ -209,12 +225,14 @@ function buildPipeline(state) {
       schema: TESTER_SCHEMA,
       dependsOn: devIds,
       retry: { max: 1, intervalMs: 0 },
+      writeScopes: domainWriteScopes(domain),
+      commitMessage: `feat(${change}): add scenario coverage`,
       resultOk: (r) => r.smokePassed === true && Array.isArray(r.missing) && r.missing.length === 0,
       prompt: (ctx) =>
         `你是测试角色。对变更「${change}」做覆盖审计、补齐缺失测试并跑核心链路冒烟。\n` +
         `对照 openspec/changes/${change}/specs/ 的 scenarios；除 happy-path 外，强制审计失败路径与边界（错误分支、空/越界输入、并发/竞态、网络失败与错误码、状态复位）。\n` +
         `任何未覆盖 scenario（含失败路径）都必须列入 missing，且不得声称可进入 CR。\n` +
-        `测试或实现存在缺陷时如实返回 smokePassed=false。`,
+        `测试或实现存在缺陷时如实返回 smokePassed=false。不得执行 git add 或 git commit；提交由 core 统一完成。`,
     });
     defs.push({
       id: 'cr',
@@ -271,5 +289,6 @@ module.exports = {
   DECISION_SCHEMA,
   buildPipeline,
   buildDevDefs,
+  domainWriteScopes,
   devSpec,
 };

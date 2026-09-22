@@ -3,25 +3,25 @@
     "name": "Leader（编排者）",
     "file": "leader.md",
     "sandbox": "workspace-write",
-    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read", "git_write"]
+    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read"]
   },
   "architect": {
     "name": "Architect（架构设计师）",
     "file": "architect.md",
     "sandbox": "workspace-write",
-    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read", "git_write", "network"]
+    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read", "network"]
   },
   "rust-backend": {
     "name": "Rust-Dev（Rust 后端专家）",
     "file": "rust-backend.md",
     "sandbox": "workspace-write",
-    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read", "git_write"]
+    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read"]
   },
   "vue-frontend": {
     "name": "Vue-Dev（Vue 前端专家）",
     "file": "vue-frontend.md",
     "sandbox": "workspace-write",
-    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read", "git_write"]
+    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read"]
   },
   "cr-agent": {
     "name": "CR（代码审查者，只读）",
@@ -39,6 +39,6 @@
     "name": "Tester（测试角色）",
     "file": "tester.md",
     "sandbox": "workspace-write",
-    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read", "git_write"]
+    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read"]
   }
 }

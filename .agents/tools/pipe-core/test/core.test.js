@@ -101,6 +101,75 @@ test('core: deterministic 与 agent 共用状态机且确定性节点零 driver 
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
+test('core: Agent 无 git_write 时由 core 审计范围并创建唯一提交', async () => {
+  const repo = tmpRepo();
+  await withRoot(repo, async () => {
+    const state = stateApi.newState('scoped', 'mock');
+    const driver = {
+      runAgent() {
+        fs.mkdirSync(path.join(repo, 'allowed'), { recursive: true });
+        fs.writeFileSync(path.join(repo, 'allowed', 'result.txt'), 'ok');
+        return { ok: true, structured: { done: true } };
+      },
+    };
+    const def = {
+      id: 'dev', kind: 'agent', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [],
+      writeScopes: ['allowed/'], commitMessage: 'feat(scoped): dev', resultOk: (r) => r.done === true,
+    };
+    const res = await core.runPipeline({ change: 'scoped', state, defsFn: () => [def], driver, commitRoot: repo, getHead: () => execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim() });
+    assert.equal(res.status, 'success');
+    assert.match(execSync('git log -1 --pretty=%s', { cwd: repo, encoding: 'utf8' }), /feat\(scoped\): dev/);
+    assert.equal(state.nodes.dev.commitSha, execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim());
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('core: Agent 越权写入时拒绝提交并挂起', async () => {
+  const repo = tmpRepo();
+  await withRoot(repo, async () => {
+    const state = stateApi.newState('scope-fail', 'mock');
+    const driver = {
+      runAgent() {
+        fs.writeFileSync(path.join(repo, 'outside.txt'), 'bad');
+        return { ok: true, structured: { done: true } };
+      },
+    };
+    const def = {
+      id: 'dev', kind: 'agent', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [],
+      writeScopes: ['allowed/'], commitMessage: 'feat(scope-fail): dev', resultOk: (r) => r.done === true,
+    };
+    const before = execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim();
+    const res = await core.runPipeline({ change: 'scope-fail', state, defsFn: () => [def], driver, commitRoot: repo });
+    assert.equal(res.status, 'suspended');
+    assert.match(state.nodes.dev.error, /越权路径.*outside\.txt/);
+    assert.equal(execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim(), before);
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('core: Agent 不得修改启动前已脏的同路径', async () => {
+  const repo = tmpRepo();
+  fs.mkdirSync(path.join(repo, 'allowed'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'allowed', 'result.txt'), 'user');
+  await withRoot(repo, async () => {
+    const state = stateApi.newState('same-path', 'mock');
+    const driver = {
+      runAgent() {
+        fs.writeFileSync(path.join(repo, 'allowed', 'result.txt'), 'agent');
+        return { ok: true, structured: { done: true } };
+      },
+    };
+    const def = {
+      id: 'dev', kind: 'agent', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [],
+      writeScopes: ['allowed/'], commitMessage: 'feat(same-path): dev', resultOk: (r) => r.done === true,
+    };
+    const res = await core.runPipeline({ change: 'same-path', state, defsFn: () => [def], driver, commitRoot: repo });
+    assert.equal(res.status, 'suspended');
+    assert.match(state.nodes.dev.error, /启动前已有差异.*allowed\/result\.txt/);
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
 test('core: 失败节点 retry 后成功（attempts=2）', async () => {
   const repo = tmpRepo();
   await withRoot(repo, async () => {

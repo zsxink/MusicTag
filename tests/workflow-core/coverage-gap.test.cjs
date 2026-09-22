@@ -12,12 +12,14 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const REPO = path.resolve(__dirname, '../..');
 const CORE = path.join(REPO, '.agents', 'tools', 'pipe-core');
 const RUNJS = path.join(CORE, 'run.js');
+const { seedWorkflows } = require(path.join(CORE, 'test', 'seed.js'));
 
 function tempRepo(prefix = 'workflow-core-gap-') {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   execFileSync('git', ['init', '-q'], { cwd: repo });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repo });
   execFileSync('git', ['config', 'user.name', 'test'], { cwd: repo });
+  seedWorkflows(repo);
   fs.writeFileSync(path.join(repo, 'seed.txt'), 'seed');
   execFileSync('git', ['add', '.'], { cwd: repo });
   execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
@@ -99,7 +101,7 @@ test('suspended workflow: failed tester persists a complete handoff state for th
     assert.equal(state.nodes.tester.status, 'suspended');
     assert.equal(typeof state.nodes.tester.error, 'string');
     assert.ok(state.nodes.tester.error.length > 0);
-    assert.equal(state.nodes.preflight.status, 'succeeded');
+    assert.equal(state.nodes.bootstrap.status, 'succeeded');
     assert.equal(state.nodes.architect.status, 'succeeded');
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
@@ -125,27 +127,26 @@ test('archive wrapper: integrate path invokes deterministic .agents command with
   }
 });
 
-test('code-domain verify contract: baseline and search regression steps are explicit and ordered', () => {
-  const pipeline = require('../../.agents/tools/pipe-core/pipeline.js');
-  const verify = pipeline.buildPipeline({
-    change: 'workflow-core',
-    nodes: { architect: { status: 'succeeded', result: { domain: 'both' } } },
-  }).find((node) => node.id === 'verify');
-  const prompt = verify.prompt({});
-  const ordered = [
-    'cargo check --manifest-path src-tauri/Cargo.toml',
-    'cargo test --manifest-path src-tauri/Cargo.toml',
-    'npm run test',
-    'npm run build',
-    'openspec validate workflow-core --strict --no-interactive',
-  ];
-  let previous = -1;
-  for (const step of ordered) {
-    const at = prompt.indexOf(step);
-    assert.ok(at > previous, `verify 基线缺失或顺序错误：${step}`);
-    previous = at;
-  }
-  assert.match(prompt, /单源换源不被聚合去重破坏/);
-  assert.match(prompt, /跨 kind 不串扰/);
-  assert.match(prompt, /全源网络失败/);
+test('code-domain verify contract: buildPlan 基线按序产出结构化步骤，必选项与顺序明确', () => {
+  const verify = require(path.join(CORE, 'verify.js'));
+  const plans = verify.buildPlan({ change: 'workflow-core', domain: 'both', root: REPO });
+  const ordered = plans.map((p) => p.step);
+  // 代码域基线顺序：cargo → npm → OpenSpec 汇合门禁。
+  const cargoIdx = ordered.indexOf('cargo check');
+  const npmIdx = ordered.indexOf('npm test');
+  const openspecIdx = ordered.lastIndexOf('OpenSpec strict validate');
+  assert.ok(cargoIdx >= 0, 'cargo check 必选');
+  assert.ok(npmIdx >= 0, 'npm test 必选');
+  assert.ok(openspecIdx >= 0, 'OpenSpec strict validate 必选');
+  assert.ok(cargoIdx < openspecIdx && npmIdx < openspecIdx, 'OpenSpec 在 lane 汇合后执行');
+  // 每条命令产生结构化 step（command + cwd + timeoutMs）。
+  for (const p of plans) assert.ok(p.command && p.cwd && p.timeoutMs, `step ${p.step} 缺少执行元数据`);
+  // 搜索联动回归：specs 标记了取词/换源/并发/离线任一维度时，verify.steps 逐项记录且缺失必选项即失败。
+  const regSteps = verify.searchRegressionSteps('workflow-core', REPO);
+  const regNames = regSteps.map((s) => s.step);
+  assert.ok(regSteps.length > 0, 'specs 含搜索联动维度时应有回归步骤');
+  assert.ok(regNames.some((s) => s.includes('取词')), '取词回归必选');
+  assert.ok(regNames.some((s) => s.includes('换源')), '换源回归必选');
+  assert.ok(regNames.some((s) => s.includes('并发')), '并发回归必选');
+  assert.ok(regNames.some((s) => s.includes('离线')), '离线判定回归必选');
 });

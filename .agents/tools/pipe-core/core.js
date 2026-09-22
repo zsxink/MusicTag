@@ -9,32 +9,15 @@ const stateApi = require('./state.js');
 const decision = require('./decision.js');
 const { DEV_SCHEMA } = require('./pipeline.js');
 const { DECISION_SCHEMA } = require('./pipeline.js');
-const { execSync } = require('node:child_process');
 const contract = require('./drivers/contract.js');
 const builtinRunners = require('./runners.js');
+const workspace = require('./workspace.js');
 
 // 同步调度器内的退避等待（CLI 场景可阻塞；intervalMs=0 时零开销）。
 function sleepSync(ms) {
   if (!ms) return;
   const end = Date.now() + ms;
   while (Date.now() < end) { /* busy wait */ }
-}
-
-// 只读角色（尤其 CR）不能依赖宿主自报权限；用节点前后 HEAD/status 做落地审计。
-// read-only 节点产生工作区写入即失败，防止无法精确限制工具的 runtime 静默污染分支。
-function worktreeSnapshot(root = process.cwd()) {
-  try {
-    const head = execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    // --ignored=matching 把被 .gitignore 隐藏的写入也纳入快照；只读 runtime
-    // 不得通过写 ignored 文件绕过工作区污染审计。
-    const status = execSync('git status --porcelain --untracked-files=all --ignored', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    const relevantStatus = status.split(/\r?\n/).filter((line) => !line.includes(' .agents/runs/')).join('\n');
-    return { head, status: relevantStatus };
-  } catch (_) { return null; }
-}
-
-function readOnlyMutation(before, after) {
-  return !!before && !!after && (before.head !== after.head || before.status !== after.status);
 }
 
 async function runPipeline(opts) {
@@ -144,7 +127,7 @@ async function runNode(def, runCtx, decider) {
 
       let res;
       const auditRoot = commitRoot || runCtx.ctx.cwd || stateApi.repoRoot();
-      const beforeAudit = worktreeSnapshot(auditRoot);
+      const beforeAudit = workspace.snapshot(auditRoot);
       if ((def.kind || 'agent') === 'deterministic') {
         const runner = runners && runners[def.runner];
         if (typeof runner !== 'function') {
@@ -174,9 +157,18 @@ async function runNode(def, runCtx, decider) {
           }
         }
       }
-      const afterAudit = worktreeSnapshot(auditRoot);
-      if (readOnlyMutation(beforeAudit, afterAudit) && (def.role === 'cr-agent' || runCtx.ctx.readOnly === true)) {
+      const afterAudit = workspace.snapshot(auditRoot);
+      const fileAudit = workspace.audit(beforeAudit, afterAudit, def.writeScopes || []);
+      if ((fileAudit.headChanged || fileAudit.indexChanged || fileAudit.changedPaths.length > 0) && (def.role === 'cr-agent' || runCtx.ctx.readOnly === true)) {
         res = { ok: false, error: { kind: 'config', message: `read-only 节点 ${id} 产生工作区写入`, retryable: false } };
+      } else if (Array.isArray(def.writeScopes) && fileAudit.headChanged) {
+        res = { ok: false, error: { kind: 'permission', message: `Agent 节点 ${id} 禁止修改 HEAD；git 提交由 core 负责`, retryable: false } };
+      } else if (Array.isArray(def.writeScopes) && fileAudit.indexChanged) {
+        res = { ok: false, error: { kind: 'permission', message: `Agent 节点 ${id} 禁止修改 git index；暂存与提交由 core 负责`, retryable: false } };
+      } else if (Array.isArray(def.writeScopes) && fileAudit.unauthorizedPaths.length) {
+        res = { ok: false, error: { kind: 'permission', message: `Agent 节点 ${id} 修改越权路径：${fileAudit.unauthorizedPaths.join(', ')}`, retryable: false } };
+      } else if (Array.isArray(def.writeScopes) && fileAudit.preexistingTouchedPaths.length) {
+        res = { ok: false, error: { kind: 'permission', message: `Agent 节点 ${id} 修改了启动前已有差异的路径：${fileAudit.preexistingTouchedPaths.join(', ')}`, retryable: false } };
       }
       res = contract.normalizeResult(res);
       if (res && res.error && typeof res.error === 'object') res.errorKind = res.error.kind || contract.classify(res);
@@ -194,7 +186,20 @@ async function runNode(def, runCtx, decider) {
       if (res.ok && res.structured) {
         const ok = def.resultOk ? def.resultOk(res.structured) : true;
         if (ok) {
-          const head = getHead();
+          let commitEvidence = null;
+          if (Array.isArray(def.writeScopes) && def.coreCommit !== false) {
+            const commitMessage = typeof def.commitMessage === 'function' ? def.commitMessage({ change, result: res.structured }) : def.commitMessage;
+            if (!commitMessage) {
+              res = contract.normalizeResult({ ok: false, error: { kind: 'config', message: `节点 ${id} 缺少 commitMessage` } });
+            } else {
+              commitEvidence = await workspace.commitChanges(auditRoot, fileAudit.changedPaths, commitMessage);
+              if (!commitEvidence.ok) res = contract.normalizeResult({ ok: false, error: commitEvidence.error, commands: commitEvidence.commands });
+            }
+          }
+          if (!res.ok) {
+            // 统一提交失败继续走下方标准失败/决断路径。
+          } else {
+          const head = commitEvidence && commitEvidence.commitSha ? commitEvidence.commitSha : getHead();
           state.nodes[id] = {
             ...(state.nodes[id] || {}),
             status: 'succeeded',
@@ -210,12 +215,13 @@ async function runNode(def, runCtx, decider) {
           stateApi.finishAttempt(state, id, attempts, {
             status: 'succeeded', endedAt,
             durationMs: Math.max(0, Date.parse(endedAt) - Date.parse(attemptStartedAt)),
-            commitSha: head, errorKind: null, commands: res.commands || [],
+            commitSha: head, errorKind: null, commands: [...(res.commands || []), ...((commitEvidence && commitEvidence.commands) || [])],
           });
           stateApi.saveState(change, state);
           results[id] = res.structured;
           log(`✓ ${id} 成功`);
           return { status: 'succeeded', node: id, result: res.structured };
+          }
         }
       }
 

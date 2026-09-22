@@ -15,7 +15,7 @@ const DEFINITIONS = Object.freeze({
 
 const MINIMUMS = Object.freeze({
   'read-only': ['shell', 'read_files', 'search_files', 'git_read'],
-  'workspace-write': ['shell', 'read_files', 'write_files', 'search_files', 'git_read', 'git_write'],
+  'workspace-write': ['shell', 'read_files', 'write_files', 'search_files', 'git_read'],
 });
 
 // 宿主工具名只能出现在这里，公共 core/role 文案不依赖它们。

@@ -15,6 +15,7 @@ const codex = require('../../.agents/tools/pipe-core/drivers/codex.js');
 const opencode = require('../../.agents/tools/pipe-core/drivers/opencode.js');
 const epic = require('../../.agents/tools/pipe-core/epic.js');
 const OPENCODE_PIPE_FIXTURE = path.resolve(__dirname, '../../.agents/tools/pipe-core/test/fixtures/fake-pipe-common.js');
+const REPO = path.resolve(__dirname, '../..');
 const pipeline = require('../../.agents/tools/pipe-core/pipeline.js');
 
 const SCHEMA = {
@@ -64,17 +65,43 @@ function task() {
 }
 
 test('P4 adaptive verify conformance: docs/spec/infra skip cargo and npm', () => {
+  const verify = require('../../.agents/tools/pipe-core/verify.js');
   for (const domain of ['docs', 'spec', 'infra']) {
-    const verify = pipeline.buildPipeline({
-      change: 'workflow-core',
-      nodes: { architect: { status: 'succeeded', result: { domain } } },
-    }).find((node) => node.id === 'verify');
-    const prompt = verify.prompt({});
-    assert.match(prompt, /node --test/);
-    assert.match(prompt, /run\.js --self-check/);
-    assert.match(prompt, /openspec validate workflow-core --strict --no-interactive/);
-    assert.doesNotMatch(prompt, /cargo (check|test)/);
-    assert.doesNotMatch(prompt, /npm run (test|build)/);
+    const plans = verify.buildPlan({ change: 'workflow-core', domain, root: REPO });
+    const steps = plans.map((p) => p.step);
+    assert.ok(steps.includes('OpenSpec strict validate'), `${domain} 必须含 OpenSpec strict validate`);
+    assert.doesNotMatch(steps.join(','), /cargo (check|test)/, `${domain} 不得跑 cargo`);
+    assert.doesNotMatch(steps.join(','), /npm run (test|build)/, `${domain} 不得跑 npm`);
+    if (domain === 'infra') {
+      assert.ok(steps.includes('node 静态检查'), 'infra 必须含 node 静态检查');
+      assert.ok(steps.includes('shell 静态检查'), 'infra 必须含 shell 静态检查');
+      assert.ok(steps.includes('pipe-core/workflow-core 全量测试'), 'infra 必须含全量测试');
+      assert.ok(steps.includes('self-check'), 'infra 必须含 self-check');
+    }
+    if (domain === 'docs' || domain === 'spec') {
+      assert.ok(steps.includes('文档一致性审计'), `${domain} 必须含文档一致性审计`);
+    }
+  }
+});
+
+test('P4 adaptive verify conformance: backend/frontend/both 含业务基线且 OpenSpec 汇合后执行', () => {
+  const verify = require('../../.agents/tools/pipe-core/verify.js');
+  for (const domain of ['backend', 'frontend', 'both']) {
+    const plans = verify.buildPlan({ change: 'workflow-core', domain, root: REPO });
+    const steps = plans.map((p) => p.step);
+    const openspecIdx = steps.lastIndexOf('OpenSpec strict validate');
+    assert.ok(openspecIdx >= 0, `${domain} 必须含 OpenSpec`);
+    if (domain === 'backend' || domain === 'both') {
+      assert.ok(steps.indexOf('cargo check') >= 0 && steps.indexOf('cargo test') >= 0, `${domain} 必须含 cargo 基线`);
+    }
+    if (domain === 'frontend' || domain === 'both') {
+      assert.ok(steps.indexOf('npm test') >= 0 && steps.indexOf('npm build') >= 0, `${domain} 必须含 npm 基线`);
+    }
+    // both：业务 lane 之后才是 OpenSpec 汇合门禁。
+    if (domain === 'both') {
+      const lastBusiness = Math.max(...steps.map((s, i) => (s.startsWith('cargo') || s.startsWith('npm') ? i : -1)));
+      assert.ok(openspecIdx > lastBusiness, 'both 的 OpenSpec 在业务 lane 汇合后执行');
+    }
   }
 });
 
