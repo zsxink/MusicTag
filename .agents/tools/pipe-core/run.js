@@ -14,6 +14,7 @@ const { execSync } = require('node:child_process');
 const { runPipeline } = require('./core.js');
 const pipeline = require('./pipeline.js');
 const stateApi = require('./state.js');
+const metrics = require('./metrics.js');
 const selfcheck = require('./selfcheck.js');
 const epicRunner = require('./epic.js');
 const registry = require('./drivers/registry.js');
@@ -204,6 +205,13 @@ async function main() {
     commitRoot: workDir,
     maxConcurrency: 1, // 单变更 DAG 串行（epic 并行在 worktree 层）
     ctx: { cwd: workDir, forceRetryNode: opts.forceRetry || null },
+  });
+
+  // 任务组 7 可观测性：run 结束（成功/失败/挂起）统一生成运行摘要、落盘 summary 并导出 events.jsonl。
+  metrics.finalizeRun(state, {
+    status: result.status,
+    log: console.error,
+    baselineMs: process.env.PIPE_BASELINE_MS ? Number(process.env.PIPE_BASELINE_MS) : undefined,
   });
 
   console.error(`\n[${opts.change}] 结果：${JSON.stringify(result, null, 2)}`);

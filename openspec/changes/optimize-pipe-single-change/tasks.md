@@ -58,10 +58,10 @@
 
 **依赖：** 任务组 6。只有完整 DAG、提交、Verify 与 Integrate 都落地后才能验证无人值守、幂等和效率目标。
 
-- [ ] 7.1 汇总 node/attempt/driver/model/command/commit/cache/CI/人工介入事件，输出总耗时、分类耗时、重试浪费、最慢三阶段及 PR/CI/merge 次数；验证失败后成功仍保留两次 attempt
-- [ ] 7.2 建立与 Issue #121 同等级的 domain=both 临时仓库 fixture，验证批准后无需主会话干预，bootstrap/spec-gate/verify/integrate 各一轮且 deterministic 节点零 driver 调用
-- [ ] 7.3 对 archive、PR 已创建、CI 已通过、远端已合并四个 checkpoint 分别中断/resume，验证幂等副作用计数和最终单 PR 完整 diff
-- [ ] 7.4 用可控时钟/基准事件生成性能报告，验证端到端相对 #121 样本降低至少 35%、代码完成后本地流程不含 CI 不超过 15 分钟
+- [x] 7.1 汇总 node/attempt/driver/model/command/commit/cache/CI/人工介入事件，输出总耗时、分类耗时、重试浪费、最慢三阶段及 PR/CI/merge 次数；验证失败后成功仍保留两次 attempt
+- [x] 7.2 建立与 Issue #121 同等级的 domain=both 临时仓库 fixture，验证批准后无需主会话干预，bootstrap/spec-gate/verify/integrate 各一轮且 deterministic 节点零 driver 调用
+- [x] 7.3 对 archive、PR 已创建、CI 已通过、远端已合并四个 checkpoint 分别中断/resume，验证幂等副作用计数和最终单 PR 完整 diff
+- [x] 7.4 用可控时钟/基准事件生成性能报告，验证端到端相对 #121 样本降低至少 35%、代码完成后本地流程不含 CI 不超过 15 分钟
 
 ## 8. 全量验证与文档同步
 

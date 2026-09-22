@@ -133,8 +133,20 @@ async function runCheckpointSerial({ def, change, state, root, log, git, github 
       log(`[integrate] checkpoint ${name} 已成功，复用`);
       continue;
     }
+    const startedAt = new Date().toISOString();
+    const startedMs = Date.now();
     const result = await runCheckpoint(name, { change, root, git, github, log, cps });
-    cps[name] = { status: result.status, updatedAt: new Date().toISOString(), evidence: result.evidence || {}, error: result.error ? result.error.message : null };
+    const durationMs = Date.now() - startedMs;
+    // durationMs / startedAt 供 metrics 统计 CI 等待与命令耗时；resume 复用时不覆盖原有记录。
+    const existingCp = cps[name] || (state.nodes[nodeId] && state.nodes[nodeId].checkpoints && state.nodes[nodeId].checkpoints[name]);
+    cps[name] = {
+      status: result.status,
+      updatedAt: new Date().toISOString(),
+      startedAt: (existingCp && existingCp.startedAt) || startedAt,
+      durationMs: Number.isFinite(existingCp && existingCp.durationMs) ? existingCp.durationMs : durationMs,
+      evidence: result.evidence || {},
+      error: result.error ? result.error.message : null,
+    };
     stateApi.setCheckpoint(state, nodeId, name, cps[name]);
     if (result.status === 'succeeded') {
       log(`[integrate] ✓ checkpoint ${name} 完成`);

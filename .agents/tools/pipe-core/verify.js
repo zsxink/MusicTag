@@ -37,7 +37,7 @@ function buildPlan({ change, domain, root }) {
       cwd: root, timeoutMs: 600_000,
     });
     plans.push({ step: 'self-check', command: 'node', args: [path.join(root, '.agents', 'tools', 'pipe-core', 'run.js'), '--self-check'], cwd: root, timeoutMs: 120_000 });
-    plans.push({ step: 'OpenSpec validate', command: 'npx', args: ['openspec', 'validate', change, '--strict', '--no-interactive'], cwd: root, timeoutMs: 180_000 });
+    plans.push({ step: 'OpenSpec strict validate', command: 'npx', args: ['openspec', 'validate', change, '--strict', '--no-interactive'], cwd: root, timeoutMs: 180_000 });
   } else if (domain === 'docs' || domain === 'spec') {
     // docs/spec：不跑业务编译；文档一致性审计（.agents/commands/docs-audit.js）+ OpenSpec strict validate。
     plans.push({

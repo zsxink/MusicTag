@@ -100,7 +100,7 @@ test('verify 5.2: infra 域生成结构化步骤，含 node 检查、self-check�
   const stepNames = res.structured.steps.map((s) => s.step);
   assert.ok(stepNames.includes('node 静态检查'), stepNames.join(','));
   assert.ok(stepNames.includes('shell 静态检查'), stepNames.join(','));
-  assert.ok(stepNames.includes('OpenSpec validate'), stepNames.join(','));
+  assert.ok(stepNames.includes('OpenSpec strict validate'), stepNames.join(','));
   // infra 不跑 cargo/npm
   assert.ok(!stepNames.some((s) => s.includes('cargo') || s.includes('npm')), stepNames.join(','));
   // 每条命令产生结构化 step

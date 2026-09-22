@@ -14,6 +14,8 @@ const claude = require('../../.agents/tools/pipe-core/drivers/claude.js');
 const codex = require('../../.agents/tools/pipe-core/drivers/codex.js');
 const opencode = require('../../.agents/tools/pipe-core/drivers/opencode.js');
 const epic = require('../../.agents/tools/pipe-core/epic.js');
+const { seedWorkflows } = require('../../.agents/tools/pipe-core/test/seed.js');
+const { fakeCommands } = require('../../.agents/tools/pipe-core/test/fixtures/fake-pipe-commands.js');
 const OPENCODE_PIPE_FIXTURE = path.resolve(__dirname, '../../.agents/tools/pipe-core/test/fixtures/fake-pipe-common.js');
 const REPO = path.resolve(__dirname, '../..');
 const pipeline = require('../../.agents/tools/pipe-core/pipeline.js');
@@ -162,8 +164,11 @@ test('P6 epic OpenCode conformance: three parallel worktrees receive isolated cw
   const previousRoot = process.env.PIPE_CORE_REPO_ROOT;
   const previousBin = process.env.PIPE_OPENCODE_BIN;
   const previousPolicy = process.env.PIPE_OPENCODE_READ_ONLY_POLICY;
+  let previousFake = process.env.PIPE_FAKE_CMDS;
+  let fakeCmds = null;
   try {
     fs.writeFileSync(path.join(main, '.gitignore'), '.worktrees/\n.agents/runs/\n');
+    seedWorkflows(main); // 任务组 7.2 fixture：worktree 缺 .agents/workflows 桩脚本 → bootstrap 必挂
     fs.writeFileSync(path.join(main, 'seed.txt'), 'seed');
     git(['init', '-q']);
     git(['config', 'user.email', 'test@example.com']);
@@ -181,13 +186,18 @@ test('P6 epic OpenCode conformance: three parallel worktrees receive isolated cw
     process.env.PIPE_CORE_REPO_ROOT = main;
     process.env.PIPE_OPENCODE_BIN = fake;
     process.env.PIPE_OPENCODE_READ_ONLY_POLICY = 'enforced';
+    // 任务组 7.2 fixture：verify/integrate 的确定性命令须短路（临时仓库无真实 cargo/npm/openspec）。
+    fakeCmds = fakeCommands({ verify: true, gitRemote: true, ghFlat: true });
+    process.env.PIPE_FAKE_CMDS = fakeCmds.dir;
     const code = await epic.run('e', 'opencode');
     assert.equal(code, 0);
-    const paths = fs.readFileSync(timeline, 'utf8').trim().split('\n').filter(Boolean).map((p) => path.resolve(p));
-    assert.equal(paths.length, 21, '三个子项各自完整执行 7 个节点');
+    const path_list = fs.readFileSync(timeline, 'utf8').trim().split('\n').filter(Boolean).map((p) => path.resolve(p));
+    // infra 域 = 6 个 agent 节点（architect + dev/dev-metrics/dev-docs + tester + cr），
+    // 确定性节点经 driver 调用（bootstrap/spec-gate/verify/integrate 由 core 直接执行）→ 每子项 6 次。
+    assert.equal(path_list.length, 18, '三个子项各自完整执行 6 个 agent 节点');
     for (const name of ['A', 'B', 'C']) {
       const expected = path.join(fs.realpathSync(main), '.worktrees', name);
-      assert.equal(paths.filter((p) => p === expected).length, 7, `${name} 的 7 个节点必须使用同一独立 worktree cwd`);
+      assert.equal(path_list.filter((p) => p === expected).length, 6, `${name} 的 6 个 agent 节点必须使用同一独立 worktree cwd`);
       assert.ok(!fs.existsSync(path.join(main, name)), `${name} 不得写入主仓库`);
     }
     fs.rmSync(timeline, { force: true });
@@ -199,6 +209,9 @@ test('P6 epic OpenCode conformance: three parallel worktrees receive isolated cw
     else process.env.PIPE_OPENCODE_BIN = previousBin;
     if (previousPolicy === undefined) delete process.env.PIPE_OPENCODE_READ_ONLY_POLICY;
     else process.env.PIPE_OPENCODE_READ_ONLY_POLICY = previousPolicy;
+    if (previousFake === undefined) delete process.env.PIPE_FAKE_CMDS;
+    else process.env.PIPE_FAKE_CMDS = previousFake;
+    if (fakeCmds) fakeCmds.cleanup();
     try { execFileSync('git', ['worktree', 'prune'], { cwd: main, stdio: 'ignore' }); } catch (_) { /* cleanup best effort */ }
     fs.rmSync(h.dir, { recursive: true, force: true });
   }
