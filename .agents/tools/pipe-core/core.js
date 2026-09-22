@@ -143,7 +143,7 @@ async function runNode(def, runCtx, decider) {
         const task = {
           id,
           role: def.role,
-          prompt: typeof def.prompt === 'function' ? def.prompt(runCtx.ctx) : def.prompt,
+          prompt: typeof def.prompt === 'function' ? def.prompt({ ...runCtx.ctx, state }) : def.prompt,
           schema: def.schema,
         };
         const taskErrors = contract.validateTask(task);

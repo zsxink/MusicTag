@@ -182,7 +182,48 @@ test('pipeline: CR 复盘专项三检（跨模块状态/竞态与串扰/网络�
   assert.match(p, /竞态与串扰/);
   assert.match(p, /网络与离线判定/);
   assert.match(p, /specReference/);
-  assert.match(p, /pass=true 仅当无 blocker 且无 major/);
+  assert.match(p, /pass=true.*仅当无阻断且无 major/);
+});
+
+test('pipeline: CR prompt 由运行时证据动态生成，删除固定 191 等历史结论（4.1）', () => {
+  const defs = pipeline.buildPipeline(stateWithDomain('both'));
+  const cr = defs.find((d) => d.id === 'cr');
+  const p = cr.prompt({});
+  assert.doesNotMatch(p, /191\s*个/);
+  assert.doesNotMatch(p, /Tester 已完成/);
+  assert.match(p, /只属于本 change/);
+});
+
+test('pipeline: CR prompt 拿到注入的 state 后展示 Tester 证据（4.1）', () => {
+  const defs = pipeline.buildPipeline({
+    change: 'demo',
+    nodes: {
+      architect: { status: 'succeeded', result: { domain: 'infra' } },
+      tester: { status: 'succeeded', result: { covered: ['scenario-x'], missing: [], smokePassed: true, risks: [] } },
+    },
+  });
+  const cr = defs.find((d) => d.id === 'cr');
+  const state = {
+    change: 'demo',
+    nodes: { tester: { status: 'succeeded', result: { covered: ['scenario-x'], missing: [], smokePassed: true, risks: [] } } },
+  };
+  const p = cr.prompt({ cwd: process.cwd(), state });
+  assert.match(p, /scenario-x/);
+  assert.match(p, /Tester 结果/);
+});
+
+test('pipeline: devSpec 各域自验证保留 scoped 语义且不重复完整基线（4.3）', () => {
+  for (const domain of pipeline.CODE_DOMAINS) {
+    const p = pipeline.devSpec('demo', domain);
+    assert.match(p, /只跑受影响模块\/文件的相关测试/);
+    assert.match(p, /不重复 Verify 的完整本地基线/);
+  }
+  const infra = pipeline.devSpec('demo', 'infra');
+  assert.doesNotMatch(infra, /cargo test/);
+  assert.match(infra, /不重复 Verify 的完整本地基线/);
+  assert.match(infra, /node --test/);
+  const docs = pipeline.devSpec('demo', 'docs');
+  assert.match(docs, /不重复 Verify 的完整本地基线/);
 });
 
 test('pipeline: integrate 由确定性 runner 执行', () => {

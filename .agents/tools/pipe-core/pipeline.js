@@ -3,6 +3,8 @@
 // 核心消费这些定义调度执行；buildPipeline(state) 按 architect 判定的 domain 动态展开
 // 开发节点（自适应编排 D3），tester/CR/verify/integrate 的依赖随开发节点动态链接。
 
+const crPrompt = require('./cr-prompt.js');
+
 const DOMAINS = ['backend', 'frontend', 'both', 'docs', 'spec', 'infra'];
 const CODE_DOMAINS = ['backend', 'frontend', 'both'];
 const NON_CODE_DOMAINS = ['docs', 'spec', 'infra'];
@@ -116,11 +118,13 @@ const DECISION_SCHEMA = {
 
 function devSpec(change, domain) {
   const changeDir = `openspec/changes/${change}`;
+  // 4.3 分层测试去重：Dev 只跑受影响模块的相关测试 + 必要类型检查，不重复
+  // Verify 会在最终 HEAD 上执行的完整本地基线（cargo/npm 全量归 Verify）。
   const selfCheck = CODE_DOMAINS.includes(domain)
-    ? 'Rust 侧跑 cargo test --manifest-path src-tauri/Cargo.toml、前端跑 npm run build 与 npm run test，任一失败不得提交。'
+    ? '只跑受影响模块/文件的相关测试（Rust 侧 `cargo test --manifest-path src-tauri/Cargo.toml` 定位到改动模块、前端 `npm run test` 定位到相关 case）与必要类型检查（`cargo check` / `npm run build`），不重复 Verify 的完整本地基线；任一失败不得提交。'
     : domain === 'infra'
-      ? '跑对应域验证：`node --test .agents/tools/pipe-core/test/*.test.js tests/workflow-core/*.test.cjs` + `run.js --self-check`（如相关）+ openspec validate，任一失败不得提交。'
-      : '跑 openspec validate + 文档一致性审计，任一失败不得提交。';
+      ? '跑对应域 scoped 验证：受影响测试文件的 `node --test`（如 cr-prompt 相关则含 cr-prompt.test.js）+ `run.js --self-check`（如相关）+ openspec validate，不重复 Verify 的完整本地基线；任一失败不得提交。'
+      : '跑 openspec validate + 文档一致性审计（受影响文档的静态自检），不重复 Verify 的完整本地基线；任一失败不得提交。';
   return (
     `读取 ${changeDir}/design.md、specs/、tasks.md，按任务实现。遵守 TDD（新逻辑先写失败测试）。` +
     `完成自验证后方可交付：${selfCheck}` +
@@ -267,9 +271,10 @@ function buildPipeline(state) {
       resultOk: (r) => r.smokePassed === true && Array.isArray(r.missing) && r.missing.length === 0,
       prompt: (ctx) =>
         `你是测试角色。对变更「${change}」做覆盖审计、补齐缺失测试并跑核心链路冒烟。\n` +
-        `对照 openspec/changes/${change}/specs/ 的 scenarios；除 happy-path 外，强制审计失败路径与边界（错误分支、空/越界输入、并发/竞态、网络失败与错误码、状态复位）。\n` +
+        `以 scenario 清单驱动（4.3）：逐条对照 openspec/changes/${change}/specs/ 的 scenarios，每个 scenario 标注对应测试（covered 中写「scenario → 测试文件/用例」）；除 happy-path 外，强制审计失败路径与边界（错误分支、空/越界输入、并发/竞态、网络失败与错误码、状态复位）。\n` +
         `任何未覆盖 scenario（含失败路径）都必须列入 missing，且不得声称可进入 CR。\n` +
-        `测试或实现存在缺陷时如实返回 smokePassed=false。不得执行 git add 或 git commit；提交由 core 统一完成。`,
+        `自验证只跑新增/受影响测试与核心链路冒烟，不重复 Verify 的完整本地基线。\n` +
+        `测试或实现存在缺陷时如实返回 smokePassed=false。不得执行 git add 或 git commit；提交由 core 统一完成（core 审计 scoped 路径）。`,
     });
     defs.push({
       id: 'cr',
@@ -280,12 +285,15 @@ function buildPipeline(state) {
       maxRounds: 3,
       retry: { max: 1, intervalMs: 0 },
       resultOk: (r) => r.pass === true && (!Array.isArray(r.blockers) || r.blockers.length === 0) && (!Array.isArray(r.majors) || r.majors.length === 0),
-      prompt: (ctx) =>
-        `你是 CR（只读，不改代码）。这是变更「${change}」的恢复性 conformance sign-off。不要调用任何工具，也不要重新扫描仓库；根据已有证据判断并立即返回最终结构化 JSON。\n` +
-        `已有证据：Tester 已完成 191 个 pipe-core/workflow-core 测试且全部通过；self-check 通过；openspec validate ${change} --strict 通过；前轮 CR 发现的问题已逐项修复并提交，包含 async driver/Leader 决断、挂起报告、只读审计、OpenCode fail-closed、epic resume、verify 范围与确定性集成 wrapper。\n` +
-        `若这些证据足以确认无 blocker/major，返回 {pass:true,blockers:[],majors:[],minors:[]}；若无法确认则如实返回 findings。必须立即输出 JSON，不要解释文字。\n` +
-        `复盘专项三检仍适用并必须纳入判定：跨模块状态语义、竞态与串扰、网络与离线判定。\n` +
-        `所有 blocker/major 必须给全 file + issue + specReference + suggestion 四项；pass=true 仅当无 blocker 且无 major。`,
+      // 动态证据注入（4.1）：prompt 由当前 change 的 specs/design、Tester 结果、
+      // HEAD、diff stat 和提交列表实时生成（cr-prompt.js），删除固定「191 个测试」
+      // 等历史结论。ctx.state 由 core.js 在构造 task 时注入。
+      prompt: (ctx) => crPrompt.buildCrPrompt({
+        change,
+        state: ctx && ctx.state,
+        cwd: ctx && ctx.cwd,
+        mainBranch: ctx && ctx.mainBranch,
+      }),
     });
     defs.push({
       id: 'verify',
