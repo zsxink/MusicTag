@@ -47,6 +47,19 @@ function timeoutMs(ctx = {}) {
   return Number(ctx.timeoutMs || process.env.PIPE_AGENT_TIMEOUT_MS) || 600000;
 }
 
+// 净化 spawn 环境：剥离主会话特有的模型覆盖变量（ANTHROPIC_MODEL / ANTHROPIC_DEFAULT_*_MODEL /
+// CLAUDE_CODE_SUBAGENT_MODEL）。这些在 opencode-free 之类宿主下会被设成宿主模型名，
+// 直接继承会让子进程 claude 报 unrecognized_model，且 driver 不在该栏目的还会继续带给自己。
+// 代理连接变量（ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL）保留。
+const MODEL_ENV_PATTERN = /^(ANTHROPIC_MODEL|ANTHROPIC_DEFAULT_.*_MODEL|ANTHROPIC_DEFAULT_.*_MODEL_NAME|CLAUDE_CODE_SUBAGENT_MODEL)$/;
+function sanitizeEnv(env = process.env) {
+  const out = { ...env };
+  for (const key of Object.keys(out)) {
+    if (MODEL_ENV_PATTERN.test(key)) delete out[key];
+  }
+  return out;
+}
+
 function finish(result) {
   return normalizeResult({ ...result, driverApiVersion: API_VERSION });
 }
@@ -59,7 +72,7 @@ function runAgent(task, ctx = {}) {
     res = spawnSync(bin, args, {
       encoding: 'utf8',
       cwd: ctx.cwd || process.cwd(),
-      env: ctx.env || process.env,
+      env: sanitizeEnv(ctx.env || process.env),
       timeout: timeoutMs(ctx),
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -82,4 +95,4 @@ function runAgent(task, ctx = {}) {
   return finish({ ok: true, ...parsed, exitCode: 0 });
 }
 
-module.exports = { API_VERSION, DRIVER_VERSION: '1.0.0', runAgent, buildArgs, parseOutput, timeoutMs };
+module.exports = { API_VERSION, DRIVER_VERSION: '1.0.0', runAgent, buildArgs, parseOutput, timeoutMs, sanitizeEnv, MODEL_ENV_PATTERN };

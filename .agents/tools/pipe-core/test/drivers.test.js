@@ -41,6 +41,25 @@ test('claude: 不用 --agent（D7 拍板）', () => {
   assert.ok(!args.includes('--agent'));
 });
 
+test('claude: sanitizeEnv 剥离宿主模型覆盖变量，保留代理连接变量', () => {
+  const env = claude.sanitizeEnv({
+    ANTHROPIC_MODEL: 'opencode-free',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'opencode-free',
+    ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: 'opencode-free',
+    CLAUDE_CODE_SUBAGENT_MODEL: 'opencode-free',
+    ANTHROPIC_AUTH_TOKEN: 'sk-keep',
+    ANTHROPIC_BASE_URL: 'http://proxy:20128/v1',
+    PATH: '/usr/bin',
+  });
+  assert.equal(env.ANTHROPIC_MODEL, undefined);
+  assert.equal(env.ANTHROPIC_DEFAULT_SONNET_MODEL, undefined);
+  assert.equal(env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME, undefined);
+  assert.equal(env.CLAUDE_CODE_SUBAGENT_MODEL, undefined);
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'sk-keep');
+  assert.equal(env.ANTHROPIC_BASE_URL, 'http://proxy:20128/v1');
+  assert.equal(env.PATH, '/usr/bin');
+});
+
 test('drivers: agent 超时可由 PIPE_AGENT_TIMEOUT_MS 配置，默认仍为 10 分钟', () => {
   const previous = process.env.PIPE_AGENT_TIMEOUT_MS;
   delete process.env.PIPE_AGENT_TIMEOUT_MS;
