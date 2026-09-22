@@ -332,6 +332,11 @@ interface SearchResult {
   source_stats: Array<[MusicSourceId, number]>;  // 各家返回条数（失败/超时记 0）
   all_failed: boolean;  // 五源全部失败（网络错误/超时）→ true；至少一源成功（含正常空结果）→ false
 }
+
+type MissingField = 'title' | 'artist' | 'album' | 'cover' | 'lyrics';
+interface MissingSong { path: string; missing: MissingField[]; }
+interface MissingScanError { path: string; reason: string; }
+interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; }
 ```
 
 **TS ↔ Rust 类型映射**：
@@ -358,6 +363,7 @@ interface SearchResult {
 | `search_source(source, title, artist, album)` | `MusicSourceId, String, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（C2 换源用，绕过跨源聚合）：逐源拿该源全部原始候选，不受每源 TOP 3 截断；失败/超时 → 空列表，前端跳过该源 |
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |
 | `download_cover(url)` | `String → Result<Vec<u8>, String>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`；失败 → `Err` 前端静默忽略该张） |
+| `scan_missing(dir, checks)` | `String, MissingField[] → Result<MissingScanResult, String>` | 按需只读扫描所选缺失维度；返回命中歌曲及单文件错误，不读取封面 base64/歌词全文，不写盘 |
 
 **封面传递**：`Song.cover` 用 **base64 data URL**（`data:image/jpeg;base64,...`），`<img :src="song.cover">` 直接用；一次只编辑一首、图不大，不必配置 asset 协议。写盘时 `save_song` 收到 base64，Rust 侧解码回 `Vec<u8>` 再写原文件（磁盘落盘形式仍是原始字节，见 PRD §5.3）。
 

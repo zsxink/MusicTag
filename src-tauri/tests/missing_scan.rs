@@ -8,6 +8,9 @@ use app_lib::commands::missing::scan_missing as scan_missing_command;
 use app_lib::model::{MissingField, MissingScanResult};
 use app_lib::service::missing::scan_missing;
 use common::{add_tags, tiny_png_bytes, write_tagged_flac, write_tagged_mp3};
+use lofty::config::WriteOptions;
+use lofty::prelude::{TagExt, TaggedFileExt};
+use lofty::tag::{items::ENGLISH, ItemKey, ItemValue, TagItem};
 use std::fs;
 use tempfile::TempDir;
 
@@ -120,6 +123,37 @@ fn embedded_mp3_lyrics_and_sidecar_lrc_are_not_missing() {
     assert_eq!(
         fs::read(tmp.path().join("sidecar.lrc")).unwrap(),
         sidecar_lrc_before
+    );
+}
+
+#[test]
+fn any_non_empty_lyrics_frame_satisfies_lyrics_check() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("duplicate-lyrics.mp3");
+    write_tagged_mp3(tmp.path(), "duplicate-lyrics.mp3", "Title", "Artist");
+
+    let mut file = lofty::read_from_path(&path).unwrap();
+    let tag = file.primary_tag_mut().unwrap();
+
+    let mut empty = TagItem::new(ItemKey::UnsyncLyrics, ItemValue::Text(String::new()));
+    empty.set_lang(ENGLISH);
+    tag.push(empty);
+
+    let mut non_empty = TagItem::new(
+        ItemKey::UnsyncLyrics,
+        ItemValue::Text("non-empty lyrics".to_string()),
+    );
+    non_empty.set_lang(ENGLISH);
+    tag.push(non_empty);
+    tag.save_to_path(&path, WriteOptions::default()).unwrap();
+
+    let result = scan(&tmp, &[MissingField::Lyrics]);
+    assert!(
+        result
+            .songs
+            .iter()
+            .all(|song| song.path != path.to_string_lossy()),
+        "只要存在一个非空歌词帧，就不应判定为缺歌词"
     );
 }
 

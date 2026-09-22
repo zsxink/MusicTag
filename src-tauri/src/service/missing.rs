@@ -8,7 +8,7 @@ use crate::service::lyrics::sidecar_lrc_path;
 use crate::service::meta::is_audio_file;
 use lofty::prelude::TaggedFileExt;
 use lofty::probe::Probe;
-use lofty::tag::ItemKey;
+use lofty::tag::{ItemKey, ItemValue};
 use std::path::Path;
 use walkdir::WalkDir;
 
@@ -116,10 +116,16 @@ fn text_missing(tag: Option<&lofty::tag::Tag>, key: ItemKey) -> bool {
 }
 
 fn lyrics_missing(tag: Option<&lofty::tag::Tag>, audio_path: &Path) -> bool {
-    let has_embedded = [ItemKey::Lyrics, ItemKey::UnsyncLyrics]
-        .into_iter()
-        .filter_map(|key| tag.and_then(|tag| tag.get_string(key)))
-        .any(|value| !value.trim().is_empty());
+    let has_embedded = tag
+        .map(|tag| {
+            tag.items()
+                .filter(|item| matches!(item.key(), ItemKey::Lyrics | ItemKey::UnsyncLyrics))
+                .any(|item| match item.value() {
+                    ItemValue::Text(value) | ItemValue::Locator(value) => !value.trim().is_empty(),
+                    ItemValue::Binary(value) => !value.is_empty(),
+                })
+        })
+        .unwrap_or(false);
 
     if has_embedded {
         return false;
