@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 // 流水线 CLI 入口（模型无关核心，D5）：把「一个变更 / 一个 epic」驱动成 DAG 执行。
-//   node run.js <change> --driver claude|codex [--resume] [--self-check]
+//   node run.js <change> --driver claude|codex [--resume] [--force-retry <node>] [--self-check]
 //   node run.js --epic <epic> --driver claude|codex [--resume]
 //   node run.js --self-check
 // 环境自动感知：未显式 --driver 时按环境变量判断（CLAUDECODE → claude；AI_AGENT 含 claude/codex），
@@ -24,7 +24,7 @@ const capability = require('./capability.js');
 function detectDriver(env) { return registry.detect(env || process.env); }
 
 function parseArgs(argv) {
-  const opts = { driver: null, resume: false, selfCheck: false, epic: null, change: null, cwd: null };
+  const opts = { driver: null, resume: false, selfCheck: false, epic: null, change: null, cwd: null, forceRetry: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--driver') opts.driver = argv[++i];
@@ -32,6 +32,7 @@ function parseArgs(argv) {
     else if (a === '--resume') opts.resume = true;
     else if (a === '--self-check') opts.selfCheck = true;
     else if (a === '--cwd') opts.cwd = argv[++i];
+    else if (a === '--force-retry') opts.forceRetry = argv[++i];
     else if (a.startsWith('-')) { console.error(`未知参数: ${a}`); process.exit(2); }
     else if (!opts.change) opts.change = a;
     else { console.error(`多余参数: ${a}`); process.exit(2); }
@@ -42,13 +43,14 @@ function parseArgs(argv) {
 function printUsage() {
   console.error(
     '用法:\n' +
-    '  node run.js <change> --driver claude|codex|opencode [--resume] [--self-check]\n' +
+    '  node run.js <change> --driver claude|codex|opencode [--resume] [--force-retry <node>] [--self-check]\n' +
     '  node run.js --epic <epic> --driver claude|codex|opencode [--resume]\n' +
     '  node run.js --self-check\n' +
     '选项:\n' +
     `  --driver\n    ${registry.helpText().split('\n').join('\n    ')}\n` +
     '  --epic <epic>           epic 并行执行器（P3）\n' +
     '  --resume                续跑已存在状态（从失败/挂起节点继续）\n' +
+    '  --force-retry <node>    保留历史并显式放行指定节点一次（须与 --resume 同用）\n' +
     '  --self-check            静态自检（角色/节点定义/driver 契约/脚本语法），fail-closed\n' +
     '  --cwd <dir>             切换工作目录（epic worktree 场景由执行器注入）'
   );
@@ -133,6 +135,10 @@ async function main() {
   }
 
   if (!opts.change) { printUsage(); process.exit(2); }
+  if (opts.forceRetry && !opts.resume) {
+    console.error('--force-retry 必须与 --resume 同用');
+    process.exit(2);
+  }
 
   const driverName = opts.driver || detectDriver();
   if (!driverName) {
@@ -197,6 +203,7 @@ async function main() {
     getHead: () => repoHead(workDir),
     commitRoot: workDir,
     maxConcurrency: 1, // 单变更 DAG 串行（epic 并行在 worktree 层）
+    ctx: { cwd: workDir, forceRetryNode: opts.forceRetry || null },
   });
 
   console.error(`\n[${opts.change}] 结果：${JSON.stringify(result, null, 2)}`);

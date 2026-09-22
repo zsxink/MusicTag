@@ -55,10 +55,32 @@ test('decision: 技术性失败 attempts 未超上限 → retry', () => {
 });
 
 test('decision: retry 耗尽仍失败 → escalate（方向/范围/歧义交主会话）', () => {
-  const d = decision.decide({ def: { id: 'verify', role: 'verify-agent', retry: { max: 2 } }, attempts: 3, error: 'flaky', result: null, round: 1, maxRounds: 1 });
+  const d = decision.decide({ def: { id: 'verify', role: 'verify-agent', retry: { max: 2 } }, attempts: 3, error: 'flaky', errorKind: 'timeout', result: null, round: 1, maxRounds: 1 });
   assert.equal(d.action, 'escalate');
   assert.equal(d.escalate, true);
   assert.match(d.reason, /主会话/);
+});
+
+test('decision: --force-retry 只显式放行指定节点一次且不删除历史', () => {
+  const d = decision.decide({
+    def: { id: 'verify', role: 'verify-agent', retry: { max: 1 } },
+    attempts: 9,
+    error: 'timeout',
+    errorKind: 'timeout',
+    forceRetry: true,
+    result: null,
+    round: 1,
+    maxRounds: 1,
+  });
+  assert.equal(d.action, 'retry');
+  assert.equal(d.forced, true);
+});
+
+test('decision: permission 永不自动重试，state-machine 错误交 checkpoint 自身处理', () => {
+  const permission = decision.decide({ def: { id: 'dev', retry: { max: 9 } }, attempts: 1, errorKind: 'permission', error: 'denied', round: 1, maxRounds: 1 });
+  assert.equal(permission.action, 'escalate');
+  const behind = decision.decide({ def: { id: 'integrate', retry: { max: 9 } }, attempts: 1, errorKind: 'branch-behind', error: 'behind', round: 1, maxRounds: 1 });
+  assert.equal(behind.action, 'handle');
 });
 
 test('decision: roleLabel 中文标签', () => {

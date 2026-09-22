@@ -98,9 +98,9 @@ async function runPipeline(opts) {
 
     const batch = ready.slice(0, maxConcurrency);
     for (const def of batch) {
-      state.nodes[def.id] = { status: 'pending', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
+      state.nodes[def.id] = { ...(state.nodes[def.id] || {}), status: 'pending', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
       stateApi.saveState(change, state);
-      state.nodes[def.id] = { status: 'ready', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
+      state.nodes[def.id] = { ...(state.nodes[def.id] || {}), status: 'ready', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
       stateApi.saveState(change, state);
       const res = await runNode(def, runCtx, decider);
       if (res.status === 'suspended' || res.status === 'failed') return res;
@@ -130,7 +130,13 @@ async function runNode(def, runCtx, decider) {
     // 同一 round 内可多次 retry（技术性失败不消耗 round）
     for (;;) {
       attempts++;
-      state.nodes[id] = { status: 'running', attempts, updatedAt: new Date().toISOString() };
+      const attemptStartedAt = new Date().toISOString();
+      state.nodes[id] = { ...(state.nodes[id] || {}), status: 'running', attempts, updatedAt: attemptStartedAt };
+      stateApi.appendAttempt(state, id, {
+        round, attempt: attempts, executor: def.kind || 'agent',
+        driver: state.driver || null, model: runCtx.ctx.model || null,
+        startedAt: attemptStartedAt, status: 'running',
+      });
       stateApi.saveState(change, state);
       log(`→ ${id}（round ${round}/${maxRounds}，attempt ${attempts}）`);
 
@@ -175,6 +181,7 @@ async function runNode(def, runCtx, decider) {
         if (ok) {
           const head = getHead();
           state.nodes[id] = {
+            ...(state.nodes[id] || {}),
             status: 'succeeded',
             attempts,
             result: res.structured,
@@ -184,6 +191,12 @@ async function runNode(def, runCtx, decider) {
             driverVersion: res.driverVersion || runCtx.ctx.driverVersion || null,
             permissionDegraded: runCtx.ctx.permissionDegraded || [],
           };
+          const endedAt = new Date().toISOString();
+          stateApi.finishAttempt(state, id, attempts, {
+            status: 'succeeded', endedAt,
+            durationMs: Math.max(0, Date.parse(endedAt) - Date.parse(attemptStartedAt)),
+            commitSha: head, errorKind: null,
+          });
           stateApi.saveState(change, state);
           results[id] = res.structured;
           log(`✓ ${id} 成功`);
@@ -194,14 +207,23 @@ async function runNode(def, runCtx, decider) {
       // 失败（技术性或语义性）→ 决断链
       errText = res.error && typeof res.error === 'object' ? res.error.message : (res.error || `driver 失败（exitCode=${res.exitCode}）`);
       state.nodes[id] = {
+        ...(state.nodes[id] || {}),
         status: 'failed', attempts, error: errText, errorKind: res.errorKind || null,
         result: res.structured || null, updatedAt: new Date().toISOString(),
         permissionDegraded: runCtx.ctx.permissionDegraded || [],
       };
+      const failedAt = new Date().toISOString();
+      stateApi.finishAttempt(state, id, attempts, {
+        status: 'failed', endedAt: failedAt,
+        durationMs: Math.max(0, Date.parse(failedAt) - Date.parse(attemptStartedAt)),
+        error: errText, errorKind: res.errorKind || null,
+        exitCode: res.exitCode === undefined ? null : res.exitCode,
+      });
       stateApi.saveState(change, state);
       log(`✗ ${id} 失败: ${errText}`);
 
-      const decisionCtx = { def, attempts, error: errText, errorKind: res.errorKind, result: res.structured || null, round, maxRounds, ctx: runCtx.ctx };
+      const forceRetry = runCtx.ctx.forceRetryNode === id && !runCtx.ctx.forceRetryUsed;
+      const decisionCtx = { def, attempts, error: errText, errorKind: res.errorKind, result: res.structured || null, round, maxRounds, forceRetry, ctx: runCtx.ctx };
       const decisionResult = await resolveDecision(decisionCtx, runCtx, decider);
       if (!decisionResult.ok) {
         const reason = `Leader 决断失败：${decisionResult.error}`;
@@ -213,6 +235,7 @@ async function runNode(def, runCtx, decider) {
       d = decisionResult.decision;
 
       if (d.action === 'retry') {
+        if (d.forced) runCtx.ctx.forceRetryUsed = true;
         if (retryInterval > 0) await sleep(retryInterval);
         continue; // 同一 round 重跑
       }
@@ -241,6 +264,8 @@ async function resolveDecision(decisionCtx, runCtx, decider) {
   try {
     if (decider) {
       raw = await decider(decisionCtx);
+    } else if (decisionCtx.errorKind && decisionCtx.errorKind !== 'unknown') {
+      raw = decision.decide(decisionCtx);
     } else {
       const task = {
         id: `decision-${decisionCtx.def.id}`,
