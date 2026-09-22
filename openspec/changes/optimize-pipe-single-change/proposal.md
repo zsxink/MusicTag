@@ -24,6 +24,10 @@ Issue [#127](https://github.com/zsxink/MusicTag/issues/127) 复盘发现，当�
 
 - `workflow-core`: 将单变更 pipe 从“所有节点均由 Agent 驱动”升级为确定性 core runner、幂等集成、累计重试、统一提交、动态 CR 证据、分层验证和逐 attempt 可观测性。
 
+## 关联 Issue
+
+- GitHub Issue：`#127`（分支提交使用 `feat(optimize-pipe-single-change): ...`，PR 使用 `Closes #127`）。
+
 ## Impact
 
 - 主要影响 `.agents/tools/pipe-core/`、`.agents/commands/`、`.agents/workflows/`、相关角色提示词与测试夹具。
