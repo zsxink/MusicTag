@@ -471,4 +471,125 @@ describe('SongList — 缺失筛选面板', () => {
     expect(songStore.current?.title).toBe('正在编辑')
     expect(mockInvoke).not.toHaveBeenCalledWith('open_song', expect.anything())
   })
+
+  describe('刷新按钮（missing-filter-refresh，#129）', () => {
+    it('扫描完成后点「刷新」重新扫描并按新结果更新命中列表', async () => {
+      let attempts = 0
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_last_dir') return null
+        if (cmd === 'scan_missing') {
+          attempts++
+          if (attempts === 1) {
+            return { songs: [{ path: '/music/b.flac', missing: ['lyrics'] }], errors: [] }
+          }
+          return { songs: [{ path: '/music/a.flac', missing: ['cover'] }], errors: [] }
+        }
+        throw new Error(`unexpected cmd: ${cmd}`)
+      })
+
+      const w = mount(SongList)
+      await w.get('button.missing-filter-btn').trigger('click')
+      await flushPromises()
+      expect(w.text()).toContain('缺歌词') // 首次扫描命中 b
+
+      await w.get('[data-testid="missing-refresh-btn"]').trigger('click')
+      await flushPromises()
+
+      expect(attempts).toBe(2) // 刷新 → scan_missing 再次被调用
+      expect(w.findAll('.song-row').length).toBe(1)
+      expect(w.text()).toContain('缺封面') // 列表更新为新返回结果
+      expect(w.text()).not.toContain('缺歌词') // 旧结果被替换
+      expect(w.text()).not.toContain('正在扫描缺失字段')
+    })
+
+    it('扫描中点「刷新」触发重扫，旧结果不落地、只反映最新', async () => {
+      const resolvers: Array<(v: unknown) => void> = []
+      let scanCalls = 0
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === 'get_last_dir') return Promise.resolve(null)
+        if (cmd === 'scan_missing') {
+          scanCalls++
+          return new Promise((resolve) => {
+            resolvers[scanCalls - 1] = resolve
+          })
+        }
+        throw new Error(`unexpected cmd: ${cmd}`)
+      })
+
+      const w = mount(SongList)
+      await w.get('button.missing-filter-btn').trigger('click')
+      await flushPromises()
+      expect(w.text()).toContain('正在扫描缺失字段')
+      expect(scanCalls).toBe(1)
+
+      // 扫描中点刷新 → 第二次扫描立即发起
+      await w.get('[data-testid="missing-refresh-btn"]').trigger('click')
+      await flushPromises()
+      expect(scanCalls).toBe(2)
+
+      // 旧扫描先 resolve → 因 seq 过期守卫作废，不得落地
+      resolvers[0]({ songs: [{ path: '/music/a.flac', missing: ['cover'] }], errors: [] })
+      await flushPromises()
+      // 新扫描后 resolve → 落地
+      resolvers[1]({ songs: [{ path: '/music/b.flac', missing: ['lyrics'] }], errors: [] })
+      await flushPromises()
+
+      expect(w.findAll('.song-row').length).toBe(1)
+      expect(w.text()).toContain('缺歌词')
+      expect(w.text()).not.toContain('缺封面') // 旧结果不落地
+      expect(w.text()).not.toContain('正在扫描缺失字段')
+    })
+
+    it('第一次扫描失败后点「刷新」重扫成功，命中列表恢复', async () => {
+      let attempts = 0
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_last_dir') return null
+        if (cmd === 'scan_missing') {
+          attempts++
+          if (attempts === 1) throw new Error('扫描服务暂不可用')
+          return { songs: [{ path: '/music/a.flac', missing: ['lyrics'] }], errors: [] }
+        }
+        throw new Error(`unexpected cmd: ${cmd}`)
+      })
+
+      const w = mount(SongList)
+      await w.get('button.missing-filter-btn').trigger('click')
+      await flushPromises()
+      expect(w.text()).toContain('扫描失败：扫描服务暂不可用')
+
+      await w.get('[data-testid="missing-refresh-btn"]').trigger('click')
+      await flushPromises()
+
+      expect(attempts).toBe(2)
+      expect(w.findAll('.song-row').length).toBe(1)
+      expect(w.text()).toContain('缺歌词')
+      expect(w.text()).not.toContain('扫描失败')
+    })
+
+    it('未开面板/未打开文件夹时不渲染刷新按钮；开启时渲染在面板头部', async () => {
+      // mock 先设好（不同于其他用例的挂载后设 mock：本用例连续多次 mount，前置避免 getLastDir 返 undefined）
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_last_dir') return null
+        if (cmd === 'scan_missing') return { songs: [], errors: [] }
+        throw new Error(`unexpected cmd: ${cmd}`)
+      })
+
+      // 未开启面板（fresh mount 默认 missingFilterEnabled=false）
+      const w = mount(SongList)
+      expect(w.find('[data-testid="missing-refresh-btn"]').exists()).toBe(false)
+
+      // 未打开文件夹（自然态：面板无从开启，missingFilterEnabled 保持 false）
+      songStore.folderPath = null
+      const w2 = mount(SongList)
+      expect(w2.find('[data-testid="missing-refresh-btn"]').exists()).toBe(false)
+
+      // 面板开启 → 按钮渲染且位于 .missing-panel 内部、共享面板头部样式
+      songStore.missingFilterEnabled = false
+      songStore.folderPath = '/music'
+      const w3 = mount(SongList)
+      await w3.get('button.missing-filter-btn').trigger('click')
+      await flushPromises()
+      expect(w3.find('.missing-panel [data-testid="missing-refresh-btn"]').exists()).toBe(true)
+    })
+  })
 })
