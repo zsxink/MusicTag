@@ -24,9 +24,15 @@ const KINDS = {
   timeout: true,
   protocol: true,
   agent: true,
+  command: true,
+  network: true,
   auth: false,
   config: false,
   schema: false,
+  permission: false,
+  'branch-behind': false,
+  'no-checks-yet': false,
+  'already-merged': false,
 };
 
 // 对 driver 返回结果做关键字归类。driver 可显式给 { kind }，缺省按 message 探测。
@@ -60,6 +66,8 @@ function normalizeResult(result) {
       sessionId: result.sessionId || null,
       exitCode: result.exitCode ?? null,
       driverApiVersion: result.driverApiVersion || API_VERSION,
+      commands: result.commands || [],
+      cacheHit: result.cacheHit === true,
     };
   }
   const kind = classify(result);
@@ -71,6 +79,7 @@ function normalizeResult(result) {
     raw: result.raw || null,
     sessionId: result.sessionId || null,
     exitCode: result.exitCode ?? null,
+    commands: result.commands || [],
   };
 }
 

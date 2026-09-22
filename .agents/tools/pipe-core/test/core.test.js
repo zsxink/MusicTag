@@ -71,6 +71,36 @@ test('core: DAG 按拓扑顺序执行全部节点', async () => {
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
+test('core: deterministic 与 agent 共用状态机且确定性节点零 driver 调用', async () => {
+  const repo = tmpRepo();
+  await withRoot(repo, async () => {
+    const change = 'hybrid';
+    const state = stateApi.newState(change, 'mock');
+    const driver = makeDriver({ architect: () => ({ ok: true, structured: { domain: 'infra' } }) });
+    const defs = [
+      { id: 'bootstrap', kind: 'deterministic', runner: 'bootstrap', schema: { type: 'object' }, dependsOn: [] },
+      { id: 'architect', kind: 'agent', role: 'architect', prompt: 'p', schema: { type: 'object' }, dependsOn: ['bootstrap'] },
+      { id: 'spec-gate', kind: 'deterministic', runner: 'spec-gate', schema: { type: 'object' }, dependsOn: ['architect'] },
+    ];
+    const deterministicCalls = [];
+    const res = await core.runPipeline({
+      change,
+      state,
+      defsFn: () => defs,
+      driver,
+      runners: {
+        bootstrap: async () => { deterministicCalls.push('bootstrap'); return { ok: true, structured: { ready: true } }; },
+        'spec-gate': async () => { deterministicCalls.push('spec-gate'); return { ok: true, structured: { ready: true } }; },
+      },
+    });
+    assert.equal(res.status, 'success');
+    assert.deepEqual(deterministicCalls, ['bootstrap', 'spec-gate']);
+    assert.deepEqual(driver.calls, ['architect']);
+    assert.equal(state.nodes.bootstrap.history[0].executor, 'deterministic');
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
 test('core: 失败节点 retry 后成功（attempts=2）', async () => {
   const repo = tmpRepo();
   await withRoot(repo, async () => {

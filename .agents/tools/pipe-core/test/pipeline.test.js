@@ -27,7 +27,7 @@ test('pipeline: backend 域 → 只派 rust-backend 开发节点', () => {
   assert.equal(devs.length, 1);
   assert.equal(devs[0].id, 'dev-rust');
   assert.equal(devs[0].role, 'rust-backend');
-  assert.deepEqual(devs[0].dependsOn, ['architect']);
+  assert.deepEqual(devs[0].dependsOn, ['spec-gate']);
 });
 
 test('pipeline: frontend 域 → 只派 vue-frontend 开发节点', () => {
@@ -61,53 +61,61 @@ test('pipeline: dev 节点必须拒绝 done=false 的未完成结果', () => {
   assert.equal(dev.resultOk({ done: false }), false);
 });
 
-test('pipeline: architect 未判定前仅 preflight+architect 两个节点', () => {
+test('pipeline: architect 未判定前包含 bootstrap→architect→spec-gate 边界', () => {
   const defs = pipeline.buildPipeline({ change: 'demo', nodes: {} });
-  assert.deepEqual(defs.map((d) => d.id).sort(), ['architect', 'preflight']);
+  assert.deepEqual(defs.map((d) => d.id), ['bootstrap', 'architect', 'spec-gate']);
 });
 
-test('pipeline: preflight ready=false 不得进入 architect（fail-closed）', () => {
-  const preflight = pipeline.buildPipeline({ change: 'demo', nodes: {} }).find((d) => d.id === 'preflight');
-  assert.equal(preflight.resultOk({ ready: true }), true);
-  assert.equal(preflight.resultOk({ ready: false }), false);
+test('pipeline: bootstrap/spec-gate 均 fail-closed', () => {
+  for (const id of ['bootstrap', 'spec-gate']) {
+    const gate = pipeline.buildPipeline({ change: 'demo', nodes: {} }).find((d) => d.id === id);
+    assert.equal(gate.resultOk({ ready: true }), true);
+    assert.equal(gate.resultOk({ ready: false }), false);
+  }
 });
 
-test('pipeline: 完整 DAG 拓扑顺序 preflight→architect→dev→tester→cr→verify→integrate', () => {
+test('pipeline: 完整 DAG 拓扑顺序 bootstrap→architect→spec-gate→dev→tester→cr→verify→integrate', () => {
   const defs = pipeline.buildPipeline(stateWithDomain('infra'));
   const ids = defs.map((d) => d.id);
-  for (const [a, b] of [['preflight', 'architect'], ['architect', 'dev'], ['dev', 'tester'], ['tester', 'cr'], ['cr', 'verify'], ['verify', 'integrate']]) {
+  for (const [a, b] of [['bootstrap', 'architect'], ['architect', 'spec-gate'], ['spec-gate', 'dev'], ['dev', 'tester'], ['tester', 'cr'], ['cr', 'verify'], ['verify', 'integrate']]) {
     const idxA = ids.indexOf(a);
     const idxB = ids.indexOf(b);
     assert.ok(idxA >= 0 && idxB >= 0 && idxA < idxB, `${a} → ${b}`);
   }
 });
 
-test('pipeline: verify prompt 对 infra 域跳过 cargo/npm，执行短路基线', () => {
+test('pipeline: 内置节点显式 kind，确定性节点不携带 Agent role/prompt', () => {
   const defs = pipeline.buildPipeline(stateWithDomain('infra'));
-  const verify = defs.find((d) => d.id === 'verify');
-  const p = verify.prompt({});
-  assert.match(p, /自适应编排跳过业务编译/);
-  assert.match(p, /node --test/);
-  assert.match(p, /tests\/workflow-core\/\*\.test\.cjs/);
-  assert.ok(!p.includes('cargo check'));
+  for (const def of defs) assert.ok(['agent', 'deterministic'].includes(def.kind), def.id);
+  for (const id of ['bootstrap', 'spec-gate', 'verify', 'integrate']) {
+    const def = defs.find((item) => item.id === id);
+    assert.equal(def.kind, 'deterministic');
+    assert.equal(typeof def.runner, 'string');
+    assert.equal(def.role, undefined);
+    assert.equal(def.prompt, undefined);
+  }
 });
 
-test('pipeline: infra 域 verify 测试命令必须 glob 形式（目录形式在 Node≥22 必 exit 1，独立复核 major）', () => {
+test('pipeline: verify 对 infra 域交给确定性 runner', () => {
   const defs = pipeline.buildPipeline(stateWithDomain('infra'));
   const verify = defs.find((d) => d.id === 'verify');
-  const p = verify.prompt({});
-  // 必须是 glob test/*.test.js，不是目录 .agents/tools/pipe-core/（该目录形式实测 exit 1）
-  assert.match(p, /node --test \.agents\/tools\/pipe-core\/test\/\*\.test\.js tests\/workflow-core\/\*\.test\.cjs/);
-  assert.doesNotMatch(p, /node --test \.agents\/tools\/pipe-core\/(?!test)/);
+  assert.equal(verify.kind, 'deterministic');
+  assert.equal(verify.runner, 'verify');
+  assert.equal(verify.domain, 'infra');
 });
 
-test('pipeline: verify prompt 对 code 域跑统一基线 + 复盘回归', () => {
+test('pipeline: infra 域 verify 携带 change/domain 供 runner 生成计划', () => {
+  const defs = pipeline.buildPipeline(stateWithDomain('infra'));
+  const verify = defs.find((d) => d.id === 'verify');
+  assert.equal(verify.change, 'demo');
+  assert.equal(verify.domain, 'infra');
+});
+
+test('pipeline: code 域 verify 仍由同一定义传递 domain', () => {
   const defs = pipeline.buildPipeline(stateWithDomain('both'));
   const verify = defs.find((d) => d.id === 'verify');
-  const p = verify.prompt({});
-  assert.match(p, /cargo check --manifest-path src-tauri\/Cargo.toml/);
-  assert.match(p, /npm run build/);
-  assert.match(p, /复盘回归清单/);
+  assert.equal(verify.runner, 'verify');
+  assert.equal(verify.domain, 'both');
 });
 
 test('pipeline: devSpec infra 域自验证只跑 node/openspec，不跑 cargo/npm', () => {
@@ -127,12 +135,10 @@ test('pipeline: CR 复盘专项三检（跨模块状态/竞态与串扰/网络�
   assert.match(p, /pass=true 仅当无 blocker 且无 major/);
 });
 
-test('pipeline: integrate 使用确定性 PR/CI/merge wrapper，不直接编排 gh', () => {
+test('pipeline: integrate 由确定性 runner 执行', () => {
   const integrate = pipeline.buildPipeline(stateWithDomain('infra')).find((d) => d.id === 'integrate');
-  const p = integrate.prompt({});
-  for (const command of ['create-pr.js', 'wait-ci.js', 'merge-pr.js']) assert.match(p, new RegExp(`\\.agents/commands/${command}`));
-  assert.doesNotMatch(p, /gh pr (create|merge)/);
-  assert.doesNotMatch(p, /git branch -d/);
+  assert.equal(integrate.kind, 'deterministic');
+  assert.equal(integrate.runner, 'integrate');
 });
 
 test('pipeline: integrate 只有真实 PR 合并才算成功', () => {

@@ -46,13 +46,13 @@ function run({ repoRoot = process.cwd() } = {}) {
     for (const d of defs) {
       const ve = validateNode(d);
       if (ve.length) errors.push(`节点 ${d.id}: ${ve.join('; ')}`);
-      if (!rolesJson[d.role]) errors.push(`节点 ${d.id} 引用未定义角色 ${d.role}`);
+      if ((d.kind || 'agent') === 'agent' && !rolesJson[d.role]) errors.push(`节点 ${d.id} 引用未定义角色 ${d.role}`);
       if (typeof d.resultOk === 'function') {
-        const probe = d.id === 'preflight'
+        const probe = ['bootstrap', 'spec-gate'].includes(d.id)
           ? { ready: true }
           : d.role === 'cr-agent'
           ? { pass: true, blockers: [], majors: [], steps: [] }
-          : d.role === 'verify-agent'
+          : d.id === 'verify'
             ? { pass: true, blockers: [], majors: [], steps: [{ step: 'probe', status: 'pass', detail: '' }] }
           : d.id === 'integrate'
             ? { archived: true, prUrl: 'https://example.invalid/pr/1', merged: true, summary: '' }

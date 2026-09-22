@@ -6,9 +6,15 @@ function validateNode(node) {
   const errors = [];
   if (!node || typeof node !== 'object') return ['节点定义非法：非对象'];
   if (!node.id) errors.push('节点缺少 id');
-  if (!node.role) errors.push(`节点 ${node.id || '(unknown)'}: 缺少 role`);
-  if (node.prompt === undefined && node.promptFn === undefined) {
-    errors.push(`节点 ${node.id || '(unknown)'}: 缺少 prompt 或 promptFn`);
+  const kind = node.kind || 'agent';
+  if (!['agent', 'deterministic'].includes(kind)) errors.push(`节点 ${node.id || '(unknown)'}: kind 非法`);
+  if (kind === 'agent') {
+    if (!node.role) errors.push(`节点 ${node.id || '(unknown)'}: 缺少 role`);
+    if (node.prompt === undefined && node.promptFn === undefined) {
+      errors.push(`节点 ${node.id || '(unknown)'}: 缺少 prompt 或 promptFn`);
+    }
+  } else if (!node.runner || typeof node.runner !== 'string') {
+    errors.push(`节点 ${node.id || '(unknown)'}: deterministic 节点缺少 runner`);
   }
   if (node.schema === undefined) errors.push(`节点 ${node.id || '(unknown)'}: 缺少 schema`);
   if (node.dependsOn !== undefined && !Array.isArray(node.dependsOn)) {

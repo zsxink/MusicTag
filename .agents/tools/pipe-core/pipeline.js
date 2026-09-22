@@ -131,7 +131,8 @@ function devSpec(change, domain) {
 
 function buildDevDefs(change, domain) {
   const base = {
-    dependsOn: ['architect'],
+    kind: 'agent',
+    dependsOn: ['spec-gate'],
     schema: DEV_SCHEMA,
     retry: { max: 1, intervalMs: 0 },
     resultOk: (r) => r.done === true,
@@ -165,27 +166,35 @@ function buildPipeline(state) {
 
   const defs = [
     {
-      id: 'preflight',
-      role: 'leader',
+      id: 'bootstrap',
+      kind: 'deterministic',
+      runner: 'bootstrap',
       schema: PREFLIGHT_SCHEMA,
       dependsOn: [],
       retry: { max: 1, intervalMs: 0 },
       resultOk: (r) => r.ready === true,
-      prompt: (ctx) =>
-        `只读执行 ${ctx.preflightScript || '.agents/workflows/pipe-preflight.sh'} ${change}；不得以人工判断替代脚本。` +
-        `脚本退出码非零时 ready=false，并逐项写入 issues；仅脚本成功且 branch=${change} 时 ready=true。`,
     },
     {
       id: 'architect',
+      kind: 'agent',
       role: 'architect',
       schema: ARCHITECT_SCHEMA,
-      dependsOn: ['preflight'],
+      dependsOn: ['bootstrap'],
       retry: { max: 1, intervalMs: 0 },
       prompt: (ctx) =>
         `你是 MusicTag 架构设计师。为已批准的变更「${change}」细化技术设计。\n` +
         `读取 openspec/changes/${change}/proposal.md、design.md、specs/、tasks.md、docs/V1-PRD.md、docs/design/design.md。\n` +
         `仅在不改变已批准需求的前提下更新 design.md 与 tasks.md：补足技术方案、关键决策、变更域和依赖顺序。\n` +
         `判定变更域：backend/frontend/both/docs/spec/infra（docs/spec/infra 为纯流程/文档/规格变更，不触发业务编译门禁）。返回结构化结果。`,
+    },
+    {
+      id: 'spec-gate',
+      kind: 'deterministic',
+      runner: 'spec-gate',
+      schema: PREFLIGHT_SCHEMA,
+      dependsOn: ['architect'],
+      retry: { max: 1, intervalMs: 0 },
+      resultOk: (r) => r.ready === true,
     },
   ];
 
@@ -195,6 +204,7 @@ function buildPipeline(state) {
     defs.push(...devDefs);
     defs.push({
       id: 'tester',
+      kind: 'agent',
       role: 'tester',
       schema: TESTER_SCHEMA,
       dependsOn: devIds,
@@ -208,6 +218,7 @@ function buildPipeline(state) {
     });
     defs.push({
       id: 'cr',
+      kind: 'agent',
       role: 'cr-agent',
       schema: CR_SCHEMA,
       dependsOn: ['tester'],
@@ -223,42 +234,24 @@ function buildPipeline(state) {
     });
     defs.push({
       id: 'verify',
-      role: 'verify-agent',
+      kind: 'deterministic',
+      runner: 'verify',
+      change,
+      domain,
       schema: VERIFY_SCHEMA,
       dependsOn: ['cr'],
       retry: { max: 1, intervalMs: 0 },
       resultOk: (r) => r.pass === true && Array.isArray(r.steps) && r.steps.length > 0 && r.steps.every((step) => step.status === 'pass'),
-      prompt: (ctx) => {
-        if (NON_CODE_DOMAINS.includes(domain)) {
-          return `你是验证(CI)角色。变更「${change}」域为 ${domain}，按自适应编排跳过业务编译（P4）：\n` +
-            `按序短路运行：node --test .agents/tools/pipe-core/test/*.test.js tests/workflow-core/*.test.cjs → node .agents/tools/pipe-core/run.js --self-check → ` +
-            `openspec validate ${change} --strict --no-interactive。任一 fail 即整体 verify_failed，只验证不修复，失败输出如实上报。\n` +
-            `全部通过才 pass=true，并逐项返回 steps（step + status + detail）。`;
-        }
-        return `你是验证(CI)角色。对变更「${change}」运行完整最终验证，统一基线按序短路：\n` +
-          `cargo check --manifest-path src-tauri/Cargo.toml → cargo test --manifest-path src-tauri/Cargo.toml → ` +
-          `npm run test → npm run build → openspec validate ${change} --strict --no-interactive。\n` +
-          `任一 fail 即整体 verify_failed，只验证不修复，失败输出如实上报。\n` +
-          `若变更触及搜索取词/单源换源/并发/离线降级路径，追加复盘回归清单并逐项入 steps：\n` +
-          `单源换源不被聚合去重破坏、歌词/封面跨 kind 不串扰（无永久搜索中）、离线判定区分全源网络失败 vs 正常空结果；\n` +
-          `否则 steps 中注明「不适用」。全部通过才 pass=true，并逐项返回 steps（step + status + detail）。`;
-      },
     });
     defs.push({
       id: 'integrate',
-      role: 'leader',
+      kind: 'deterministic',
+      runner: 'integrate',
+      change,
       schema: INTEGRATION_SCHEMA,
       dependsOn: ['verify'],
       retry: { max: 1, intervalMs: 0 },
       resultOk: (r) => r.archived === true && r.merged === true && typeof r.prUrl === 'string' && r.prUrl.length > 0,
-      prompt: (ctx) =>
-        `你是流水线 Leader。变更「${change}」已通过验证，现在执行受控集成：\n` +
-        `1. 归档：若 openspec/changes/${change} 仍存在则执行 node .agents/commands/archive-change.js ${change}；若已位于 openspec/changes/archive/ 下则视为已归档并幂等跳过（规格改动随分支提交）\n` +
-        `2. 推送分支：git push -u origin ${change}\n` +
-        `3. 提交 PR：node .agents/commands/create-pr.js ${change} "feat(${change}): <变更摘要>" "Closes #<issue>"（Issue 号从 openspec/changes/${change}/proposal.md 的「关联 Issue」段取，无则省略 Closes；记录 wrapper 输出的 PR URL）\n` +
-        `4. 等 CI required checks 通过：node .agents/commands/wait-ci.js <pr-url-or-number>\n` +
-        `5. 合并并清理分支：node .agents/commands/merge-pr.js <pr-url-or-number>（wrapper 负责 squash 与删除已合并分支）\n` +
-        `全部完成返回 archived=true、prUrl、merged=true、summary；任何一步失败返回 merged=false 并附失败原因。`,
     });
   }
   return defs;
