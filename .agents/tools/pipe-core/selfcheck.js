@@ -95,6 +95,8 @@ function run({ repoRoot = process.cwd() } = {}) {
   const walk = (root) => {
     if (!fs.existsSync(root)) return;
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      // test/fixtures/ 是故意注入语法错误/缺失输出的失败探针，不得进入静态自检。
+      if (entry.isDirectory() && entry.name === 'fixtures') continue;
       const file = path.join(root, entry.name);
       if (entry.isDirectory()) walk(file);
       else if (entry.name.endsWith('.js')) jsFiles.push(file);

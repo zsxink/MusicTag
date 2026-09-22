@@ -60,7 +60,20 @@ test('pipeline: Agent 写入节点声明最小 writeScopes 和 core commit，pro
 
   const infra = pipeline.buildPipeline(stateWithDomain('infra'));
   const infraDev = infra.find((d) => d.id === 'dev');
-  assert.deepEqual(infraDev.writeScopes, ['.agents/', '.claude/', '.opencode/', 'openspec/', 'tests/workflow-core/', 'AGENTS.md']);
+  // infra 变更工作量大：拆 dev→dev-metrics→dev-docs 三个串行子节点，各自最小写范围，
+  // 避免单个长会话在 agent driver 下超时/不可靠。dev 只做任务组 4（动态 CR）。
+  const infraDevs = infra.filter((d) => d.id.startsWith('dev'));
+  assert.equal(infraDevs.length, 3);
+  assert.deepEqual(
+    infraDevs.map((d) => d.id),
+    ['dev', 'dev-metrics', 'dev-docs'],
+  );
+  assert.deepEqual(infraDev.dependsOn, ['spec-gate'], 'dev 只依赖 spec-gate');
+  assert.equal(infraDevs[1].dependsOn[0], 'dev');
+  assert.equal(infraDevs[2].dependsOn[0], 'dev-metrics');
+  assert.ok(infraDev.writeScopes.indexOf('.agents/tools/pipe-core/') !== -1);
+  assert.ok(infraDevs[1].writeScopes.length > 0);
+  assert.ok(infraDevs[2].writeScopes.length > 0);
 });
 
 test('pipeline: Architect 只可写当前 change 的 design/tasks 且不单独提交', () => {
@@ -72,13 +85,21 @@ test('pipeline: Architect 只可写当前 change 的 design/tasks 且不单独�
   assert.equal(architect.coreCommit, false);
 });
 
-test('pipeline: docs/spec/infra 域 → leader 开发节点（自适应编排不触发业务编译门禁）', () => {
-  for (const domain of ['docs', 'spec', 'infra']) {
+test('pipeline: docs/spec 域 → 单个 leader 开发节点；infra 拆三节点（自适应编排不触发业务编译门禁）', () => {
+  for (const domain of ['docs', 'spec']) {
     const defs = pipeline.buildPipeline(stateWithDomain(domain));
     const devs = defs.filter((d) => d.id.startsWith('dev'));
     assert.equal(devs.length, 1, domain);
     assert.equal(devs[0].role, 'leader', domain);
     assert.match(devs[0].prompt({}), /流程\/文档资产/);
+  }
+  for (const domain of ['infra']) {
+    const defs = pipeline.buildPipeline(stateWithDomain(domain));
+    const devs = defs.filter((d) => d.id.startsWith('dev'));
+    assert.equal(devs.length, 3, domain);
+    assert.ok(devs.every((d) => d.role === 'leader'), domain);
+    assert.ok(devs[1].dependsOn && devs[1].dependsOn[0] === 'dev');
+    assert.ok(devs[2].dependsOn && devs[2].dependsOn[0] === 'dev-metrics');
   }
 });
 

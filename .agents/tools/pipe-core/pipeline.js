@@ -159,7 +159,44 @@ function buildDevDefs(change, domain) {
       { ...base, id: 'dev-vue', role: 'vue-frontend', writeScopes: ['src/'], dependsOn: ['dev-rust'], prompt: (ctx) => `你是 Vue 开发。${devSpec(change, domain)}\n只负责 src/ 下前端任务；跨端时先使用已落地的 Rust 契约。` },
     ];
   }
-  // docs / spec / infra：leader 流程维护角色，不派 rust-backend/vue-frontend
+  // docs / spec / infra：leader 流程维护角色，不派 rust-backend/vue-frontend。
+  // infra 变更（改动编排设施自身）工作量大，单节点长会话在 agent driver 下不可靠，
+  // 拆成串行子节点：dev（任务组 4 动态 CR）→ dev-metrics（任务组 7 可观测）→ dev-docs（任务组 8 文档）。
+  // docs/spec 仍保持一个 dev 节点（工作量小，单会话即可）。
+  if (domain === 'infra') {
+    const leaderScope = (scope) => ['.agents/tools/pipe-core/', '.agents/tools/pipe-core/test/', 'tests/workflow-core/', ...scope];
+    return [
+      {
+        ...base,
+        id: 'dev',
+        role: 'leader',
+        writeScopes: leaderScope(['.claude/']),
+        prompt: (ctx) => `你是流水线 Leader（流程维护）。你是 infra 域开发，只负责「任务组 4：动态 CR 与测试分层」——` +
+          `用当前 change 的 specs/design、Tester 结果、HEAD、diff stat 生成 CR prompt，删除固定「191 个测试」等历史结论；` +
+          `${devSpec(change, domain)}\n只碰 .agents/、.claude/、tests/workflow-core/ 下资产，不碰 src/、src-tauri/。`,
+      },
+      {
+        ...base,
+        id: 'dev-metrics',
+        role: 'leader',
+        dependsOn: ['dev'],
+        writeScopes: leaderScope([]),
+        prompt: (ctx) => `你是流水线 Leader（流程维护）。你是 infra 域开发，只负责「任务组 7：可观测性与端到端验收」——` +
+          `汇总 node/attempt/driver/model/command/commit/cache/CI/人工介入事件，输出总耗时、分类耗时、最慢三阶段及 PR/CI/merge 次数，建立 metrics 与 checkpoint 中断 resume 证据；` +
+          `${devSpec(change, domain)}\n只碰 .agents/、tests/workflow-core/ 下资产，不碰 src/、src-tauri/。`,
+      },
+      {
+        ...base,
+        id: 'dev-docs',
+        role: 'leader',
+        dependsOn: ['dev-metrics'],
+        writeScopes: ['.claude/', '.opencode/', 'AGENTS.md', 'docs/'],
+        prompt: (ctx) => `你是流水线 Leader（流程维护）。你是 infra 域开发，只负责「任务组 8：全量验证与文档同步」——` +
+          `更新 pipe skill、AGENTS 入口、角色说明和 workflow 注释以匹配新 DAG/权限/恢复语义，运行静态检查与全量门禁并核对 specs 验收标准证据；` +
+          `${devSpec(change, domain)}\n只碰 .claude/、AGENTS.md、docs/ 下文档资产，不碰 src/、src-tauri/、核心代码。`,
+      },
+    ];
+  }
   return [{
     ...base,
     id: 'dev',
