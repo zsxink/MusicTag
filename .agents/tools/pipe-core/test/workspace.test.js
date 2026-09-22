@@ -39,7 +39,9 @@ test('workspace: 越权与 ignored 写入均 fail-closed，HEAD 变化单独报�
   const after = workspace.snapshot(repo);
   const audit = workspace.audit(before, after, ['src/']);
   assert.equal(audit.headChanged, true);
-  assert.ok(audit.unauthorizedPaths.includes('ignored/secret.txt'));
+  // ignore 目录折叠为目录级条目（防大型 node_modules 逐文件枚举 ENOBUFS/性能问题），
+  // fail-closed 语义保留：在 ignore 目录内写入 → 目录本身作为 unauthorized 路径被捕获。
+  assert.ok(audit.unauthorizedPaths.includes('ignored/'));
   assert.ok(audit.unauthorizedPaths.includes('outside.txt'));
   fs.rmSync(repo, { recursive: true, force: true });
 });

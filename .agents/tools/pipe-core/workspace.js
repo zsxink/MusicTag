@@ -7,7 +7,12 @@ const { execFileSync } = require('node:child_process');
 const { runCommand } = require('./command-runner.js');
 
 function git(root, args, options = {}) {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...options });
+  return execFileSync('git', args, {
+    cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    // 大仓库下 git 输出可能超过默认 1MB（如 --ignored 递归展开 node_modules），兜底防 ENOBUFS 崩溃。
+    maxBuffer: 64 * 1024 * 1024,
+    ...options,
+  });
 }
 
 function fingerprint(root, relativePath) {
@@ -24,7 +29,22 @@ function fingerprint(root, relativePath) {
 function statusEntries(root) {
   const entries = new Map();
   const raw = git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
-  const records = raw.split('\0').filter(Boolean);
+
+  // 被 gitignore 的目录：`git status --porcelain -z --ignored` 折叠成单条 `!! <dir>/`，
+  // 由 porcelain 记录统一收集，避免 `git ls-files --others --ignored` 递归展开
+  // node_modules 等目录（OpenCode 下 6.4 万条路径，>1MB）炸掉 execFileSync maxBuffer。
+  let ignoredRaw = '';
+  try {
+    ignoredRaw = git(root, ['status', '--porcelain=v1', '-z', '--ignored']);
+  } catch (_) {
+    // --ignored 输出过大或 git 版本不支持：降级回 --untracked-files=all（不折叠 ignore 粒度，
+    // 但目录内全部条目都会出现在 untracked 记录，快照差异判定依然正确；只见目录不见子文件）。
+    ignoredRaw = raw;
+  }
+  const records = raw.split('\0').filter(Boolean).concat(
+    ignoredRaw.split('\0').filter(Boolean).filter((r) => r.startsWith('!!')),
+  );
+
   for (let index = 0; index < records.length; index++) {
     const record = records[index];
     const status = record.slice(0, 2);
@@ -35,10 +55,6 @@ function statusEntries(root) {
     }
     if (!file || file.startsWith('.agents/runs/')) continue;
     entries.set(file, { status, fingerprint: fingerprint(root, file) });
-  }
-  const ignored = git(root, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z']).split('\0').filter(Boolean);
-  for (const file of ignored) {
-    if (!file.startsWith('.agents/runs/')) entries.set(file, { status: '!!', fingerprint: fingerprint(root, file) });
   }
   return entries;
 }
