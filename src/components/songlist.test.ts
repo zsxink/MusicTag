@@ -540,6 +540,58 @@ describe('SongList — 缺失筛选面板', () => {
       expect(w.text()).not.toContain('正在扫描缺失字段')
     })
 
+    it('刷新在途时改勾选维度，旧刷新响应作废、最新维度结果胜出', async () => {
+      const resolvers: Array<(v: unknown) => void> = []
+      let scanCalls = 0
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === 'get_last_dir') return Promise.resolve(null)
+        if (cmd === 'scan_missing') {
+          scanCalls++
+          return new Promise((resolve) => {
+            resolvers[scanCalls - 1] = resolve
+          })
+        }
+        throw new Error(`unexpected cmd: ${cmd}`)
+      })
+
+      const w = mount(SongList)
+      await w.get('button.missing-filter-btn').trigger('click')
+      await flushPromises()
+      expect(scanCalls).toBe(1)
+
+      // 首扫完成：命中缺封面的 b
+      resolvers[0]({ songs: [{ path: '/music/b.flac', missing: ['cover'] }], errors: [] })
+      await flushPromises()
+      expect(w.text()).toContain('缺封面')
+
+      // 点刷新 → 二扫 in-flight
+      await w.get('[data-testid="missing-refresh-btn"]').trigger('click')
+      await flushPromises()
+      expect(scanCalls).toBe(2)
+
+      // 扫描中取消「歌词」维度 → 三扫发起（seq 递增，在途刷新被作废）
+      const checks = w.findAll('input[type="checkbox"]')
+      await checks[4].setValue(false)
+      await flushPromises()
+      expect(scanCalls).toBe(3)
+
+      // 旧刷新扫描（二扫）先返回 → 因 seq 过期守卫不落地
+      resolvers[1]({ songs: [{ path: '/music/a.flac', missing: ['lyrics'] }], errors: [] })
+      await flushPromises()
+      // 最新维度扫描（三扫）返回 → 落地
+      resolvers[2]({ songs: [{ path: '/music/b.flac', missing: ['title'] }], errors: [] })
+      await flushPromises()
+
+      // 最终列表只反映最新维度结果；旧刷新（缺歌词命中 a）与首扫（缺封面）均不落地
+      expect(scanCalls).toBe(3)
+      expect(songStore.missingChecks).not.toContain('lyrics')
+      expect(w.findAll('.song-row').length).toBe(1)
+      expect(w.text()).toContain('缺歌名')
+      expect(w.text()).not.toContain('缺封面')
+      expect(w.text()).not.toContain('缺歌词')
+      expect(w.text()).not.toContain('正在扫描缺失字段')
+    })
+
     it('第一次扫描失败后点「刷新」重扫成功，命中列表恢复', async () => {
       let attempts = 0
       mockInvoke.mockImplementation(async (cmd: string) => {
@@ -564,6 +616,33 @@ describe('SongList — 缺失筛选面板', () => {
       expect(w.findAll('.song-row').length).toBe(1)
       expect(w.text()).toContain('缺歌词')
       expect(w.text()).not.toContain('扫描失败')
+    })
+
+    it('刷新后再次扫描失败 → 进入错误态，陈旧命中结果与 badge 均不残留', async () => {
+      let attempts = 0
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_last_dir') return null
+        if (cmd === 'scan_missing') {
+          attempts++
+          if (attempts === 1) return { songs: [{ path: '/music/b.flac', missing: ['lyrics'] }], errors: [] }
+          throw new Error('刷新时扫描服务不可用')
+        }
+        throw new Error(`unexpected cmd: ${cmd}`)
+      })
+
+      const w = mount(SongList)
+      await w.get('button.missing-filter-btn').trigger('click')
+      await flushPromises()
+      expect(w.text()).toContain('缺歌词') // 首次扫描命中 b
+
+      await w.get('[data-testid="missing-refresh-btn"]').trigger('click')
+      await flushPromises()
+
+      expect(attempts).toBe(2)
+      expect(w.text()).toContain('扫描失败：刷新时扫描服务不可用')
+      // 陈旧命中结果被作废清空：不得残留「缺歌词」badge，也不显示「正在扫描」
+      expect(w.text()).not.toContain('缺歌词')
+      expect(w.text()).not.toContain('正在扫描缺失字段')
     })
 
     it('未开面板/未打开文件夹时不渲染刷新按钮；开启时渲染在面板头部', async () => {
