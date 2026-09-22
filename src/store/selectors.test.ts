@@ -11,6 +11,9 @@ describe('store/selectors — 纯展示派生（spec: 搜索过滤 + 文件名�
   beforeEach(() => {
     songStore.songs = []
     songStore.searchQuery = ''
+    songStore.missingFilterEnabled = false
+    songStore.missingScanState = 'idle'
+    songStore.missingByPath = {}
   })
 
   describe('filteredSongs — 搜索过滤 + 文件名升序（computed 从 songStore 派生）', () => {
@@ -45,6 +48,34 @@ describe('store/selectors — 纯展示派生（spec: 搜索过滤 + 文件名�
     it('无匹配返回空数组', () => {
       songStore.searchQuery = 'zzz-no-match'
       expect(filteredSongs.value).toEqual([])
+    })
+
+    it('缺失筛选先缩小结果集，再叠加歌名/作者搜索', () => {
+      songStore.missingFilterEnabled = true
+      songStore.missingScanState = 'done'
+      songStore.missingByPath = {
+        '/a/zz.mp3': ['cover'],
+        '/c/mid.mp3': ['lyrics'],
+      }
+
+      expect(filteredSongs.value.map((x) => x.path)).toEqual(['/c/mid.mp3', '/a/zz.mp3'])
+
+      songStore.searchQuery = 'ideology'
+      expect(filteredSongs.value).toEqual([])
+
+      songStore.searchQuery = 'candle'
+      expect(filteredSongs.value.map((x) => x.path)).toEqual(['/c/mid.mp3'])
+    })
+
+    it('扫描中或命令失败时保留完整列表，避免误显为无命中', () => {
+      songStore.missingFilterEnabled = true
+      songStore.missingByPath = {}
+
+      songStore.missingScanState = 'scanning'
+      expect(filteredSongs.value).toHaveLength(4)
+
+      songStore.missingScanState = 'error'
+      expect(filteredSongs.value).toHaveLength(4)
     })
   })
 

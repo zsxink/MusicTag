@@ -13,9 +13,13 @@ import { searchSource as defaultSearchSource } from '../api/search'
 import { renameSong as defaultRename } from '../api/songs'
 import { saveLastDir as defaultSaveLastDir } from '../api/songs'
 import { saveSong as defaultSave } from '../api/songs'
+import { scanMissing as defaultScanMissing } from '../api/songs'
 import type {
   CoverInput,
   LyricsSource,
+  MissingField,
+  MissingScanError,
+  MissingScanResult,
   MusicSourceId,
   SearchResult,
   Song,
@@ -47,6 +51,22 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'save_failed'
  *  自动搜索可同时搜两类、手动搜索只搜一类——若为全局单值，手动搜歌词会让封面面板误显「搜索中…」。 */
 type SearchState = 'idle' | 'searching' | 'done'
 
+export type MissingScanState = 'idle' | 'scanning' | 'done' | 'error'
+
+export const MISSING_FIELDS: MissingField[] = ['title', 'artist', 'album', 'cover', 'lyrics']
+
+function normalizeMissingChecks(checks: MissingField[]): MissingField[] {
+  return MISSING_FIELDS.filter((field) => checks.includes(field))
+}
+
+function sameMissingChecks(left: MissingField[], right: MissingField[]): boolean {
+  return left.length === right.length && left.every((field, index) => field === right[index])
+}
+
+function missingScanErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /** 切歌/换目录未保存确认的待办动作（v1-ux-settings D1：两个入口共享同一三选一状态机）。
  *  pendingAction 非 null → App 渲染 <SwitchDialog/>；loader 闭包存 reactive 合法（仿 saveFn 注入先例）。 */
 export type PendingAction =
@@ -61,6 +81,20 @@ interface SongEditor {
   songs: SongSummary[]
   /** 搜索框关键词（空 = 不过滤）。 */
   searchQuery: string
+  /** 是否启用查漏筛选；扫描中/命令失败时 selector 暂时保留完整列表。 */
+  missingFilterEnabled: boolean
+  /** 查漏维度，始终按 title → artist → album → cover → lyrics 归一化。 */
+  missingChecks: MissingField[]
+  /** 仅存储命中歌曲的缺失维度，不污染 SongSummary。 */
+  missingByPath: Record<string, MissingField[]>
+  /** 单文件扫描错误，命中列表仍可展示。 */
+  missingScanErrors: MissingScanError[]
+  /** 查漏 command 状态。 */
+  missingScanState: MissingScanState
+  /** 查漏 command 级错误。 */
+  missingScanError: string
+  /** 查漏任务过期序号。 */
+  missingScanSeq: number
   /** 被选中歌曲的 path（null = 无选中）。 */
   selectedPath: string | null
   /** 编辑中歌曲（open_song 结果，表单 v-model 绑它）。 */
@@ -148,6 +182,7 @@ export async function activateFolder(
 ): Promise<void> {
   if (dir === null || dir === '') return // 取消/空，无视
   raw.folderPath = dir
+  resetMissingFilterState()
   raw.selectedPath = null
   raw.current = null
   raw.original = null
@@ -290,6 +325,13 @@ const raw = reactive<SongEditor>({
   folderPath: null,
   songs: [],
   searchQuery: '',
+  missingFilterEnabled: false,
+  missingChecks: [...MISSING_FIELDS],
+  missingByPath: {},
+  missingScanErrors: [],
+  missingScanState: 'idle',
+  missingScanError: '',
+  missingScanSeq: 0,
   selectedPath: null,
   current: null,
   original: null,
@@ -324,6 +366,96 @@ const raw = reactive<SongEditor>({
   lyricSearchSeq: 0,
   coverSearchSeq: 0,
 })
+
+function resetMissingFilterState(): void {
+  raw.missingFilterEnabled = false
+  raw.missingChecks = [...MISSING_FIELDS]
+  raw.missingByPath = {}
+  raw.missingScanErrors = []
+  raw.missingScanState = 'idle'
+  raw.missingScanError = ''
+  raw.missingScanSeq++
+}
+
+function clearMissingResults(): void {
+  raw.missingByPath = {}
+  raw.missingScanErrors = []
+  raw.missingScanState = 'idle'
+  raw.missingScanError = ''
+}
+
+/** 执行当前目录/维度的查漏扫描；scanFn 注入后可在单测中隔离 Tauri。 */
+export async function scanMissing(
+  scanFn: (dir: string, checks: MissingField[]) => Promise<MissingScanResult> = defaultScanMissing,
+): Promise<void> {
+  const dir = raw.folderPath
+  const checks = normalizeMissingChecks(raw.missingChecks)
+  if (!raw.missingFilterEnabled || dir === null || checks.length === 0) return
+
+  const mySeq = ++raw.missingScanSeq
+  raw.missingChecks = checks
+  raw.missingScanState = 'scanning'
+  raw.missingScanError = ''
+  raw.missingScanErrors = []
+  raw.missingByPath = {}
+
+  try {
+    const result = await scanFn(dir, checks)
+    const stillCurrent =
+      raw.folderPath === dir &&
+      raw.missingScanSeq === mySeq &&
+      raw.missingFilterEnabled &&
+      sameMissingChecks(raw.missingChecks, checks)
+    if (!stillCurrent) return
+
+    raw.missingByPath = Object.fromEntries(result.songs.map((song) => [song.path, song.missing]))
+    raw.missingScanErrors = result.errors
+    raw.missingScanState = 'done'
+  } catch (error) {
+    const stillCurrent =
+      raw.folderPath === dir &&
+      raw.missingScanSeq === mySeq &&
+      raw.missingFilterEnabled &&
+      sameMissingChecks(raw.missingChecks, checks)
+    if (!stillCurrent) return
+
+    raw.missingScanState = 'error'
+    raw.missingScanError = missingScanErrorMessage(error)
+  }
+}
+
+/** 打开查漏面板：首次打开默认五维，并立即扫描。 */
+export function openMissingFilter(
+  scanFn: (dir: string, checks: MissingField[]) => Promise<MissingScanResult> = defaultScanMissing,
+): Promise<void> {
+  if (raw.folderPath === null) return Promise.resolve()
+  if (raw.missingChecks.length === 0) raw.missingChecks = [...MISSING_FIELDS]
+  raw.missingFilterEnabled = true
+  return scanMissing(scanFn)
+}
+
+/** 修改查漏维度；全不选等同关闭，其余选择立即触发最新扫描。 */
+export function setMissingChecks(
+  checks: MissingField[],
+  scanFn: (dir: string, checks: MissingField[]) => Promise<MissingScanResult> = defaultScanMissing,
+): Promise<void> {
+  raw.missingChecks = normalizeMissingChecks(checks)
+  raw.missingScanSeq++
+  if (raw.missingChecks.length === 0) {
+    raw.missingFilterEnabled = false
+    clearMissingResults()
+    return Promise.resolve()
+  }
+  raw.missingFilterEnabled = true
+  return scanMissing(scanFn)
+}
+
+/** 关闭查漏，只清查漏派生状态，保留当前单曲编辑态。 */
+export function closeMissingFilter(): void {
+  raw.missingFilterEnabled = false
+  raw.missingScanSeq++
+  clearMissingResults()
+}
 
 /**
  * 打开一首歌：`open_song` 成功 → `current = original = song`（快照独立）、readonly=false；

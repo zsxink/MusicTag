@@ -4,7 +4,7 @@
 // model.rs）：pick_folder / list_songs / open_song / save_song。实现 = `invokeCommand` 透传，
 // 组件与 store 一律经此层发 IPC（store 动作的 loader 注入 api/songs.ts 封装）。
 import { invokeCommand } from './client'
-import type { CoverInput, Song, SongSummary } from './types'
+import type { CoverInput, MissingField, MissingScanResult, Song, SongSummary } from './types'
 
 /** 打开原生文件夹选择器。取消返回 null，否则返回目录绝对路径。 */
 export function pickFolder(): Promise<string | null> {
@@ -24,6 +24,11 @@ export function saveLastDir(dir: string): Promise<void> {
 /** 深度遍历 `dir` 收集全部 FLAC/MP3，返回只读列表项。 */
 export function listSongs(dir: string): Promise<SongSummary[]> {
   return invokeCommand<SongSummary[]>('list_songs', { dir })
+}
+
+/** 按选中维度只读扫描目录，返回命中项与单文件错误。 */
+export function scanMissing(dir: string, checks: MissingField[]): Promise<MissingScanResult> {
+  return invokeCommand<MissingScanResult>('scan_missing', { dir, checks })
 }
 
 /** 读取单曲完整标签（选中歌曲即调；坏标签 → reject，前端只读）。 */

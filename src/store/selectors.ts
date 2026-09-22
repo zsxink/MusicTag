@@ -36,7 +36,13 @@ export function artistText(sum: SongSummary): string {
  *  computed 从 songStore 派生；模板用解包后的数组（勿写 `.value`，bug #27 回归）。 */
 export const filteredSongs = computed<SongSummary[]>(() => {
   const q = songStore.searchQuery.trim().toLowerCase()
-  const sorted = [...songStore.songs].sort((a, b) =>
+  const source =
+    songStore.missingFilterEnabled &&
+    songStore.missingScanState !== 'scanning' &&
+    songStore.missingScanState !== 'error'
+      ? songStore.songs.filter((song) => songStore.missingByPath[song.path] !== undefined)
+      : songStore.songs
+  const sorted = [...source].sort((a, b) =>
     fileName(a.path).localeCompare(fileName(b.path)),
   )
   if (q === '') return sorted

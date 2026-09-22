@@ -8,7 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
 
-import type { CoverInput, Song } from './types'
+import type { CoverInput, MissingScanResult, Song } from './types'
 import {
   getLastDir,
   listSongs,
@@ -19,6 +19,7 @@ import {
   renameSong,
   saveLastDir,
   saveSong,
+  scanMissing,
 } from './songs'
 
 const makeSong = (over: Partial<Song> = {}): Song => ({
@@ -128,5 +129,19 @@ describe('api/songs.ts — 类型化 command 封装（命令名/参数逐字对�
   it('renameSong：改名被拒（撞名）→ reject（Rust「目标已存在」中文原因透传）', async () => {
     mockInvoke.mockRejectedValue(new Error('目标已存在'))
     await expect(renameSong('/a/old.flac', '新歌.mp3')).rejects.toThrow('目标已存在')
+  })
+
+  it('scanMissing：透传 scan_missing + { dir, checks } 和结果', async () => {
+    const result: MissingScanResult = {
+      songs: [{ path: '/music/a.flac', missing: ['title', 'cover'] }],
+      errors: [],
+    }
+    mockInvoke.mockResolvedValue(result)
+
+    await expect(scanMissing('/music', ['cover', 'title'])).resolves.toEqual(result)
+    expect(mockInvoke).toHaveBeenCalledWith('scan_missing', {
+      dir: '/music',
+      checks: ['cover', 'title'],
+    })
   })
 })

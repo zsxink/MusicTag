@@ -2,11 +2,21 @@
 // 左栏（v1-folder-list）：顶部「打开文件夹」按钮 + 搜索框 + 展平列表。
 // 数据流：invoke('pick_folder') → Rust 原生选择器 → None 无视 / Some(dir)
 //   → store.folderPath = dir → invoke('list_songs', { dir }) → songs 整体替换、selectedPath 重置。
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 
 import { getLastDir, listSongs, pickFolder } from '../api/songs'
+import type { MissingField } from '../api/types'
 import { filteredSongs } from '../store/selectors'
-import { initLastDir, requestFolder, songStore } from '../store/song'
+import {
+  closeMissingFilter,
+  initLastDir,
+  MISSING_FIELDS,
+  openMissingFilter,
+  requestFolder,
+  scanMissing,
+  setMissingChecks,
+  songStore,
+} from '../store/song'
 import SongRow from './SongRow.vue'
 
 /** 打开文件夹：选择 + 遍历 + 整体替换列表。
@@ -24,6 +34,50 @@ function onKeydown(e: KeyboardEvent) {
     openFolder()
   }
 }
+
+const missingLabels: Record<MissingField, string> = {
+  title: '歌名',
+  artist: '歌手',
+  album: '专辑',
+  cover: '封面',
+  lyrics: '歌词',
+}
+
+function isMissingChecked(field: MissingField): boolean {
+  return songStore.missingChecks.includes(field)
+}
+
+function toggleMissingField(field: MissingField, event: Event): void {
+  const checked = (event.target as HTMLInputElement).checked
+  const next = songStore.missingChecks.filter((item) => item !== field)
+  if (checked) next.push(field)
+  void setMissingChecks(next)
+}
+
+function retryMissingScan(): void {
+  void scanMissing()
+}
+
+const missingEmptyState = computed(() => {
+  if (
+    !songStore.missingFilterEnabled ||
+    songStore.missingScanState !== 'done' ||
+    songStore.searchQuery.trim() !== ''
+  ) {
+    return null
+  }
+  if (Object.keys(songStore.missingByPath).length > 0) return null
+  if (songStore.missingScanErrors.length > 0) {
+    return {
+      title: '扫描结果不完整',
+      description: '部分歌曲读取失败，请查看上方提示后重试。',
+    }
+  }
+  return {
+    title: '没有缺失所选字段的歌曲',
+    description: '当前文件夹没有缺少所选字段的歌曲',
+  }
+})
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
@@ -64,6 +118,39 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         type="text"
         placeholder="搜索歌名 / 作者"
       />
+      <button
+        class="missing-filter-btn"
+        type="button"
+        :disabled="songStore.folderPath === null"
+        @click="openMissingFilter()"
+      >
+        筛选缺失
+      </button>
+    </div>
+
+    <div v-if="songStore.missingFilterEnabled" class="missing-panel" data-testid="missing-panel">
+      <div class="missing-panel-head">
+        <span>缺失字段</span>
+        <button class="missing-close-btn" type="button" @click="closeMissingFilter">关闭</button>
+      </div>
+      <label v-for="field in MISSING_FIELDS" :key="field" class="missing-check">
+        <input
+          type="checkbox"
+          :checked="isMissingChecked(field)"
+          @change="toggleMissingField(field, $event)"
+        />
+        <span>{{ missingLabels[field] }}</span>
+      </label>
+      <p v-if="songStore.missingScanState === 'scanning'" class="missing-status">
+        正在扫描缺失字段…
+      </p>
+      <p v-else-if="songStore.missingScanState === 'error'" class="missing-status missing-error">
+        扫描失败：{{ songStore.missingScanError }}
+        <button class="missing-retry-btn" type="button" @click="retryMissingScan">重试</button>
+      </p>
+      <p v-if="songStore.missingScanState === 'done' && songStore.missingScanErrors.length > 0" class="missing-status">
+        {{ songStore.missingScanErrors.length }} 首歌曲读取失败，已保留其他结果
+      </p>
     </div>
 
     <!-- 空态：未打开文件夹 -->
@@ -81,20 +168,33 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     >
       <span class="empty-icon" aria-hidden="true">🎵</span>
       <p class="empty-title">
-        {{ songStore.songs.length === 0 ? '文件夹中没有音乐' : '无匹配结果' }}
+        {{
+          missingEmptyState?.title
+            ? missingEmptyState.title
+            : songStore.songs.length === 0
+              ? '文件夹中没有音乐'
+              : '无匹配结果'
+        }}
       </p>
       <p class="empty-desc">
         {{
-          songStore.songs.length === 0
-            ? '当前文件夹没有 .flac / .mp3 文件'
-            : '换个关键词试试'
+          missingEmptyState?.description
+            ? missingEmptyState.description
+            : songStore.songs.length === 0
+              ? '当前文件夹没有 .flac / .mp3 文件'
+              : '换个关键词试试'
         }}
       </p>
     </div>
 
     <!-- 列表 -->
     <ul v-else class="list">
-      <SongRow v-for="song in filteredSongs" :key="song.path" :song="song" />
+      <SongRow
+        v-for="song in filteredSongs"
+        :key="song.path"
+        :song="song"
+        :missing="songStore.missingByPath[song.path]"
+      />
     </ul>
   </aside>
 </template>
@@ -134,6 +234,82 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 .open-btn:active {
   transform: translateY(1px);
+}
+
+.missing-filter-btn,
+.missing-close-btn,
+.missing-retry-btn {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.missing-filter-btn:hover:not(:disabled),
+.missing-close-btn:hover,
+.missing-retry-btn:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.missing-filter-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.missing-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 10px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.missing-panel-head,
+.missing-status {
+  grid-column: 1 / -1;
+}
+
+.missing-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.missing-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.missing-check input {
+  accent-color: var(--accent);
+}
+
+.missing-status {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.missing-error {
+  color: var(--danger, #e57373);
+}
+
+.missing-retry-btn {
+  margin-left: 5px;
+  padding: 3px 6px;
+  color: inherit;
 }
 
 .search-input {
