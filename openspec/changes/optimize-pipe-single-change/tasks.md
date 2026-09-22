@@ -68,5 +68,5 @@
 **依赖：** 任务组 7。先用端到端证据确认最终行为，再同步所有入口文档并执行 infra 全量门禁。
 
 - [ ] 8.1 更新 pipe skill、AGENTS 入口、角色说明和 workflow 注释以匹配新 DAG/权限/恢复语义，并验证 prompt/skill 漂移审计通过
-- [ ] 8.2 运行 `node --check`、`bash -n`、`node --test .agents/tools/pipe-core/test/*.test.js tests/workflow-core/*.test.cjs`、`node .agents/tools/pipe-core/run.js --self-check`，验证全部静态与回归门禁通过
-- [ ] 8.3 运行 `npx openspec validate optimize-pipe-single-change --strict --no-interactive` 并逐项核对 specs scenarios、tasks 完成状态和 Issue #127 九条验收标准均有证据
+- [x] 8.2 运行 `node --check`、`bash -n`、`node --test .agents/tools/pipe-core/test/*.test.js tests/workflow-core/*.test.cjs`、`node .agents/tools/pipe-core/run.js --self-check`，验证全部静态与回归门禁通过
+- [x] 8.3 运行 `npx openspec validate optimize-pipe-single-change --strict --no-interactive` 并逐项核对 specs scenarios、tasks 完成状态和 Issue #127 九条验收标准均有证据
