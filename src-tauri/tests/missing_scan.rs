@@ -45,6 +45,33 @@ fn missing_field_contract_has_fixed_wire_names_and_order() {
 }
 
 #[test]
+fn duplicate_checks_are_deduplicated_in_fixed_business_order() {
+    let tmp = TempDir::new().unwrap();
+    write_tagged_flac(tmp.path(), "duplicate-checks.flac", "  ", "Artist");
+
+    let result = scan(
+        &tmp,
+        &[
+            MissingField::Lyrics,
+            MissingField::Title,
+            MissingField::Lyrics,
+            MissingField::Cover,
+            MissingField::Album,
+            MissingField::Title,
+        ],
+    );
+    assert_eq!(
+        result.songs[0].missing,
+        vec![
+            MissingField::Title,
+            MissingField::Album,
+            MissingField::Cover,
+            MissingField::Lyrics,
+        ]
+    );
+}
+
+#[test]
 fn scans_text_cover_and_lyrics_dimensions_with_or_semantics() {
     let tmp = TempDir::new().unwrap();
     write_tagged_flac(tmp.path(), "missing.flac", "  ", "Artist");
@@ -90,6 +117,86 @@ fn scans_text_cover_and_lyrics_dimensions_with_or_semantics() {
 
     let only_artist = scan(&tmp, &[MissingField::Artist]);
     assert!(only_artist.songs.is_empty(), "未选维度不得影响结果");
+}
+
+#[test]
+fn cover_and_lyrics_selection_is_an_or_union_for_mixed_files() {
+    let tmp = TempDir::new().unwrap();
+
+    write_tagged_flac(tmp.path(), "cover-only.flac", "Title", "Artist");
+    add_tags(
+        &tmp.path().join("cover-only.flac"),
+        None,
+        Some(tiny_png_bytes()),
+    );
+
+    write_tagged_flac(tmp.path(), "lyrics-only.flac", "Title", "Artist");
+    add_tags(
+        &tmp.path().join("lyrics-only.flac"),
+        Some("embedded lyrics"),
+        None,
+    );
+
+    let result = scan(&tmp, &[MissingField::Cover, MissingField::Lyrics]);
+    assert_eq!(result.errors, Vec::new());
+    assert_eq!(result.songs.len(), 2);
+    assert_eq!(
+        result
+            .songs
+            .iter()
+            .find(|song| song.path.ends_with("cover-only.flac"))
+            .unwrap()
+            .missing,
+        vec![MissingField::Lyrics]
+    );
+    assert_eq!(
+        result
+            .songs
+            .iter()
+            .find(|song| song.path.ends_with("lyrics-only.flac"))
+            .unwrap()
+            .missing,
+        vec![MissingField::Cover]
+    );
+}
+
+#[test]
+fn text_dimensions_treat_each_trimmed_blank_value_as_missing() {
+    let tmp = TempDir::new().unwrap();
+    write_tagged_flac(tmp.path(), "blank-title.flac", "  ", "Artist");
+    write_tagged_flac(tmp.path(), "blank-artist.flac", "Title", "\t");
+    write_tagged_flac(tmp.path(), "blank-album.flac", "Title", "Artist");
+
+    let title_result = scan(&tmp, &[MissingField::Title]);
+    assert_eq!(
+        title_result
+            .songs
+            .iter()
+            .find(|song| song.path.ends_with("blank-title.flac"))
+            .unwrap()
+            .missing,
+        vec![MissingField::Title]
+    );
+
+    let artist_result = scan(&tmp, &[MissingField::Artist]);
+    assert_eq!(
+        artist_result
+            .songs
+            .iter()
+            .find(|song| song.path.ends_with("blank-artist.flac"))
+            .unwrap()
+            .missing,
+        vec![MissingField::Artist]
+    );
+
+    let album_result = scan(&tmp, &[MissingField::Album]);
+    assert!(album_result.songs.iter().all(|song| {
+        song.missing == vec![MissingField::Album]
+            && (song.path.ends_with("blank-title.flac")
+                || song.path.ends_with("blank-artist.flac")
+                || song.path.ends_with("blank-album.flac"))
+    }));
+    assert_eq!(album_result.songs.len(), 3);
 }
 
 #[test]

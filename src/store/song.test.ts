@@ -180,6 +180,65 @@ describe('songStore — 缺失筛选状态与扫描竞态', () => {
     expect(songStore.current?.title).toBe('正在编辑')
     expect(songStore.original?.title).toBe('歌名')
   })
+
+  it('命令级失败后重试可恢复结果，不污染当前编辑态', async () => {
+    songStore.current = { ...makeSong({ title: '正在编辑' }) }
+    songStore.original = { ...makeSong() }
+    let attempts = 0
+    const scan = vi.fn(async () => {
+      attempts++
+      if (attempts === 1) throw new Error('临时不可用')
+      return {
+        songs: [{ path: '/music/a.flac', missing: ['lyrics'] }],
+        errors: [],
+      }
+    })
+
+    await openMissingFilter(scan)
+    expect(songStore.missingScanState).toBe('error')
+    await scanMissing(scan)
+
+    expect(attempts).toBe(2)
+    expect(songStore.missingScanState).toBe('done')
+    expect(songStore.missingByPath).toEqual({ '/music/a.flac': ['lyrics'] })
+    expect(songStore.current?.title).toBe('正在编辑')
+    expect(songStore.original?.title).toBe('歌名')
+  })
+
+  it('同一目录重选维度时，旧扫描结果不得覆盖最新条件', async () => {
+    let resolveOld!: (result: MissingScanResult) => void
+    const oldScan = vi.fn(() => new Promise<MissingScanResult>((resolve) => { resolveOld = resolve }))
+    const newScan = vi.fn(async () => ({
+      songs: [{ path: '/music/b.flac', missing: ['cover'] }],
+      errors: [],
+    }))
+
+    void openMissingFilter(oldScan)
+    await Promise.resolve()
+    await setMissingChecks(['cover'], newScan)
+    resolveOld({ songs: [{ path: '/music/a.flac', missing: ['title'] }], errors: [] })
+    await Promise.resolve()
+
+    expect(songStore.missingChecks).toEqual(['cover'])
+    expect(songStore.missingByPath).toEqual({ '/music/b.flac': ['cover'] })
+  })
+
+  it('真实换目录会复位查漏状态，旧目录响应不得串入新目录', async () => {
+    let resolveOld!: (result: MissingScanResult) => void
+    const oldScan = vi.fn(() => new Promise<MissingScanResult>((resolve) => { resolveOld = resolve }))
+
+    void openMissingFilter(oldScan)
+    await Promise.resolve()
+    await activateFolder('/new', async () => [s('/new/new.flac', 'New', 'Artist')])
+    resolveOld({ songs: [{ path: '/music/a.flac', missing: ['title'] }], errors: [] })
+    await Promise.resolve()
+
+    expect(songStore.folderPath).toBe('/new')
+    expect(songStore.songs).toEqual([s('/new/new.flac', 'New', 'Artist')])
+    expect(songStore.missingFilterEnabled).toBe(false)
+    expect(songStore.missingByPath).toEqual({})
+    expect(songStore.missingScanState).toBe('idle')
+  })
 })
 
 describe('songStore — v1-song-read 编辑状态模型', () => {
