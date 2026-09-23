@@ -88,14 +88,14 @@ test('claude: parseOutput 支持真实 structured_output 字段（实测字段�
   assert.deepEqual(parsed.structured, { ready: true, branch: 'workflow-core', issues: [] });
 });
 
-test('claude: runAgent 成功解析结构化输出', () => {
-  const res = claude.runAgent({ prompt: 'P', schema: SCHEMA }, { claudeBin: FAKE_CLAUDE });
+test('claude: runAgent 成功解析结构化输出', async () => {
+  const res = await claude.runAgent({ prompt: 'P', schema: SCHEMA }, { claudeBin: FAKE_CLAUDE });
   assert.equal(res.ok, true);
   assert.deepEqual(res.structured, { ready: true, branch: 'demo', issues: [] });
 });
 
-test('claude: runAgent 非零退出上报失败', () => {
-  const res = claude.runAgent({ prompt: 'P', schema: SCHEMA }, { claudeBin: FAKE_CLAUDE, env: { ...process.env, FAKE_EXIT: '1' } });
+test('claude: runAgent 非零退出上报失败', async () => {
+  const res = await claude.runAgent({ prompt: 'P', schema: SCHEMA }, { claudeBin: FAKE_CLAUDE, env: { ...process.env, FAKE_EXIT: '1' } });
   assert.equal(res.ok, false);
   assert.equal(res.exitCode, 1);
 });
@@ -185,8 +185,28 @@ test('codex: result 文件非 JSON → 显式失败', () => {
   fs.rmSync(badJson, { force: true });
 });
 
-test('claude: 二进制缺失（spawn 失败）→ 显式上报失败，不崩溃', () => {
-  const res = claude.runAgent({ prompt: 'P', schema: SCHEMA }, { claudeBin: '/nonexistent/claude-bin' });
+test('claude: 二进制缺失（spawn 失败）→ 显式上报失败，不崩溃', async () => {
+  const res = await claude.runAgent({ prompt: 'P', schema: SCHEMA }, { claudeBin: '/nonexistent/claude-bin' });
   assert.equal(res.ok, false);
   assert.equal(res.exitCode, null);
+});
+
+test('claude: 长任务超时 → kind=timeout 显式上报（异步 spawn 不假性挂起）', async () => {
+  const res = await claude.runAgent({ prompt: 'P', schema: SCHEMA }, {
+    claudeBin: FAKE_CLAUDE,
+    env: { ...process.env, FAKE_DELAY_MS: '2000' },
+    timeoutMs: 100,
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.error.kind, 'timeout');
+  assert.equal(res.error.retryable, true);
+});
+
+test('claude: 异步 runAgent 成功路径延迟输出仍正确解析', async () => {
+  const res = await claude.runAgent({ prompt: 'P', schema: SCHEMA }, {
+    claudeBin: FAKE_CLAUDE,
+    env: { ...process.env, FAKE_DELAY_MS: '100' },
+  });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.structured, { ready: true, branch: 'demo', issues: [] });
 });
