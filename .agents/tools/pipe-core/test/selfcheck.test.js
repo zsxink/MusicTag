@@ -14,6 +14,13 @@ test('self-check: 7 角色常量完整', () => {
   ]);
 });
 
+test('self-check: 内置 Agent 无 git_write 且写节点有 writeScopes', () => {
+  const res = selfcheck.run({ repoRoot: __dirname + '/../../..' });
+  assert.equal(res.ok, true, `self-check 应通过，实际失败: ${res.errors.join('; ')}`);
+  assert.ok(res.checks.agentGitWriteForbidden);
+  assert.ok(res.checks.scopedWriterNodes);
+});
+
 test('self-check: 驱动缺失 → fail-closed 返回错误', () => {
   // 用一个假的 repoRoot（无 .claude/workflows）也不影响 driver 契约检查；
   // 构造临时目录遮挡 driver 加载路径会破坏其余检查，这里只验证错误数组类型契约。

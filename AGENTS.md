@@ -28,7 +28,9 @@ MusicTag 是一个跨平台桌面应用：**一次一首**地给本地裸 FLAC/M
 
 ## pipe 流水线入口（本文件核心）
 
-任何新功能 / 行为修改 / Bug 修复，**先走 pipe 流水线**，由模型无关编排核心 `.agents/tools/pipe-core/` 驱动多 Agent（7 角色）完成「前置校验 → 架构 → 开发 → 测试 → CR → 最终验证 → 集成」。
+任何新功能 / 行为修改 / Bug 修复，**先走 pipe 流水线**，由模型无关编排核心 `.agents/tools/pipe-core/` 驱动多 Agent（7 角色）完成「bootstrap → 架构 → spec-gate → 开发 → 测试 → CR → 最终验证 → 集成」。
+
+**节点分两类**：`bootstrap`、`spec-gate`、`verify`、`integrate` 为 **deterministic 节点**，由 core 直接执行（不调用模型）；`architect`、`dev`、`tester`、`cr` 为 Agent 节点，才走 driver。git 提交由 core 统一完成，Agent 不写 `.git`。
 
 **触发方式**（在会话说「跑 pipe <change>」即识别本入口）：
 
@@ -42,13 +44,17 @@ node .agents/tools/pipe-core/run.js --epic <epic> --driver codex
 # 断点续跑（从失败/挂起节点继续；跨 driver 只依赖落地校验）
 node .agents/tools/pipe-core/run.js <change> --driver codex --resume
 
+# 显式放行超预算节点（保留历史并重跑一次；须与 --resume 同用）
+node .agents/tools/pipe-core/run.js <change> --driver codex --resume --force-retry <node>
+
 # 静态自检（fail-closed）
 node .agents/tools/pipe-core/run.js --self-check
 ```
 
 - Claude Code / Codex / OpenCode 分别使用 `--driver claude|codex|opencode`，共享同一 core、DAG 与 state；OpenCode 由 NDJSON adapter 提取最终 assistant JSON。
 - 角色文案单一来源：`.agents/tools/pipe-core/roles/`，角色只声明产品无关 capability；宿主无法满足最小权限时 fail-closed。
-- 节点状态落盘 `.agents/runs/<change>/state.json`（gitignore）；epic 并行状态 `.agents/runs/<epic>/epic-state.json`。
+- 节点状态落盘 `.agents/runs/<change>/state.json`（gitignore），按 attempt 追加历史、原子写盘；epic 并行状态 `.agents/runs/<epic>/epic-state.json`。
+- **git 提交由 core 统一完成**：Agent 角色不写 `.git`（无 git_write 能力），core 在工作区快照审计通过后按授权路径确定性 add/commit，commit SHA 落盘为落地证据。
 - 状态记录 `driverApiVersion`、`driverVersion`、权限降级；显式跨 driver resume 不依赖旧 sessionId。
 - 涉及用户决策（CR 三轮不过 / 验证反复不过 / 需求歧义）→ 退出 `suspended`（exit 3），交主会话决策后 `--resume` 续跑，流水线内不自动拍板。
 
@@ -56,8 +62,8 @@ node .agents/tools/pipe-core/run.js --self-check
 
 - **Issue 驱动**：任何变更动手前必须先建 GitHub Issue 作为锚点；PR 描述引用 `Closes #<issue>`。
 - **每变更一分支**：分支名 = change 名（kebab-case），从 main 开；不在 main 上直接开发；merge PR 是回到 main 的唯一方式。
-- 开发期间增量提交 `feat(<change>): <任务>`，进度可追溯、崩溃可恢复。
-- 归档在提交 PR 前由 `node .agents/commands/archive-change.js <change>` 执行；`/opsx:archive` 仅是入口层命令。
+- **提交由 core 统一完成**：每个 dev/tester 节点成功、工作区审计通过后，core 以确定性消息 `feat(<change>): <任务>` 提交且只提交该节点授权路径；Agent 不执行 git add/commit。进度可追溯、崩溃可恢复。
+- 归档在提交 PR 前由核心 integrate checkpoint 执行 `node .agents/commands/archive-change.js <change>`；`/opsx:archive` 仅是入口层命令。归档 commit 与实现同进 PR，合并后主规格即最新。
 
 ## 常用命令
 
@@ -67,7 +73,8 @@ npm run build           # 前端构建
 npm run test            # 前端测试
 cargo check --manifest-path src-tauri/Cargo.toml   # 后端类型检查
 cargo test --manifest-path src-tauri/Cargo.toml    # 后端测试
-node --test .agents/tools/pipe-core/test/*.test.js   # 编排核心单测（glob，目录形式在 Node ≥22 会失败）
+node --test ".agents/tools/pipe-core/test/*.test.js" "tests/workflow-core/*.test.cjs"  # 编排核心 + workflow-core 回归（glob 形式）
+node .agents/tools/pipe-core/run.js --self-check   # 静态自检（角色/节点定义/driver 契约/脚本语法），fail-closed
 npx openspec validate <change> --strict --no-interactive
 ```
 

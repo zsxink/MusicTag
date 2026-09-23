@@ -8,7 +8,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execSync } = require('node:child_process');
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 // 仓库根判定：① PIPE_CORE_REPO_ROOT（主编排器派生 worktree 子进程时注入主仓库绝对路径）
 // → ② git rev-parse --show-toplevel（普通直跑）→ ③ 报错退出。
@@ -43,6 +43,8 @@ function newState(change, driver, driverApiVersion = null, driverVersion = null)
     driverApiVersion,
     driverVersion,
     permissionDegraded: [],
+    summary: {},
+    humanInterventions: [],
     startedAt: now,
     updatedAt: now,
     nodes: {},
@@ -53,17 +55,71 @@ function loadState(change) {
   const file = stateFile(change);
   if (!fs.existsSync(file)) return null;
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  if (raw.schemaVersion === 1) {
-    // P1–P5 状态可安全迁移：旧节点不含 runtime 元数据，正确性仍由 commit 落地校验保证。
+  if (raw.schemaVersion === 1 || raw.schemaVersion === 2) {
+    const fromVersion = raw.schemaVersion;
+    // v1/v2 兼容迁移：保留未知字段与累计 attempts，把旧最终状态合成为
+    // 一条 legacy history 事件，后续 attempt 只追加不覆盖。
     raw.schemaVersion = SCHEMA_VERSION;
     raw.driverApiVersion = raw.driverApiVersion || null;
     raw.driverVersion = raw.driverVersion || null;
     raw.permissionDegraded = raw.permissionDegraded || [];
+    raw.summary = raw.summary || {};
+    raw.humanInterventions = raw.humanInterventions || [];
+    raw.nodes = raw.nodes || {};
+    for (const [id, node] of Object.entries(raw.nodes)) {
+      node.history = Array.isArray(node.history) ? node.history : [{
+        legacy: true,
+        migratedFrom: fromVersion,
+        node: id,
+        attempt: node.attempts || 0,
+        status: node.status || 'unknown',
+        error: node.error || null,
+        commitSha: node.commitSha || null,
+      }];
+      node.checkpoints = node.checkpoints || {};
+    }
+    saveState(change, raw);
   }
   if (raw.schemaVersion !== SCHEMA_VERSION) {
     throw new Error(`state.json schemaVersion 不兼容：${raw.schemaVersion} !== ${SCHEMA_VERSION}`);
   }
   return raw;
+}
+
+function ensureNode(stateObj, nodeId) {
+  stateObj.nodes = stateObj.nodes || {};
+  stateObj.nodes[nodeId] = stateObj.nodes[nodeId] || { status: 'pending', attempts: 0 };
+  const node = stateObj.nodes[nodeId];
+  node.history = Array.isArray(node.history) ? node.history : [];
+  node.checkpoints = node.checkpoints || {};
+  return node;
+}
+
+function appendAttempt(stateObj, nodeId, attempt) {
+  const node = ensureNode(stateObj, nodeId);
+  const value = { node: nodeId, recordedAt: new Date().toISOString(), ...attempt };
+  node.history.push(value);
+  if (Number.isInteger(attempt.attempt)) node.attempts = Math.max(node.attempts || 0, attempt.attempt);
+  return value;
+}
+
+function finishAttempt(stateObj, nodeId, attemptNumber, values) {
+  const node = ensureNode(stateObj, nodeId);
+  const attempt = [...node.history].reverse().find((item) => item.attempt === attemptNumber && !item.legacy);
+  if (!attempt) return appendAttempt(stateObj, nodeId, { attempt: attemptNumber, ...values });
+  Object.assign(attempt, values, { recordedAt: attempt.recordedAt || new Date().toISOString() });
+  return attempt;
+}
+
+function setCheckpoint(stateObj, nodeId, checkpointId, value) {
+  const node = ensureNode(stateObj, nodeId);
+  node.checkpoints[checkpointId] = { updatedAt: new Date().toISOString(), ...value };
+  return node.checkpoints[checkpointId];
+}
+
+function setSummary(stateObj, summary) {
+  stateObj.summary = { ...(stateObj.summary || {}), ...summary };
+  return stateObj.summary;
 }
 
 // 原子写盘：先写同目录 .tmp 再 rename。
@@ -179,4 +235,9 @@ module.exports = {
   commitLanded,
   validateLandings,
   markDirty,
+  appendAttempt,
+  finishAttempt,
+  setCheckpoint,
+  setSummary,
+  ensureNode,
 };

@@ -25,7 +25,7 @@ function tempRepo(prefix) {
   return repo;
 }
 
-test('contract boundary: an unknown DriverResult error kind is canonicalized', () => {
+test('contract boundary: an unclassifiable error becomes unknown (RS11 Leader decision, not blind agent retry)', () => {
   const contract = require('../../.agents/tools/pipe-core/drivers/contract.js');
   const result = contract.normalizeResult({
     ok: false,
@@ -33,8 +33,8 @@ test('contract boundary: an unknown DriverResult error kind is canonicalized', (
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.error.kind, 'agent', '核心不得把非标准 kind 传播到决断链');
-  assert.equal(result.error.retryable, true);
+  assert.equal(result.error.kind, 'unknown', '无信号错误应归 unknown，交由 Leader 决断（spec RS11）而不是盲目 agent 重试');
+  assert.equal(result.error.retryable, false, 'unknown 不可自动盲目重试——须经 Leader 技术判断');
 });
 
 test('core boundary: reroute repair output must pass DEV_SCHEMA before re-review', async () => {
@@ -161,14 +161,14 @@ test('state boundary: a new node persists pending before ready/running', async (
   assert.deepEqual(snapshots.slice(1, 3), ['ready', 'running']);
 });
 
-test('Claude driver boundary: exit 0 with damaged JSON is protocol failure', () => {
+test('Claude driver boundary: exit 0 with damaged JSON is protocol failure', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-core-claude-protocol-'));
   const fake = path.join(dir, 'fake-claude.js');
   fs.writeFileSync(fake, '#!/usr/bin/env node\nprocess.stdout.write("not-json");\n');
   fs.chmodSync(fake, 0o755);
   try {
     const claude = require('../../.agents/tools/pipe-core/drivers/claude.js');
-    const result = claude.runAgent({ id: 'n1', role: 'tester', prompt: 'P' }, { claudeBin: fake });
+    const result = await claude.runAgent({ id: 'n1', role: 'tester', prompt: 'P' }, { claudeBin: fake });
     assert.equal(result.ok, false);
     assert.equal(result.error.kind, 'protocol');
   } finally {

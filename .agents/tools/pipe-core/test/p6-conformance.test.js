@@ -11,6 +11,8 @@ const contract = require('../drivers/contract.js');
 
 const FAKE = path.join(__dirname, 'fixtures', 'fake-opencode.js');
 const FAKE_PIPE = path.join(__dirname, 'fixtures', 'fake-pipe-opencode.js');
+const { seedWorkflows } = require('./seed.js');
+const { fakeCommands } = require('./fixtures/fake-pipe-commands.js');
 const SCHEMA = { type: 'object', properties: { ready: { type: 'boolean' } }, required: ['ready'] };
 
 test('conformance: OpenCode success parses final assistant JSON and preserves worktree cwd', () => {
@@ -69,26 +71,31 @@ test('OpenCode 将 sandbox/permission/capability policy 传入 runtime 环境', 
 
 test('fake E2E: OpenCode adapter drives the complete infra pipeline in its worktree cwd', () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-opencode-e2e-'));
+  const fake = fakeCommands({ verify: true, gitRemote: true, ghFlat: true });
   try {
     execFileSync('git', ['init', '-q'], { cwd: repo });
     execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repo });
     execFileSync('git', ['config', 'user.name', 'test'], { cwd: repo });
+    seedWorkflows(repo);
     fs.writeFileSync(path.join(repo, 'README.md'), 'e2e');
     execFileSync('git', ['add', '.'], { cwd: repo });
     execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
     const result = execFileSync(process.execPath, [path.join(__dirname, '..', 'run.js'), 'demo', '--driver', 'opencode'], {
-      cwd: repo, encoding: 'utf8', env: { ...process.env, PIPE_CORE_REPO_ROOT: repo, PIPE_OPENCODE_BIN: FAKE_PIPE, PIPE_OPENCODE_READ_ONLY_POLICY: 'enforced' },
+      cwd: repo, encoding: 'utf8', env: { ...process.env, ...fake.env(), PIPE_CORE_REPO_ROOT: repo, PIPE_OPENCODE_BIN: FAKE_PIPE, PIPE_OPENCODE_READ_ONLY_POLICY: 'enforced' },
     });
     assert.match(result, /流水线成功/);
     const state = JSON.parse(fs.readFileSync(path.join(repo, '.agents', 'runs', 'demo', 'state.json'), 'utf8'));
     assert.equal(state.driver, 'opencode');
     assert.equal(state.nodes.integrate.status, 'succeeded');
-  } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+  } finally {
+    fake.cleanup();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
 });
 
-test('state v2: driver metadata is persisted and v1 state migrates without session dependency', () => {
+test('state v3: driver metadata is persisted and v1/v2 states migrate without session dependency', () => {
   const state = require('../state.js');
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-state-v2-'));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-state-v3-'));
   const previous = process.env.PIPE_CORE_REPO_ROOT;
   try {
     execFileSync('git', ['init', '-q'], { cwd: repo });
@@ -99,14 +106,14 @@ test('state v2: driver metadata is persisted and v1 state migrates without sessi
     execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
     process.env.PIPE_CORE_REPO_ROOT = repo;
     const current = state.newState('demo', 'opencode', contract.API_VERSION, '1.0.0');
-    assert.equal(current.schemaVersion, 2);
+    assert.equal(current.schemaVersion, state.SCHEMA_VERSION);
     assert.equal(current.driverApiVersion, contract.API_VERSION);
     state.saveState('demo', current);
-    assert.equal(state.loadState('demo').schemaVersion, 2);
+    assert.equal(state.loadState('demo').schemaVersion, state.SCHEMA_VERSION);
     fs.mkdirSync(path.dirname(state.stateFile('legacy')), { recursive: true });
     fs.writeFileSync(state.stateFile('legacy'), JSON.stringify({ schemaVersion: 1, change: 'legacy', driver: 'claude', nodes: {} }));
     const migrated = state.loadState('legacy');
-    assert.equal(migrated.schemaVersion, 2);
+    assert.equal(migrated.schemaVersion, state.SCHEMA_VERSION);
     assert.deepEqual(migrated.permissionDegraded, []);
   } finally {
     if (previous === undefined) delete process.env.PIPE_CORE_REPO_ROOT;

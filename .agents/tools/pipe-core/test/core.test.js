@@ -71,6 +71,105 @@ test('core: DAG 按拓扑顺序执行全部节点', async () => {
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
+test('core: deterministic 与 agent 共用状态机且确定性节点零 driver 调用', async () => {
+  const repo = tmpRepo();
+  await withRoot(repo, async () => {
+    const change = 'hybrid';
+    const state = stateApi.newState(change, 'mock');
+    const driver = makeDriver({ architect: () => ({ ok: true, structured: { domain: 'infra' } }) });
+    const defs = [
+      { id: 'bootstrap', kind: 'deterministic', runner: 'bootstrap', schema: { type: 'object' }, dependsOn: [] },
+      { id: 'architect', kind: 'agent', role: 'architect', prompt: 'p', schema: { type: 'object' }, dependsOn: ['bootstrap'] },
+      { id: 'spec-gate', kind: 'deterministic', runner: 'spec-gate', schema: { type: 'object' }, dependsOn: ['architect'] },
+    ];
+    const deterministicCalls = [];
+    const res = await core.runPipeline({
+      change,
+      state,
+      defsFn: () => defs,
+      driver,
+      runners: {
+        bootstrap: async () => { deterministicCalls.push('bootstrap'); return { ok: true, structured: { ready: true } }; },
+        'spec-gate': async () => { deterministicCalls.push('spec-gate'); return { ok: true, structured: { ready: true } }; },
+      },
+    });
+    assert.equal(res.status, 'success');
+    assert.deepEqual(deterministicCalls, ['bootstrap', 'spec-gate']);
+    assert.deepEqual(driver.calls, ['architect']);
+    assert.equal(state.nodes.bootstrap.history[0].executor, 'deterministic');
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('core: Agent 无 git_write 时由 core 审计范围并创建唯一提交', async () => {
+  const repo = tmpRepo();
+  await withRoot(repo, async () => {
+    const state = stateApi.newState('scoped', 'mock');
+    const driver = {
+      runAgent() {
+        fs.mkdirSync(path.join(repo, 'allowed'), { recursive: true });
+        fs.writeFileSync(path.join(repo, 'allowed', 'result.txt'), 'ok');
+        return { ok: true, structured: { done: true } };
+      },
+    };
+    const def = {
+      id: 'dev', kind: 'agent', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [],
+      writeScopes: ['allowed/'], commitMessage: 'feat(scoped): dev', resultOk: (r) => r.done === true,
+    };
+    const res = await core.runPipeline({ change: 'scoped', state, defsFn: () => [def], driver, commitRoot: repo, getHead: () => execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim() });
+    assert.equal(res.status, 'success');
+    assert.match(execSync('git log -1 --pretty=%s', { cwd: repo, encoding: 'utf8' }), /feat\(scoped\): dev/);
+    assert.equal(state.nodes.dev.commitSha, execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim());
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('core: Agent 越权写入时拒绝提交并挂起', async () => {
+  const repo = tmpRepo();
+  await withRoot(repo, async () => {
+    const state = stateApi.newState('scope-fail', 'mock');
+    const driver = {
+      runAgent() {
+        fs.writeFileSync(path.join(repo, 'outside.txt'), 'bad');
+        return { ok: true, structured: { done: true } };
+      },
+    };
+    const def = {
+      id: 'dev', kind: 'agent', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [],
+      writeScopes: ['allowed/'], commitMessage: 'feat(scope-fail): dev', resultOk: (r) => r.done === true,
+    };
+    const before = execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim();
+    const res = await core.runPipeline({ change: 'scope-fail', state, defsFn: () => [def], driver, commitRoot: repo });
+    assert.equal(res.status, 'suspended');
+    assert.match(state.nodes.dev.error, /越权路径.*outside\.txt/);
+    assert.equal(execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim(), before);
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('core: Agent 不得修改启动前已脏的同路径', async () => {
+  const repo = tmpRepo();
+  fs.mkdirSync(path.join(repo, 'allowed'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'allowed', 'result.txt'), 'user');
+  await withRoot(repo, async () => {
+    const state = stateApi.newState('same-path', 'mock');
+    const driver = {
+      runAgent() {
+        fs.writeFileSync(path.join(repo, 'allowed', 'result.txt'), 'agent');
+        return { ok: true, structured: { done: true } };
+      },
+    };
+    const def = {
+      id: 'dev', kind: 'agent', role: 'tester', prompt: 'p', schema: { type: 'object' }, dependsOn: [],
+      writeScopes: ['allowed/'], commitMessage: 'feat(same-path): dev', resultOk: (r) => r.done === true,
+    };
+    const res = await core.runPipeline({ change: 'same-path', state, defsFn: () => [def], driver, commitRoot: repo });
+    assert.equal(res.status, 'suspended');
+    assert.match(state.nodes.dev.error, /启动前已有差异.*allowed\/result\.txt/);
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
 test('core: 失败节点 retry 后成功（attempts=2）', async () => {
   const repo = tmpRepo();
   await withRoot(repo, async () => {
@@ -78,7 +177,7 @@ test('core: 失败节点 retry 后成功（attempts=2）', async () => {
     const state = stateApi.newState(change, 'mock');
     const driver = makeDriver({
       n1: () => ({ ok: true, structured: { v: 1 } }),
-      n2: (a) => (a === 1 ? { ok: false, error: 'transient' } : { ok: true, structured: { v: 2 } }),
+      n2: (a) => (a === 1 ? { ok: false, error: { kind: 'agent', message: 'transient model hiccup' } } : { ok: true, structured: { v: 2 } }),
     });
     const defs = [node('n1', []), Object.assign(node('n2', ['n1']), { retry: { max: 2, intervalMs: 0 } })];
     const res = await core.runPipeline({ change, state, defsFn: () => defs, driver });
@@ -185,6 +284,51 @@ test('core: resume 集成——失败节点重跑、已通过节点复用（落�
 });
 
 // ---------- 失败路径与边界（除 happy-path 外强制审计） ----------
+
+test('core: --force-retry 跨 resume 放行闭环——已挂起节点被显式放行后成功', async () => {
+  const repo = tmpRepo();
+  await withRoot(repo, async () => {
+    const change = 'demo';
+    const state = stateApi.newState(change, 'mock');
+    let n1fails = true;
+    const driver = makeDriver({
+      // 无信号错误 → spec RS11 语义：unknown（不盲目重试）→ Leader 决断 escalate。
+      // 修复后 force-retry 显式放行 → attempt 2 成功。
+      n1: () => (n1fails ? { ok: false, error: 'unclassifiable structure failure' } : { ok: true, structured: { v: 1 } }),
+    });
+    const defs = [Object.assign(node('n1', []), { retry: { max: 0, intervalMs: 0 } })];
+
+    // 第一轮：unknown 错误 + 预算耗尽 → 挂起（无 force-retry，不得盲目重试）
+    const res1 = await core.runPipeline({
+      change,
+      state,
+      defsFn: () => defs,
+      driver,
+      getHead: () => execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim(),
+    });
+    assert.equal(res1.status, 'suspended');
+    assert.equal(state.nodes.n1.status, 'suspended');
+    assert.equal(state.nodes.n1.attempts, 1, 'unknown 错误不盲目重试，预算 0 即耗尽');
+
+    // 修复后 resume + --force-retry n1：显式放行一次 → attempt 2 成功 → 整体 success
+    n1fails = false;
+    driver.calls.length = 0;
+    stateApi.validateLandings(state);
+    const res2 = await core.runPipeline({
+      change,
+      state,
+      defsFn: () => defs,
+      driver,
+      ctx: { forceRetryNode: 'n1' },
+      getHead: () => execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim(),
+    });
+    assert.equal(res2.status, 'success');
+    assert.equal(state.nodes.n1.status, 'succeeded');
+    assert.equal(state.nodes.n1.attempts, 2);
+    assert.ok(driver.calls.includes('n1'), 'force-retry 必须真实重跑目标节点');
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
 
 test('core: 核心不认识模型——同一 DAG 内 claude/codex/opencode 节点走同一调度，仅 driver 层不同', async () => {
   const repo = tmpRepo();
@@ -347,7 +491,7 @@ test('core: 落地校验失效后依赖它的已通过节点续跑被污染（�
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
-test('core: await Promise driver → Leader 决断经 schema 校验并持久化挂起报告', async () => {
+test('core: 已知 permanent 错误由确定性分类器 fail-fast 并持久化挂起报告', async () => {
   const repo = tmpRepo();
   await withRoot(repo, async () => {
     const change = 'promise-decision';
@@ -357,11 +501,7 @@ test('core: await Promise driver → Leader 决断经 schema 校验并持久化�
       async runAgent(task) {
         calls.push(task.id);
         if (task.id === 'n1') return Promise.resolve({ ok: false, error: { kind: 'config', message: '需要主会话决策' } });
-        assert.equal(task.role, 'leader');
-        assert.ok(task.schema, 'Leader 决断 task 必须携带 DECISION_SCHEMA');
-        return Promise.resolve({ ok: true, structured: {
-          action: 'escalate', node: 'n1', reason: '请用户确认范围', candidates: ['修复后续跑', '终止变更'],
-        } });
+        throw new Error('已知 permanent 错误不应调用 Leader');
       },
     };
     const result = await core.runPipeline({
@@ -371,13 +511,12 @@ test('core: await Promise driver → Leader 决断经 schema 校验并持久化�
       driver,
     });
     assert.equal(result.status, 'suspended');
-    assert.deepEqual(calls, ['n1', 'decision-n1']);
+    assert.deepEqual(calls, ['n1']);
     assert.equal(result.decision.action, 'escalate');
     assert.ok(fs.existsSync(result.reportPath));
     const report = JSON.parse(fs.readFileSync(result.reportPath, 'utf8'));
     assert.equal(report.node, 'n1');
-    assert.equal(report.reason, '请用户确认范围');
-    assert.deepEqual(report.candidates, ['修复后续跑', '终止变更']);
+    assert.match(report.reason, /不可重试的 config/);
   });
   fs.rmSync(repo, { recursive: true, force: true });
 });

@@ -78,7 +78,7 @@ test('OpenCode boundary: final JSON with schema mismatch is schema failure', () 
 test('network boundary: retryable HTTP status is not misclassified as auth', () => {
   for (const message of ['HTTP 429 Too Many Requests', 'HTTP 500 Internal Server Error', 'HTTP 503 Service Unavailable']) {
     const result = contract.normalizeResult({ ok: false, error: message });
-    assert.equal(result.error.kind, 'agent', message);
+    assert.equal(result.error.kind, 'network', message);
     assert.equal(result.error.retryable, true, message);
   }
   const timeout = contract.normalizeResult({ ok: false, error: 'HTTP 408 Request Timeout' });

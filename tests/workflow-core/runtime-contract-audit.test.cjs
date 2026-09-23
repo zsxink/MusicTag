@@ -25,13 +25,13 @@ function tempRepo() {
   return repo;
 }
 
-test('P6 shared contract: every runtime returns a structured spawn error for a missing binary', () => {
+test('P6 shared contract: every runtime returns a structured spawn error for a missing binary', async () => {
   const task = { id: 'n1', role: 'tester', prompt: 'P' };
-  const results = [
+  const results = await Promise.all([
     claude.runAgent(task, { claudeBin: '/definitely-missing-claude' }),
     codex.runAgent(task, { codexBin: '/definitely-missing-codex' }),
     opencode.runAgent(task, { opencodeBin: '/definitely-missing-opencode' }),
-  ];
+  ]);
   for (const result of results) {
     assert.equal(result.ok, false);
     assert.equal(typeof result.error, 'object', 'DriverResult.error 必须是标准错误对象');
@@ -40,9 +40,9 @@ test('P6 shared contract: every runtime returns a structured spawn error for a m
   }
 });
 
-test('P6 network/error-code boundary: HTTP 500 is retryable agent failure, not auth', () => {
+test('P6 network/error-code boundary: HTTP 500 is retryable network failure, not auth', () => {
   const result = contract.normalizeResult({ ok: false, error: 'HTTP 500 Internal Server Error' });
-  assert.equal(result.error.kind, 'agent');
+  assert.equal(result.error.kind, 'network');
   assert.equal(result.error.retryable, true);
   assert.equal(contract.normalizeResult({ ok: false, error: 'HTTP 401 Unauthorized' }).error.kind, 'auth');
 });

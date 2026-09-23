@@ -165,3 +165,57 @@ test('state: markDirty 标记自身与依赖它的节点（dependents）', () =>
   assert.equal(st.nodes.integrate.status, 'failed');
   assert.equal(st.nodes.integrate.dirty, true);
 });
+
+test('state v3: v1/v2 迁移保留累计 attempts、未知字段并生成 legacy history', () => {
+  const repo = tmpRepo();
+  const prevRoot = process.env.PIPE_CORE_REPO_ROOT;
+  process.env.PIPE_CORE_REPO_ROOT = repo;
+  try {
+    const change = 'legacy';
+    fs.mkdirSync(path.dirname(state.stateFile(change)), { recursive: true });
+    fs.writeFileSync(state.stateFile(change), JSON.stringify({
+      schemaVersion: 2,
+      change,
+      driver: 'codex',
+      customField: { keep: true },
+      nodes: { verify: { status: 'failed', attempts: 4, error: 'boom', customNode: 7 } },
+    }));
+    const loaded = state.loadState(change);
+    assert.equal(loaded.schemaVersion, 3);
+    assert.equal(loaded.nodes.verify.attempts, 4);
+    assert.equal(loaded.nodes.verify.customNode, 7);
+    assert.equal(loaded.nodes.verify.history.length, 1);
+    assert.equal(loaded.nodes.verify.history[0].legacy, true);
+    assert.deepEqual(loaded.customField, { keep: true });
+    assert.deepEqual(loaded.summary, {});
+    assert.deepEqual(loaded.humanInterventions, []);
+    assert.equal(JSON.parse(fs.readFileSync(state.stateFile(change), 'utf8')).schemaVersion, 3, '迁移结果须原子落盘');
+  } finally {
+    if (prevRoot === undefined) delete process.env.PIPE_CORE_REPO_ROOT;
+    else process.env.PIPE_CORE_REPO_ROOT = prevRoot;
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('state v3: appendAttempt 不覆盖失败历史，checkpoint 与 summary 可寻址持久化', () => {
+  const repo = tmpRepo();
+  const prevRoot = process.env.PIPE_CORE_REPO_ROOT;
+  process.env.PIPE_CORE_REPO_ROOT = repo;
+  try {
+    const change = 'history';
+    const st = state.newState(change, 'codex');
+    state.appendAttempt(st, 'verify', { attempt: 1, status: 'failed', errorKind: 'timeout', durationMs: 10 });
+    state.appendAttempt(st, 'verify', { attempt: 2, status: 'succeeded', durationMs: 4 });
+    state.setCheckpoint(st, 'integrate', 'push', { status: 'succeeded', evidence: { sha: 'abc' } });
+    state.setSummary(st, { totalDurationMs: 14, retries: 1 });
+    state.saveState(change, st);
+    const loaded = state.loadState(change);
+    assert.deepEqual(loaded.nodes.verify.history.map((item) => item.status), ['failed', 'succeeded']);
+    assert.equal(loaded.nodes.integrate.checkpoints.push.evidence.sha, 'abc');
+    assert.equal(loaded.summary.retries, 1);
+  } finally {
+    if (prevRoot === undefined) delete process.env.PIPE_CORE_REPO_ROOT;
+    else process.env.PIPE_CORE_REPO_ROOT = prevRoot;
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

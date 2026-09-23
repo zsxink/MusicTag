@@ -27,7 +27,7 @@ test('pipeline: backend 域 → 只派 rust-backend 开发节点', () => {
   assert.equal(devs.length, 1);
   assert.equal(devs[0].id, 'dev-rust');
   assert.equal(devs[0].role, 'rust-backend');
-  assert.deepEqual(devs[0].dependsOn, ['architect']);
+  assert.deepEqual(devs[0].dependsOn, ['spec-gate']);
 });
 
 test('pipeline: frontend 域 → 只派 vue-frontend 开发节点', () => {
@@ -45,13 +45,61 @@ test('pipeline: both 域 → rust→vue 串行（vue dependsOn dev-rust）', () 
   assert.deepEqual(devs[1].dependsOn, ['dev-rust']);
 });
 
-test('pipeline: docs/spec/infra 域 → leader 开发节点（自适应编排不触发业务编译门禁）', () => {
-  for (const domain of ['docs', 'spec', 'infra']) {
+test('pipeline: Agent 写入节点声明最小 writeScopes 和 core commit，prompt 禁止自行提交', () => {
+  const both = pipeline.buildPipeline(stateWithDomain('both'));
+  const rust = both.find((d) => d.id === 'dev-rust');
+  const vue = both.find((d) => d.id === 'dev-vue');
+  const tester = both.find((d) => d.id === 'tester');
+  assert.deepEqual(rust.writeScopes, ['src-tauri/']);
+  assert.deepEqual(vue.writeScopes, ['src/']);
+  assert.deepEqual(tester.writeScopes, ['src-tauri/', 'src/']);
+  for (const def of [rust, vue, tester]) {
+    assert.match(def.commitMessage, /^feat\(demo\):/);
+    assert.match(def.prompt({}), /不得执行 git add 或 git commit/);
+  }
+
+  const infra = pipeline.buildPipeline(stateWithDomain('infra'));
+  const infraDev = infra.find((d) => d.id === 'dev');
+  // infra 变更工作量大：拆 dev→dev-metrics→dev-docs 三个串行子节点，各自最小写范围，
+  // 避免单个长会话在 agent driver 下超时/不可靠。dev 只做任务组 4（动态 CR）。
+  const infraDevs = infra.filter((d) => d.id.startsWith('dev'));
+  assert.equal(infraDevs.length, 3);
+  assert.deepEqual(
+    infraDevs.map((d) => d.id),
+    ['dev', 'dev-metrics', 'dev-docs'],
+  );
+  assert.deepEqual(infraDev.dependsOn, ['spec-gate'], 'dev 只依赖 spec-gate');
+  assert.equal(infraDevs[1].dependsOn[0], 'dev');
+  assert.equal(infraDevs[2].dependsOn[0], 'dev-metrics');
+  assert.ok(infraDev.writeScopes.indexOf('.agents/tools/pipe-core/') !== -1);
+  assert.ok(infraDevs[1].writeScopes.length > 0);
+  assert.ok(infraDevs[2].writeScopes.length > 0);
+});
+
+test('pipeline: Architect 只可写当前 change 的 design/tasks 且不单独提交', () => {
+  const architect = pipeline.buildPipeline({ change: 'demo', nodes: {} }).find((d) => d.id === 'architect');
+  assert.deepEqual(architect.writeScopes, [
+    'openspec/changes/demo/design.md',
+    'openspec/changes/demo/tasks.md',
+  ]);
+  assert.equal(architect.coreCommit, false);
+});
+
+test('pipeline: docs/spec 域 → 单个 leader 开发节点；infra 拆三节点（自适应编排不触发业务编译门禁）', () => {
+  for (const domain of ['docs', 'spec']) {
     const defs = pipeline.buildPipeline(stateWithDomain(domain));
     const devs = defs.filter((d) => d.id.startsWith('dev'));
     assert.equal(devs.length, 1, domain);
     assert.equal(devs[0].role, 'leader', domain);
     assert.match(devs[0].prompt({}), /流程\/文档资产/);
+  }
+  for (const domain of ['infra']) {
+    const defs = pipeline.buildPipeline(stateWithDomain(domain));
+    const devs = defs.filter((d) => d.id.startsWith('dev'));
+    assert.equal(devs.length, 3, domain);
+    assert.ok(devs.every((d) => d.role === 'leader'), domain);
+    assert.ok(devs[1].dependsOn && devs[1].dependsOn[0] === 'dev');
+    assert.ok(devs[2].dependsOn && devs[2].dependsOn[0] === 'dev-metrics');
   }
 });
 
@@ -61,59 +109,69 @@ test('pipeline: dev 节点必须拒绝 done=false 的未完成结果', () => {
   assert.equal(dev.resultOk({ done: false }), false);
 });
 
-test('pipeline: architect 未判定前仅 preflight+architect 两个节点', () => {
+test('pipeline: architect 未判定前包含 bootstrap→architect→spec-gate 边界', () => {
   const defs = pipeline.buildPipeline({ change: 'demo', nodes: {} });
-  assert.deepEqual(defs.map((d) => d.id).sort(), ['architect', 'preflight']);
+  assert.deepEqual(defs.map((d) => d.id), ['bootstrap', 'architect', 'spec-gate']);
 });
 
-test('pipeline: preflight ready=false 不得进入 architect（fail-closed）', () => {
-  const preflight = pipeline.buildPipeline({ change: 'demo', nodes: {} }).find((d) => d.id === 'preflight');
-  assert.equal(preflight.resultOk({ ready: true }), true);
-  assert.equal(preflight.resultOk({ ready: false }), false);
+test('pipeline: bootstrap/spec-gate 均 fail-closed', () => {
+  for (const id of ['bootstrap', 'spec-gate']) {
+    const gate = pipeline.buildPipeline({ change: 'demo', nodes: {} }).find((d) => d.id === id);
+    assert.equal(gate.resultOk({ ready: true }), true);
+    assert.equal(gate.resultOk({ ready: false }), false);
+  }
 });
 
-test('pipeline: 完整 DAG 拓扑顺序 preflight→architect→dev→tester→cr→verify→integrate', () => {
+test('pipeline: 完整 DAG 拓扑顺序 bootstrap→architect→spec-gate→dev→tester→cr→verify→integrate', () => {
   const defs = pipeline.buildPipeline(stateWithDomain('infra'));
   const ids = defs.map((d) => d.id);
-  for (const [a, b] of [['preflight', 'architect'], ['architect', 'dev'], ['dev', 'tester'], ['tester', 'cr'], ['cr', 'verify'], ['verify', 'integrate']]) {
+  for (const [a, b] of [['bootstrap', 'architect'], ['architect', 'spec-gate'], ['spec-gate', 'dev'], ['dev', 'tester'], ['tester', 'cr'], ['cr', 'verify'], ['verify', 'integrate']]) {
     const idxA = ids.indexOf(a);
     const idxB = ids.indexOf(b);
     assert.ok(idxA >= 0 && idxB >= 0 && idxA < idxB, `${a} → ${b}`);
   }
 });
 
-test('pipeline: verify prompt 对 infra 域跳过 cargo/npm，执行短路基线', () => {
+test('pipeline: 内置节点显式 kind，确定性节点不携带 Agent role/prompt', () => {
   const defs = pipeline.buildPipeline(stateWithDomain('infra'));
-  const verify = defs.find((d) => d.id === 'verify');
-  const p = verify.prompt({});
-  assert.match(p, /自适应编排跳过业务编译/);
-  assert.match(p, /node --test/);
-  assert.match(p, /tests\/workflow-core\/\*\.test\.cjs/);
-  assert.ok(!p.includes('cargo check'));
+  for (const def of defs) assert.ok(['agent', 'deterministic'].includes(def.kind), def.id);
+  for (const id of ['bootstrap', 'spec-gate', 'verify', 'integrate']) {
+    const def = defs.find((item) => item.id === id);
+    assert.equal(def.kind, 'deterministic');
+    assert.equal(typeof def.runner, 'string');
+    assert.equal(def.role, undefined);
+    assert.equal(def.prompt, undefined);
+  }
 });
 
-test('pipeline: infra 域 verify 测试命令必须 glob 形式（目录形式在 Node≥22 必 exit 1，独立复核 major）', () => {
+test('pipeline: verify 对 infra 域交给确定性 runner', () => {
   const defs = pipeline.buildPipeline(stateWithDomain('infra'));
   const verify = defs.find((d) => d.id === 'verify');
-  const p = verify.prompt({});
-  // 必须是 glob test/*.test.js，不是目录 .agents/tools/pipe-core/（该目录形式实测 exit 1）
-  assert.match(p, /node --test \.agents\/tools\/pipe-core\/test\/\*\.test\.js tests\/workflow-core\/\*\.test\.cjs/);
-  assert.doesNotMatch(p, /node --test \.agents\/tools\/pipe-core\/(?!test)/);
+  assert.equal(verify.kind, 'deterministic');
+  assert.equal(verify.runner, 'verify');
+  assert.equal(verify.domain, 'infra');
 });
 
-test('pipeline: verify prompt 对 code 域跑统一基线 + 复盘回归', () => {
+test('pipeline: infra 域 verify 携带 change/domain 供 runner 生成计划', () => {
+  const defs = pipeline.buildPipeline(stateWithDomain('infra'));
+  const verify = defs.find((d) => d.id === 'verify');
+  assert.equal(verify.change, 'demo');
+  assert.equal(verify.domain, 'infra');
+});
+
+test('pipeline: code 域 verify 仍由同一定义传递 domain', () => {
   const defs = pipeline.buildPipeline(stateWithDomain('both'));
   const verify = defs.find((d) => d.id === 'verify');
-  const p = verify.prompt({});
-  assert.match(p, /cargo check --manifest-path src-tauri\/Cargo.toml/);
-  assert.match(p, /npm run build/);
-  assert.match(p, /复盘回归清单/);
+  assert.equal(verify.runner, 'verify');
+  assert.equal(verify.domain, 'both');
 });
 
 test('pipeline: devSpec infra 域自验证只跑 node/openspec，不跑 cargo/npm', () => {
   const p = pipeline.devSpec('demo', 'infra');
   assert.match(p, /node --test/);
   assert.ok(!p.includes('cargo test'));
+  assert.doesNotMatch(p, /git add \+ commit/);
+  assert.match(p, /提交由 core 统一完成/);
 });
 
 test('pipeline: CR 复盘专项三检（跨模块状态/竞态与串扰/网络与离线判定）在新核心保留', () => {
@@ -124,15 +182,54 @@ test('pipeline: CR 复盘专项三检（跨模块状态/竞态与串扰/网络�
   assert.match(p, /竞态与串扰/);
   assert.match(p, /网络与离线判定/);
   assert.match(p, /specReference/);
-  assert.match(p, /pass=true 仅当无 blocker 且无 major/);
+  assert.match(p, /pass=true.*仅当无阻断且无 major/);
 });
 
-test('pipeline: integrate 使用确定性 PR/CI/merge wrapper，不直接编排 gh', () => {
+test('pipeline: CR prompt 由运行时证据动态生成，删除固定 191 等历史结论（4.1）', () => {
+  const defs = pipeline.buildPipeline(stateWithDomain('both'));
+  const cr = defs.find((d) => d.id === 'cr');
+  const p = cr.prompt({});
+  assert.doesNotMatch(p, /191\s*个/);
+  assert.doesNotMatch(p, /Tester 已完成/);
+  assert.match(p, /只属于本 change/);
+});
+
+test('pipeline: CR prompt 拿到注入的 state 后展示 Tester 证据（4.1）', () => {
+  const defs = pipeline.buildPipeline({
+    change: 'demo',
+    nodes: {
+      architect: { status: 'succeeded', result: { domain: 'infra' } },
+      tester: { status: 'succeeded', result: { covered: ['scenario-x'], missing: [], smokePassed: true, risks: [] } },
+    },
+  });
+  const cr = defs.find((d) => d.id === 'cr');
+  const state = {
+    change: 'demo',
+    nodes: { tester: { status: 'succeeded', result: { covered: ['scenario-x'], missing: [], smokePassed: true, risks: [] } } },
+  };
+  const p = cr.prompt({ cwd: process.cwd(), state });
+  assert.match(p, /scenario-x/);
+  assert.match(p, /Tester 结果/);
+});
+
+test('pipeline: devSpec 各域自验证保留 scoped 语义且不重复完整基线（4.3）', () => {
+  for (const domain of pipeline.CODE_DOMAINS) {
+    const p = pipeline.devSpec('demo', domain);
+    assert.match(p, /只跑受影响模块\/文件的相关测试/);
+    assert.match(p, /不重复 Verify 的完整本地基线/);
+  }
+  const infra = pipeline.devSpec('demo', 'infra');
+  assert.doesNotMatch(infra, /cargo test/);
+  assert.match(infra, /不重复 Verify 的完整本地基线/);
+  assert.match(infra, /node --test/);
+  const docs = pipeline.devSpec('demo', 'docs');
+  assert.match(docs, /不重复 Verify 的完整本地基线/);
+});
+
+test('pipeline: integrate 由确定性 runner 执行', () => {
   const integrate = pipeline.buildPipeline(stateWithDomain('infra')).find((d) => d.id === 'integrate');
-  const p = integrate.prompt({});
-  for (const command of ['create-pr.js', 'wait-ci.js', 'merge-pr.js']) assert.match(p, new RegExp(`\\.agents/commands/${command}`));
-  assert.doesNotMatch(p, /gh pr (create|merge)/);
-  assert.doesNotMatch(p, /git branch -d/);
+  assert.equal(integrate.kind, 'deterministic');
+  assert.equal(integrate.runner, 'integrate');
 });
 
 test('pipeline: integrate 只有真实 PR 合并才算成功', () => {

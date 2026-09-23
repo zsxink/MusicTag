@@ -9,31 +9,15 @@ const stateApi = require('./state.js');
 const decision = require('./decision.js');
 const { DEV_SCHEMA } = require('./pipeline.js');
 const { DECISION_SCHEMA } = require('./pipeline.js');
-const { execSync } = require('node:child_process');
 const contract = require('./drivers/contract.js');
+const builtinRunners = require('./runners.js');
+const workspace = require('./workspace.js');
 
 // 同步调度器内的退避等待（CLI 场景可阻塞；intervalMs=0 时零开销）。
 function sleepSync(ms) {
   if (!ms) return;
   const end = Date.now() + ms;
   while (Date.now() < end) { /* busy wait */ }
-}
-
-// 只读角色（尤其 CR）不能依赖宿主自报权限；用节点前后 HEAD/status 做落地审计。
-// read-only 节点产生工作区写入即失败，防止无法精确限制工具的 runtime 静默污染分支。
-function worktreeSnapshot(root = process.cwd()) {
-  try {
-    const head = execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    // --ignored=matching 把被 .gitignore 隐藏的写入也纳入快照；只读 runtime
-    // 不得通过写 ignored 文件绕过工作区污染审计。
-    const status = execSync('git status --porcelain --untracked-files=all --ignored', { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    const relevantStatus = status.split(/\r?\n/).filter((line) => !line.includes(' .agents/runs/')).join('\n');
-    return { head, status: relevantStatus };
-  } catch (_) { return null; }
-}
-
-function readOnlyMutation(before, after) {
-  return !!before && !!after && (before.head !== after.head || before.status !== after.status);
 }
 
 async function runPipeline(opts) {
@@ -50,6 +34,7 @@ async function runPipeline(opts) {
     getHead = stateApi.currentHead,
     commitRoot, // 落地校验判定根（worktree 场景由 run.js 传 worktree 路径；缺省 repoRoot）
     results = {},
+    runners = builtinRunners,
   } = opts;
 
   if (!Number.isInteger(maxConcurrency) || maxConcurrency <= 0) {
@@ -57,7 +42,7 @@ async function runPipeline(opts) {
   }
 
   const log = (msg) => { if (logger) logger(msg); };
-  const runCtx = { change, ctx, state, driver, getHead, commitRoot, log, sleep, results };
+  const runCtx = { change, ctx, state, driver, getHead, commitRoot, log, sleep, results, runners };
 
   let guard = 0;
   const maxIterations = 1000;
@@ -98,9 +83,9 @@ async function runPipeline(opts) {
 
     const batch = ready.slice(0, maxConcurrency);
     for (const def of batch) {
-      state.nodes[def.id] = { status: 'pending', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
+      state.nodes[def.id] = { ...(state.nodes[def.id] || {}), status: 'pending', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
       stateApi.saveState(change, state);
-      state.nodes[def.id] = { status: 'ready', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
+      state.nodes[def.id] = { ...(state.nodes[def.id] || {}), status: 'ready', attempts: (state.nodes[def.id] && state.nodes[def.id].attempts) || 0, updatedAt: new Date().toISOString() };
       stateApi.saveState(change, state);
       const res = await runNode(def, runCtx, decider);
       if (res.status === 'suspended' || res.status === 'failed') return res;
@@ -116,7 +101,7 @@ async function runPipeline(opts) {
 // 语义：round 计复审轮（CR 每次 reroute 修复后进入下一轮）；attempt 计 driver 调用总次数。
 // 技术性失败在同一 round 内 retry，不消耗 round。
 async function runNode(def, runCtx, decider) {
-  const { change, state, driver, getHead, log, sleep, results, commitRoot } = runCtx;
+  const { change, state, driver, getHead, log, sleep, results, commitRoot, runners } = runCtx;
   const id = def.id;
   const maxRounds = def.maxRounds || 1;
   const retryInterval = (def.retry && def.retry.intervalMs) || 0;
@@ -130,32 +115,60 @@ async function runNode(def, runCtx, decider) {
     // 同一 round 内可多次 retry（技术性失败不消耗 round）
     for (;;) {
       attempts++;
-      state.nodes[id] = { status: 'running', attempts, updatedAt: new Date().toISOString() };
+      const attemptStartedAt = new Date().toISOString();
+      state.nodes[id] = { ...(state.nodes[id] || {}), status: 'running', attempts, updatedAt: attemptStartedAt };
+      stateApi.appendAttempt(state, id, {
+        round, attempt: attempts, executor: def.kind || 'agent',
+        driver: state.driver || null, model: runCtx.ctx.model || null,
+        startedAt: attemptStartedAt, status: 'running',
+      });
       stateApi.saveState(change, state);
       log(`→ ${id}（round ${round}/${maxRounds}，attempt ${attempts}）`);
 
-      const task = {
-        id,
-        role: def.role,
-        prompt: typeof def.prompt === 'function' ? def.prompt(runCtx.ctx) : def.prompt,
-        schema: def.schema,
-      };
       let res;
       const auditRoot = commitRoot || runCtx.ctx.cwd || stateApi.repoRoot();
-      const beforeAudit = worktreeSnapshot(auditRoot);
-      const taskErrors = contract.validateTask(task);
-      if (taskErrors.length) {
-        res = { ok: false, error: { kind: 'config', message: `task 非法：${taskErrors.join('; ')}`, retryable: false } };
+      const beforeAudit = workspace.snapshot(auditRoot);
+      if ((def.kind || 'agent') === 'deterministic') {
+        const runner = runners && runners[def.runner];
+        if (typeof runner !== 'function') {
+          res = { ok: false, error: { kind: 'config', message: `deterministic runner 未注册：${def.runner}`, retryable: false } };
+        } else {
+          try {
+            res = await runner({ def, change, state, ctx: runCtx.ctx, root: auditRoot, log, saveState: () => stateApi.saveState(change, state) });
+          } catch (e) {
+            res = { ok: false, error: { kind: e.kind || 'unknown', message: String(e && e.message || e), retryable: false } };
+          }
+        }
       } else {
-        try {
-          res = await driver.runAgent(task, { ...runCtx.ctx, nodeId: id });
-        } catch (e) {
-          res = { ok: false, error: String(e) };
+        const task = {
+          id,
+          role: def.role,
+          prompt: typeof def.prompt === 'function' ? def.prompt({ ...runCtx.ctx, state }) : def.prompt,
+          schema: def.schema,
+        };
+        const taskErrors = contract.validateTask(task);
+        if (taskErrors.length) {
+          res = { ok: false, error: { kind: 'config', message: `task 非法：${taskErrors.join('; ')}`, retryable: false } };
+        } else {
+          try {
+            res = await driver.runAgent(task, { ...runCtx.ctx, nodeId: id });
+          } catch (e) {
+            res = { ok: false, error: String(e) };
+          }
         }
       }
-      const afterAudit = worktreeSnapshot(auditRoot);
-      if (readOnlyMutation(beforeAudit, afterAudit) && (def.role === 'cr-agent' || runCtx.ctx.readOnly === true)) {
+      const afterAudit = workspace.snapshot(auditRoot);
+      const fileAudit = workspace.audit(beforeAudit, afterAudit, def.writeScopes || []);
+      if ((fileAudit.headChanged || fileAudit.indexChanged || fileAudit.changedPaths.length > 0) && (def.role === 'cr-agent' || runCtx.ctx.readOnly === true)) {
         res = { ok: false, error: { kind: 'config', message: `read-only 节点 ${id} 产生工作区写入`, retryable: false } };
+      } else if (Array.isArray(def.writeScopes) && fileAudit.headChanged) {
+        res = { ok: false, error: { kind: 'permission', message: `Agent 节点 ${id} 禁止修改 HEAD；git 提交由 core 负责`, retryable: false } };
+      } else if (Array.isArray(def.writeScopes) && fileAudit.indexChanged) {
+        res = { ok: false, error: { kind: 'permission', message: `Agent 节点 ${id} 禁止修改 git index；暂存与提交由 core 负责`, retryable: false } };
+      } else if (Array.isArray(def.writeScopes) && fileAudit.unauthorizedPaths.length) {
+        res = { ok: false, error: { kind: 'permission', message: `Agent 节点 ${id} 修改越权路径：${fileAudit.unauthorizedPaths.join(', ')}`, retryable: false } };
+      } else if (Array.isArray(def.writeScopes) && fileAudit.preexistingTouchedPaths.length) {
+        res = { ok: false, error: { kind: 'permission', message: `Agent 节点 ${id} 修改了启动前已有差异的路径：${fileAudit.preexistingTouchedPaths.join(', ')}`, retryable: false } };
       }
       res = contract.normalizeResult(res);
       if (res && res.error && typeof res.error === 'object') res.errorKind = res.error.kind || contract.classify(res);
@@ -173,8 +186,22 @@ async function runNode(def, runCtx, decider) {
       if (res.ok && res.structured) {
         const ok = def.resultOk ? def.resultOk(res.structured) : true;
         if (ok) {
-          const head = getHead();
+          let commitEvidence = null;
+          if (Array.isArray(def.writeScopes) && def.coreCommit !== false) {
+            const commitMessage = typeof def.commitMessage === 'function' ? def.commitMessage({ change, result: res.structured }) : def.commitMessage;
+            if (!commitMessage) {
+              res = contract.normalizeResult({ ok: false, error: { kind: 'config', message: `节点 ${id} 缺少 commitMessage` } });
+            } else {
+              commitEvidence = await workspace.commitChanges(auditRoot, fileAudit.changedPaths, commitMessage);
+              if (!commitEvidence.ok) res = contract.normalizeResult({ ok: false, error: commitEvidence.error, commands: commitEvidence.commands });
+            }
+          }
+          if (!res.ok) {
+            // 统一提交失败继续走下方标准失败/决断路径。
+          } else {
+          const head = commitEvidence && commitEvidence.commitSha ? commitEvidence.commitSha : getHead();
           state.nodes[id] = {
+            ...(state.nodes[id] || {}),
             status: 'succeeded',
             attempts,
             result: res.structured,
@@ -184,24 +211,41 @@ async function runNode(def, runCtx, decider) {
             driverVersion: res.driverVersion || runCtx.ctx.driverVersion || null,
             permissionDegraded: runCtx.ctx.permissionDegraded || [],
           };
+          const endedAt = new Date().toISOString();
+          stateApi.finishAttempt(state, id, attempts, {
+            status: 'succeeded', endedAt,
+            durationMs: Math.max(0, Date.parse(endedAt) - Date.parse(attemptStartedAt)),
+            commitSha: head, errorKind: null, commands: [...(res.commands || []), ...((commitEvidence && commitEvidence.commands) || [])],
+          });
           stateApi.saveState(change, state);
           results[id] = res.structured;
           log(`✓ ${id} 成功`);
           return { status: 'succeeded', node: id, result: res.structured };
+          }
         }
       }
 
       // 失败（技术性或语义性）→ 决断链
       errText = res.error && typeof res.error === 'object' ? res.error.message : (res.error || `driver 失败（exitCode=${res.exitCode}）`);
       state.nodes[id] = {
+        ...(state.nodes[id] || {}),
         status: 'failed', attempts, error: errText, errorKind: res.errorKind || null,
         result: res.structured || null, updatedAt: new Date().toISOString(),
         permissionDegraded: runCtx.ctx.permissionDegraded || [],
       };
+      const failedAt = new Date().toISOString();
+      stateApi.finishAttempt(state, id, attempts, {
+        status: 'failed', endedAt: failedAt,
+        durationMs: Math.max(0, Date.parse(failedAt) - Date.parse(attemptStartedAt)),
+        error: errText, errorKind: res.errorKind || null,
+        exitCode: res.exitCode === undefined ? null : res.exitCode,
+        commands: res.commands || [],
+      });
       stateApi.saveState(change, state);
       log(`✗ ${id} 失败: ${errText}`);
 
-      const decisionCtx = { def, attempts, error: errText, errorKind: res.errorKind, result: res.structured || null, round, maxRounds, ctx: runCtx.ctx };
+      const forceRetry = runCtx.ctx.forceRetryNode === id && !runCtx.ctx.forceRetryUsed;
+      const decisionCtx = { def, attempts, error: errText, errorKind: res.errorKind, result: res.structured || null, round, maxRounds, forceRetry, ctx: runCtx.ctx };
       const decisionResult = await resolveDecision(decisionCtx, runCtx, decider);
       if (!decisionResult.ok) {
         const reason = `Leader 决断失败：${decisionResult.error}`;
@@ -211,8 +255,11 @@ async function runNode(def, runCtx, decider) {
         }, errText, 'decision-failed');
       }
       d = decisionResult.decision;
+      stateApi.finishAttempt(state, id, attempts, { decision: d.action });
+      stateApi.saveState(change, state);
 
       if (d.action === 'retry') {
+        if (d.forced) runCtx.ctx.forceRetryUsed = true;
         if (retryInterval > 0) await sleep(retryInterval);
         continue; // 同一 round 重跑
       }
@@ -241,6 +288,8 @@ async function resolveDecision(decisionCtx, runCtx, decider) {
   try {
     if (decider) {
       raw = await decider(decisionCtx);
+    } else if (decisionCtx.errorKind && decisionCtx.errorKind !== 'unknown') {
+      raw = decision.decide(decisionCtx);
     } else {
       const task = {
         id: `decision-${decisionCtx.def.id}`,

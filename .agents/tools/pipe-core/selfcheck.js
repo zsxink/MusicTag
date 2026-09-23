@@ -17,6 +17,10 @@ const REQUIRED_ROLES = ['leader', 'architect', 'rust-backend', 'vue-frontend', '
 // 返回 { ok, errors[] }。ok=false 即 fail-closed。
 function run({ repoRoot = process.cwd() } = {}) {
   const errors = [];
+  const checks = {
+    agentGitWriteForbidden: true,
+    scopedWriterNodes: true,
+  };
   const dir = __dirname;
   // 旧测试传入 `<repo>/.agents` 作为 repoRoot；兼容该调用形态，实际资产根仍是仓库根。
   const requestedRoot = path.resolve(repoRoot);
@@ -36,6 +40,10 @@ function run({ repoRoot = process.cwd() } = {}) {
     if (!rolesJson[role]) { errors.push(`角色 ${role} 未定义`); continue; }
     const f = path.join(dir, 'roles', rolesJson[role].file || `${role}.md`);
     if (!fs.existsSync(f)) errors.push(`角色 ${role} 的文案文件缺失: ${f}`);
+    if ((rolesJson[role].capabilities || []).includes('git_write')) {
+      checks.agentGitWriteForbidden = false;
+      errors.push(`角色 ${role} 不得申请 git_write，提交由 core 统一完成`);
+    }
   }
 
   // ② 节点定义合法 + 角色引用合法（遍历全部 6 个 domain 的动态展开）
@@ -46,13 +54,17 @@ function run({ repoRoot = process.cwd() } = {}) {
     for (const d of defs) {
       const ve = validateNode(d);
       if (ve.length) errors.push(`节点 ${d.id}: ${ve.join('; ')}`);
-      if (!rolesJson[d.role]) errors.push(`节点 ${d.id} 引用未定义角色 ${d.role}`);
+      if ((d.kind || 'agent') === 'agent' && !rolesJson[d.role]) errors.push(`节点 ${d.id} 引用未定义角色 ${d.role}`);
+      if ((d.kind || 'agent') === 'agent' && d.role !== 'cr-agent' && !Array.isArray(d.writeScopes)) {
+        checks.scopedWriterNodes = false;
+        errors.push(`可写 Agent 节点 ${d.id} 缺少 writeScopes`);
+      }
       if (typeof d.resultOk === 'function') {
-        const probe = d.id === 'preflight'
+        const probe = ['bootstrap', 'spec-gate'].includes(d.id)
           ? { ready: true }
           : d.role === 'cr-agent'
           ? { pass: true, blockers: [], majors: [], steps: [] }
-          : d.role === 'verify-agent'
+          : d.id === 'verify'
             ? { pass: true, blockers: [], majors: [], steps: [{ step: 'probe', status: 'pass', detail: '' }] }
           : d.id === 'integrate'
             ? { archived: true, prUrl: 'https://example.invalid/pr/1', merged: true, summary: '' }
@@ -83,6 +95,8 @@ function run({ repoRoot = process.cwd() } = {}) {
   const walk = (root) => {
     if (!fs.existsSync(root)) return;
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      // test/fixtures/ 是故意注入语法错误/缺失输出的失败探针，不得进入静态自检。
+      if (entry.isDirectory() && entry.name === 'fixtures') continue;
       const file = path.join(root, entry.name);
       if (entry.isDirectory()) walk(file);
       else if (entry.name.endsWith('.js')) jsFiles.push(file);
@@ -103,7 +117,7 @@ function run({ repoRoot = process.cwd() } = {}) {
   }
   if (!fs.existsSync(path.resolve(root, NEUTRAL_COMMAND_DIR))) errors.push('中立 command 目录缺失');
 
-  return { ok: errors.length === 0, errors };
+  return { ok: errors.length === 0, errors, checks };
 }
 
 module.exports = { run, REQUIRED_ROLES };

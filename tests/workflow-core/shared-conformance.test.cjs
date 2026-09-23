@@ -14,7 +14,10 @@ const claude = require('../../.agents/tools/pipe-core/drivers/claude.js');
 const codex = require('../../.agents/tools/pipe-core/drivers/codex.js');
 const opencode = require('../../.agents/tools/pipe-core/drivers/opencode.js');
 const epic = require('../../.agents/tools/pipe-core/epic.js');
+const { seedWorkflows } = require('../../.agents/tools/pipe-core/test/seed.js');
+const { fakeCommands } = require('../../.agents/tools/pipe-core/test/fixtures/fake-pipe-commands.js');
 const OPENCODE_PIPE_FIXTURE = path.resolve(__dirname, '../../.agents/tools/pipe-core/test/fixtures/fake-pipe-common.js');
+const REPO = path.resolve(__dirname, '../..');
 const pipeline = require('../../.agents/tools/pipe-core/pipeline.js');
 
 const SCHEMA = {
@@ -64,25 +67,51 @@ function task() {
 }
 
 test('P4 adaptive verify conformance: docs/spec/infra skip cargo and npm', () => {
+  const verify = require('../../.agents/tools/pipe-core/verify.js');
   for (const domain of ['docs', 'spec', 'infra']) {
-    const verify = pipeline.buildPipeline({
-      change: 'workflow-core',
-      nodes: { architect: { status: 'succeeded', result: { domain } } },
-    }).find((node) => node.id === 'verify');
-    const prompt = verify.prompt({});
-    assert.match(prompt, /node --test/);
-    assert.match(prompt, /run\.js --self-check/);
-    assert.match(prompt, /openspec validate workflow-core --strict --no-interactive/);
-    assert.doesNotMatch(prompt, /cargo (check|test)/);
-    assert.doesNotMatch(prompt, /npm run (test|build)/);
+    const plans = verify.buildPlan({ change: 'workflow-core', domain, root: REPO });
+    const steps = plans.map((p) => p.step);
+    assert.ok(steps.includes('OpenSpec strict validate'), `${domain} 必须含 OpenSpec strict validate`);
+    assert.doesNotMatch(steps.join(','), /cargo (check|test)/, `${domain} 不得跑 cargo`);
+    assert.doesNotMatch(steps.join(','), /npm run (test|build)/, `${domain} 不得跑 npm`);
+    if (domain === 'infra') {
+      assert.ok(steps.includes('node 静态检查'), 'infra 必须含 node 静态检查');
+      assert.ok(steps.includes('shell 静态检查'), 'infra 必须含 shell 静态检查');
+      assert.ok(steps.includes('pipe-core/workflow-core 全量测试'), 'infra 必须含全量测试');
+      assert.ok(steps.includes('self-check'), 'infra 必须含 self-check');
+    }
+    if (domain === 'docs' || domain === 'spec') {
+      assert.ok(steps.includes('文档一致性审计'), `${domain} 必须含文档一致性审计`);
+    }
   }
 });
 
-test('P6 shared conformance: all registered drivers preserve cwd and structured output', () => {
+test('P4 adaptive verify conformance: backend/frontend/both 含业务基线且 OpenSpec 汇合后执行', () => {
+  const verify = require('../../.agents/tools/pipe-core/verify.js');
+  for (const domain of ['backend', 'frontend', 'both']) {
+    const plans = verify.buildPlan({ change: 'workflow-core', domain, root: REPO });
+    const steps = plans.map((p) => p.step);
+    const openspecIdx = steps.lastIndexOf('OpenSpec strict validate');
+    assert.ok(openspecIdx >= 0, `${domain} 必须含 OpenSpec`);
+    if (domain === 'backend' || domain === 'both') {
+      assert.ok(steps.indexOf('cargo check') >= 0 && steps.indexOf('cargo test') >= 0, `${domain} 必须含 cargo 基线`);
+    }
+    if (domain === 'frontend' || domain === 'both') {
+      assert.ok(steps.indexOf('npm test') >= 0 && steps.indexOf('npm build') >= 0, `${domain} 必须含 npm 基线`);
+    }
+    // both：业务 lane 之后才是 OpenSpec 汇合门禁。
+    if (domain === 'both') {
+      const lastBusiness = Math.max(...steps.map((s, i) => (s.startsWith('cargo') || s.startsWith('npm') ? i : -1)));
+      assert.ok(openspecIdx > lastBusiness, 'both 的 OpenSpec 在业务 lane 汇合后执行');
+    }
+  }
+});
+
+test('P6 shared conformance: all registered drivers preserve cwd and structured output', async () => {
   const h = harness();
   try {
     for (const [name, runtime] of Object.entries(h.runtimes)) {
-      const result = runtime.module.runAgent(task(), { ...runtime.ctx, cwd: h.cwd });
+      const result = await runtime.module.runAgent(task(), { ...runtime.ctx, cwd: h.cwd });
       assert.equal(result.ok, true, `${name} success result`);
       assert.deepEqual(result.structured, { ready: true }, `${name} structured result`);
       assert.equal(fs.realpathSync(fs.readFileSync(h.marker, 'utf8')), fs.realpathSync(h.cwd), `${name} child cwd`);
@@ -93,11 +122,11 @@ test('P6 shared conformance: all registered drivers preserve cwd and structured 
   }
 });
 
-test('P6 shared conformance: all registered drivers classify damaged output as protocol', () => {
+test('P6 shared conformance: all registered drivers classify damaged output as protocol', async () => {
   const h = harness();
   try {
     for (const [name, runtime] of Object.entries(h.runtimes)) {
-      const result = runtime.module.runAgent(task(), { ...runtime.badProtocol, cwd: h.cwd });
+      const result = await runtime.module.runAgent(task(), { ...runtime.badProtocol, cwd: h.cwd });
       assert.equal(result.ok, false, `${name} malformed output must fail`);
       assert.equal(result.error.kind, 'protocol', `${name} malformed output kind`);
     }
@@ -106,11 +135,11 @@ test('P6 shared conformance: all registered drivers classify damaged output as p
   }
 });
 
-test('P6 shared conformance: all registered drivers expose timeout termination', () => {
+test('P6 shared conformance: all registered drivers expose timeout termination', async () => {
   const h = harness();
   try {
     for (const [name, runtime] of Object.entries(h.runtimes)) {
-      const result = runtime.module.runAgent(task(), { ...runtime.timeout, cwd: h.cwd, timeoutMs: 20 });
+      const result = await runtime.module.runAgent(task(), { ...runtime.timeout, cwd: h.cwd, timeoutMs: 20 });
       assert.equal(result.ok, false, `${name} timeout must fail`);
       assert.equal(result.error.kind, 'timeout', `${name} timeout kind`);
       assert.equal(result.error.retryable, true, `${name} timeout retryability`);
@@ -135,8 +164,11 @@ test('P6 epic OpenCode conformance: three parallel worktrees receive isolated cw
   const previousRoot = process.env.PIPE_CORE_REPO_ROOT;
   const previousBin = process.env.PIPE_OPENCODE_BIN;
   const previousPolicy = process.env.PIPE_OPENCODE_READ_ONLY_POLICY;
+  let previousFake = process.env.PIPE_FAKE_CMDS;
+  let fakeCmds = null;
   try {
     fs.writeFileSync(path.join(main, '.gitignore'), '.worktrees/\n.agents/runs/\n');
+    seedWorkflows(main); // 任务组 7.2 fixture：worktree 缺 .agents/workflows 桩脚本 → bootstrap 必挂
     fs.writeFileSync(path.join(main, 'seed.txt'), 'seed');
     git(['init', '-q']);
     git(['config', 'user.email', 'test@example.com']);
@@ -154,13 +186,18 @@ test('P6 epic OpenCode conformance: three parallel worktrees receive isolated cw
     process.env.PIPE_CORE_REPO_ROOT = main;
     process.env.PIPE_OPENCODE_BIN = fake;
     process.env.PIPE_OPENCODE_READ_ONLY_POLICY = 'enforced';
+    // 任务组 7.2 fixture：verify/integrate 的确定性命令须短路（临时仓库无真实 cargo/npm/openspec）。
+    fakeCmds = fakeCommands({ verify: true, gitRemote: true, ghFlat: true });
+    process.env.PIPE_FAKE_CMDS = fakeCmds.dir;
     const code = await epic.run('e', 'opencode');
     assert.equal(code, 0);
-    const paths = fs.readFileSync(timeline, 'utf8').trim().split('\n').filter(Boolean).map((p) => path.resolve(p));
-    assert.equal(paths.length, 21, '三个子项各自完整执行 7 个节点');
+    const path_list = fs.readFileSync(timeline, 'utf8').trim().split('\n').filter(Boolean).map((p) => path.resolve(p));
+    // infra 域 = 6 个 agent 节点（architect + dev/dev-metrics/dev-docs + tester + cr），
+    // 确定性节点经 driver 调用（bootstrap/spec-gate/verify/integrate 由 core 直接执行）→ 每子项 6 次。
+    assert.equal(path_list.length, 18, '三个子项各自完整执行 6 个 agent 节点');
     for (const name of ['A', 'B', 'C']) {
       const expected = path.join(fs.realpathSync(main), '.worktrees', name);
-      assert.equal(paths.filter((p) => p === expected).length, 7, `${name} 的 7 个节点必须使用同一独立 worktree cwd`);
+      assert.equal(path_list.filter((p) => p === expected).length, 6, `${name} 的 6 个 agent 节点必须使用同一独立 worktree cwd`);
       assert.ok(!fs.existsSync(path.join(main, name)), `${name} 不得写入主仓库`);
     }
     fs.rmSync(timeline, { force: true });
@@ -172,6 +209,9 @@ test('P6 epic OpenCode conformance: three parallel worktrees receive isolated cw
     else process.env.PIPE_OPENCODE_BIN = previousBin;
     if (previousPolicy === undefined) delete process.env.PIPE_OPENCODE_READ_ONLY_POLICY;
     else process.env.PIPE_OPENCODE_READ_ONLY_POLICY = previousPolicy;
+    if (previousFake === undefined) delete process.env.PIPE_FAKE_CMDS;
+    else process.env.PIPE_FAKE_CMDS = previousFake;
+    if (fakeCmds) fakeCmds.cleanup();
     try { execFileSync('git', ['worktree', 'prune'], { cwd: main, stdio: 'ignore' }); } catch (_) { /* cleanup best effort */ }
     fs.rmSync(h.dir, { recursive: true, force: true });
   }

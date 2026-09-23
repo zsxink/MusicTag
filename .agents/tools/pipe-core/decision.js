@@ -3,6 +3,8 @@
 // 只做技术归类（retry/reroute 不涉及产品方向）；一旦需要用户拍板（方向/范围/歧义/CR 三轮不过）
 // → escalate 挂起回主会话（D6），不自动继续。
 
+const { retryDisposition } = require('./error-classifier.js');
+
 const OWNER_RULES = [
   { prefix: 'src-tauri/', role: 'rust-backend', scope: 'src-tauri/ 下代码' },
   { prefix: 'src/', role: 'vue-frontend', scope: 'src/ 下代码' },
@@ -44,7 +46,7 @@ function decisionPrompt(ctx) {
 // 决断入口：节点失败后调用。返回 { action, node, reason, ... }。
 // ctx: { def, attempts, error, result, round, maxRounds }
 function decide(ctx) {
-  const { def, attempts, error, errorKind, result, round, maxRounds } = ctx;
+  const { def, attempts, error, errorKind, result, round, maxRounds, forceRetry = false } = ctx;
 
   // ① CR 内容问题（pass=false 且 blocker/major 非空）优先 reroute（内容问题非技术性，不进 retry）
   if (def.role === 'cr-agent' && result && result.pass === false) {
@@ -70,7 +72,19 @@ function decide(ctx) {
 
   // 配置/权限/schema 错误重试不会改变外部条件；尤其只读节点已经产生
   // 工作区写入时，第二次尝试可能把同一污染误判为“无变化”。立即挂起。
-  if (['auth', 'config', 'schema'].includes(errorKind)) {
+  const retryMax = def.retry && def.retry.max !== undefined ? def.retry.max : 2;
+  const disposition = retryDisposition({ kind: errorKind || 'unknown', attempts, retryMax, forceRetry });
+  if (disposition.action === 'retry') {
+    return {
+      action: 'retry', node: def.id,
+      reason: forceRetry ? `显式 force-retry 放行节点 ${def.id} 一次` : `第 ${attempts} 次执行失败（${error || '未知'}），瞬态错误重试`,
+      forced: forceRetry,
+    };
+  }
+  if (disposition.action === 'handle') {
+    return { action: 'handle', node: def.id, reason: `${errorKind} 由节点 checkpoint 状态机处理` };
+  }
+  if (disposition.category === 'permanent') {
     return {
       action: 'escalate',
       node: def.id,
@@ -79,9 +93,9 @@ function decide(ctx) {
     };
   }
 
-  // ② 技术性失败 → retry（attempts 未超上限；退避由调用方按 def.retry.intervalMs 执行）
-  const retryMax = def.retry && def.retry.max !== undefined ? def.retry.max : 2;
-  if (attempts <= retryMax) {
+  // 兼容旧 driver：尚未分类的技术失败保持原有预算，真正 unknown 由 core
+  // 的 resolveDecision 交 Leader 判断。
+  if (!errorKind && attempts <= retryMax) {
     return { action: 'retry', node: def.id, reason: `第 ${attempts} 次执行失败（${error || '未知'}），技术性重试` };
   }
 

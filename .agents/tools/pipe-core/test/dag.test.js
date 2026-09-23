@@ -8,6 +8,9 @@ test('dag: validateNode 缺必填报错', () => {
   assert.ok(errs.length > 0);
   assert.ok(validateNode({ id: 'x', role: 'architect', prompt: 'p', schema: {} }).length === 0);
   assert.ok(validateNode({ id: 'x', role: 'architect', promptFn: () => 'p', schema: {} }).length === 0);
+  assert.ok(validateNode({ id: 'x', kind: 'deterministic', runner: 'bootstrap', schema: {} }).length === 0);
+  assert.match(validateNode({ id: 'x', kind: 'deterministic', schema: {} }).join(';'), /runner/);
+  assert.match(validateNode({ id: 'x', kind: 'invalid', schema: {} }).join(';'), /kind/);
 });
 
 test('dag: topoSort 按依赖排前', () => {
