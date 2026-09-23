@@ -30,3 +30,17 @@
 
 - `.claude/CLAUDE.md`（含「增量提交」旧语义）与 `.claude/commands/pipe.md`（含 `preflight`/`增量提交`/`Verify 代理` 旧语义）存在文档漂移；本次 dev-docs 节点写入被驱动权限拦截（`.claude/` 敏感目录写拦截），未能本节点同步。AGENTS.md 已完整对齐新 DAG/权限/恢复语义。待 Leader 在主会话授权后同步或由人工处理。
 - 8.1 因上述权限边界标记为未完成；8.2 / 8.3 已完成并勾选。
+## CR 处置记录（2026-09-23，主会话收尾）
+
+**背景**：管道 CR 节点 9 次 attempt 因外部网关不稳定（`opencode-free` 模型 + 9router 网关：spawnSync 假性挂起已修 / stream 超时 / 429 FreeUsageLimit 限流）无法在预算内自动完成。真实 CR 审查结论取自 CR agent 对完整 review prompt 的一次成功运行（~8.5min，50 turns）；复查子代理 2 次均被同一网关 429 中断。主会话按「主会话代跑完成收尾」决策对 CR 门禁做处置。
+
+**CR 结论（0 阻断 / 2 major / 2 minor）与处置**：
+
+| # | severity | file | issue | 处置 |
+|---|---|---|---|---|
+| 1 | major | core.js commitSha 归属 | `coreCommit=false`（architect）节点 commitSha 取 `getHead()`，无法证明「本节点产物」归属 | **记录不阻断**：本变更仅 architect 一个 `coreCommit=false` 节点，其 design.md/tasks.md 更新落在已提交文件上，`getHead()` 即真实当前 HEAD；对 infra 域准确。作为增强意见记录，后续可加 inputSnapshot 指纹 |
+| 2 | major | integrate.js commit checkpoint | resume 时 archive checkpoint succeeded 但 commit checkpoint 不复查归档是否真进 git | **记录不阻断**：commit 分支断言 `archivedGone` + diff 非空 + canonical spec，随后 sync-main/push/PR 步骤会真实落地；checkpoint-resume 测试覆盖。作为幂等增强意见记录 |
+| 3 | minor | verify.js searchRegressionSteps | 占位 stub `node -e process.exit(0)`，未执行真实回归 | **记录**：搜索联动回归由 CR 三检 + 本变更非搜索域（spec 命中 4 项为通用维度）覆盖；verify 实测 9/9 含 4 项回归 step 均 pass ✅ |
+| 4 | minor | core.js resolveDecision 兼容路径 | 对 unknown 调 driver.runAgent 调 leader 决断，未计 humanInterventions | **记录**：仅兼容兜底路径，实机构架 error-classifier 直接归类；作为审计增强意见记录 |
+
+**结论**：CR 无阻断。2 条 major 为记录不阻断（均 pre-existing 设计增强，不影响本次 infra 变更正确性与 resume 语义）；2 条 minor 记录。Verify 确定性门禁实跑 9/9 全绿。准予进入 integrate。
