@@ -177,7 +177,7 @@ test('core: 失败节点 retry 后成功（attempts=2）', async () => {
     const state = stateApi.newState(change, 'mock');
     const driver = makeDriver({
       n1: () => ({ ok: true, structured: { v: 1 } }),
-      n2: (a) => (a === 1 ? { ok: false, error: 'transient' } : { ok: true, structured: { v: 2 } }),
+      n2: (a) => (a === 1 ? { ok: false, error: { kind: 'agent', message: 'transient model hiccup' } } : { ok: true, structured: { v: 2 } }),
     });
     const defs = [node('n1', []), Object.assign(node('n2', ['n1']), { retry: { max: 2, intervalMs: 0 } })];
     const res = await core.runPipeline({ change, state, defsFn: () => defs, driver });
@@ -284,6 +284,51 @@ test('core: resume 集成——失败节点重跑、已通过节点复用（落�
 });
 
 // ---------- 失败路径与边界（除 happy-path 外强制审计） ----------
+
+test('core: --force-retry 跨 resume 放行闭环——已挂起节点被显式放行后成功', async () => {
+  const repo = tmpRepo();
+  await withRoot(repo, async () => {
+    const change = 'demo';
+    const state = stateApi.newState(change, 'mock');
+    let n1fails = true;
+    const driver = makeDriver({
+      // 无信号错误 → spec RS11 语义：unknown（不盲目重试）→ Leader 决断 escalate。
+      // 修复后 force-retry 显式放行 → attempt 2 成功。
+      n1: () => (n1fails ? { ok: false, error: 'unclassifiable structure failure' } : { ok: true, structured: { v: 1 } }),
+    });
+    const defs = [Object.assign(node('n1', []), { retry: { max: 0, intervalMs: 0 } })];
+
+    // 第一轮：unknown 错误 + 预算耗尽 → 挂起（无 force-retry，不得盲目重试）
+    const res1 = await core.runPipeline({
+      change,
+      state,
+      defsFn: () => defs,
+      driver,
+      getHead: () => execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim(),
+    });
+    assert.equal(res1.status, 'suspended');
+    assert.equal(state.nodes.n1.status, 'suspended');
+    assert.equal(state.nodes.n1.attempts, 1, 'unknown 错误不盲目重试，预算 0 即耗尽');
+
+    // 修复后 resume + --force-retry n1：显式放行一次 → attempt 2 成功 → 整体 success
+    n1fails = false;
+    driver.calls.length = 0;
+    stateApi.validateLandings(state);
+    const res2 = await core.runPipeline({
+      change,
+      state,
+      defsFn: () => defs,
+      driver,
+      ctx: { forceRetryNode: 'n1' },
+      getHead: () => execSync('git rev-parse HEAD', { cwd: repo, encoding: 'utf8' }).trim(),
+    });
+    assert.equal(res2.status, 'success');
+    assert.equal(state.nodes.n1.status, 'succeeded');
+    assert.equal(state.nodes.n1.attempts, 2);
+    assert.ok(driver.calls.includes('n1'), 'force-retry 必须真实重跑目标节点');
+  });
+  fs.rmSync(repo, { recursive: true, force: true });
+});
 
 test('core: 核心不认识模型——同一 DAG 内 claude/codex/opencode 节点走同一调度，仅 driver 层不同', async () => {
   const repo = tmpRepo();

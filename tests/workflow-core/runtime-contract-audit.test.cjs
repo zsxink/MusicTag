@@ -40,9 +40,9 @@ test('P6 shared contract: every runtime returns a structured spawn error for a m
   }
 });
 
-test('P6 network/error-code boundary: HTTP 500 is retryable agent failure, not auth', () => {
+test('P6 network/error-code boundary: HTTP 500 is retryable network failure, not auth', () => {
   const result = contract.normalizeResult({ ok: false, error: 'HTTP 500 Internal Server Error' });
-  assert.equal(result.error.kind, 'agent');
+  assert.equal(result.error.kind, 'network');
   assert.equal(result.error.retryable, true);
   assert.equal(contract.normalizeResult({ ok: false, error: 'HTTP 401 Unauthorized' }).error.kind, 'auth');
 });

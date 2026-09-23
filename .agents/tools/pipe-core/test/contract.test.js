@@ -80,6 +80,15 @@ test('contract: 标准 DriverResult 的 exitCode 保留（供错误/成功诊断
   assert.equal(fixed.exitCode, 1);
 });
 
+test('contract: 无信号错误归 unknown（RS11——交 Leader 决断，非盲目 agent 重试）', () => {
+  // 无任何可识别关键词的错误不得兜底成 agent（会盲目重试到预算耗尽），
+  // 应归 unknown 走 core 的 Leader 决断分支。
+  const unknown = contract.normalizeResult({ ok: false, error: 'something completely unclassifiable happened' });
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.error.kind, 'unknown');
+  assert.equal(unknown.error.retryable, false, 'unknown 不自动重试，须经 Leader 技术判断');
+});
+
 test('contract: retryable 判定函数暴露（供决策链判断是否值得重试）', () => {
   // timeout/spawn 可重试；auth/config/schema 重试无意义
   assert.equal(contract.retryable({ kind: 'timeout' }), true);
@@ -89,4 +98,5 @@ test('contract: retryable 判定函数暴露（供决策链判断是否值得重
   assert.equal(contract.retryable({ kind: 'schema' }), false);
   assert.equal(contract.retryable({ kind: 'protocol' }), true);
   assert.equal(contract.retryable({ kind: 'agent' }), true, 'agent 层失败（模型侧）可重试');
+  assert.equal(contract.retryable({ kind: 'unknown' }), false, 'unknown 不自动盲目重试—交 Leader 决断');
 });
