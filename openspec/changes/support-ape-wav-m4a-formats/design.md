@@ -7,7 +7,58 @@
 - 唯一 TagType 分支在 `apply_lyrics`（`meta.rs:64-78`）：`Id3v2` → USLT `lang=eng`；`_ =>` 兜底写 `ItemKey::Lyrics`。理由：`Lyrics` 在 ID3v2 被 lofty 静默丢弃，`UnsyncLyrics` 在 Vorbis 多出 `UNSYNCEDLYRICS`。
 - 读侧：`service/reader.rs` 两条路径均 `Probe::open().read()` + `primary_tag()`，无格式特判；歌词 `Lyrics`→`UnsyncLyrics`→侧载 `.lrc` 三级 fallback，年份 `RecordingDate`→`Year`；读失败 Err → 前端只读降级。
 - 测试：全部外置 `src-tauri/tests/`，样例文件 = 手工最小壳字节（`tests/common/mod.rs`）+ lofty 回写标签，无外部二进制 fixture。
-- lofty 0.24 原生支持 APE/WAV/MP4 标签；文档映射表在 PRD §5.1（FLAC）/§5.2（MP3），design.md 尚无格式分支章节（本变更待补）。
+- lofty 0.24 原生支持 APE/WAV/MP4 标签；文档映射表在 PRD §5.1（FLAC）/§5.2（MP3），格式分支矢区见本文「技术方案」章节。
+
+## 技术方案
+
+### 模块边界与数据流（改动全部收敛在 `service/` 层，commands 薄壳与 IPC 契约零改动）
+
+```
+commands/   folder.rs  list_songs ── WalkDir + meta::is_audio_file（白名单过滤，改）── reader::read_summary
+            song.rs    open_song  ── reader::read_song_meta（新格式兼容核对 + WAV 双标签预案 A1，改）
+                       save_song  ── service::writer::save_song（编排不变，APE 保护断言 A6，改）
+service/    meta.rs    is_audio_file（白名单数组，改）；apply_meta / apply_lyrics / apply_cover（TagType 分派核对，改）
+            reader.rs  read_summary / read_song_meta（读侧 fallback 核对，改）
+            writer.rs  save_song 编排（Probe → primary_tag_mut → clear → apply_meta → write_atomic，结构不变）
+            missing.rs scan_missing（复用 is_audio_file，自动同步，零改动）
+```
+
+三条数据流全部复用既有服务，三格式只是「过滤放行 + 读写分派正确」，无新 command、无新模块：
+
+- **收集**：`pick_folder → list_songs(dir)` → walkdir 逐文件 `is_audio_file`（白名单）→ `read_summary`（title/artist，读失败空串保列表）。`scan_missing` 同函数过滤，自动同步。
+- **读**：`open_song(path) → read_song_meta` → `Probe::open().read()` + `primary_tag()` → 9 文本字段（ItemKey 统一）+ 歌词（`Lyrics`→`UnsyncLyrics`→侧载 `.lrc`）+ 封面（`pictures().first()` → base64 data URL）。坏标签 `Err` → 前端只读，行为不变。
+- **保存**：`save_song(song, exportLrc)` → `Probe::open().read()` → `primary_tag_mut().clear()` → `apply_meta`（文本字段 ItemKey 统一、年份统一 `RecordingDate`，歌词/封面按 TagType 分派）→ `write_atomic`（同目录临时文件 + rename 原子替换）。
+
+### 逐格式分支矢区（三格式在现有架构上的落点）
+
+| 维度 | FLAC / MP3（现状） | WAV | M4A（含 `.mp4`） | APE |
+|---|---|---|---|---|
+| 收集 `is_audio_file` | `flac`/`mp3` | `wav` | `m4a`/`mp4` | `ape` |
+| 读侧 primary tag | Vorbis / Id3v2 | 内嵌 ID3v2（A1 实测） | `Mp4Ilst` | `ApeTag` |
+| 文本字段 | ItemKey 统一 | ItemKey 统一 | ItemKey 统一 | ItemKey 统一 |
+| 年份 | `RecordingDate` | `TDRC`（Id3v2 臂） | `©day`（A5 实测） | `RecordingDate`（A5 实测） |
+| 歌词 | `LYRICS` / USLT | USLT（既有 `Id3v2` 臂） | `©lyr`（兜底 `ItemKey::Lyrics`，A2） | `ItemKey::Lyrics`（兜底 A3） |
+| 封面 | PICTURE / APIC | APIC（`push_picture`） | `covr`（`push_picture`） | APE Cover Art（`push_picture` 实测，A4） |
+
+> 规律：**文本字段零改动**（ItemKey 统一分派是现状架构最大红利）；**歌词/封面/年份只需核对三格式的 TagType 锚点**；WAV=Id3v2、M4A=Mp4Ilst、APE=ApeTag 三类 TagType 若实测不落现有臂/兜底，按 D2 加显式 match 臂，均对齐 `meta.rs:62-63` 既有注释风格。
+
+### TDD 实测锚点（实现期按表逐个「红 → 实现 → 绿」，A 编号与 tasks 组 3 对应）
+
+| # | 锚点 | 预期 | 实测不符时预案 |
+|---|---|---|---|
+| A1 | WAV 在 RIFF INFO + 内嵌 ID3v2 并存时 `primary_tag()` 取 ID3v2 | 取 ID3v2 | `reader.rs` 加读侧 fallback 链（同现有 `Lyrics`/`Year` 模式）；写侧固定写 ID3v2 |
+| A2 | M4A 兜底 `ItemKey::Lyrics` 可写 `©lyr` | 是 | `apply_lyrics` 加 `Mp4Ilst` 显式臂 |
+| A3 | APE 兜底 `ItemKey::Lyrics` 可写（Vorbis 风格 item） | 是 | `apply_lyrics` 加 `ApeTag` 显式臂 |
+| A4 | APE `push_picture` 落 Cover Art front | 是 | `apply_cover` 加 `ApeTag` 显式臂（构造 APE 封面条目） |
+| A5 | APE/M4A 年份 `RecordingDate` 写读一致（M4A→`©day`） | 是 | 写侧按 TagType 改用该格式年份键 + 读侧对称 fallback（对齐现有 `RecordingDate`→`Year`） |
+| A6 | APE `primary_tag_mut()` 仅触碰 APE 标签、不产生只读 ID3v2 写入 | 是 | 断言测试锁定 primary=APE；若 lofty 对 APE 暴露 ID3v2 primary 则显式选 `ApeTag` tag，不写 ID3v2 |
+
+### 不变行为护栏（写入测试断言）
+
+- MP3 仍写 ID3v2.4（lofty 默认，不用 `use_id3v23`）。
+- 全量覆盖（`clear()` 重建）、坏标签只读、写回原路径、`write_atomic` 原子替换——三格式全部沿用。
+- 封面跨 IPC 仍 base64 data URL、磁盘落盘原始字节；**IPC 契约与 TS 类型零改动 → 前端零文件改动**。
+- 样例构造保持无外部二进制 fixture：lofty 0.24 对 `FileType::Ape` / `FileType::Wav` / `FileType::Mp4` 均支持 `write_to_path` 产出最小可解析容器，故 D4 优先用 lofty 产壳。
 
 ## Goals / Non-Goals
 
@@ -65,6 +116,32 @@
 - [APE 写入改动牵连只读 ID3v2 导致写坏文件] → 断言测试锁定 primary tag 为 APE；`write_atomic` 同目录 rename 兜底保证失败不动原文件。
 - [手工最小壳构造成本（尤其 APE/M4A）] → D4 优先 lofty 产出；测试仅断言标签层往返，不追求音频帧可播放。
 - [扩展名白名单放开后扫描到无法解析的坏文件] → 读侧既有语义兜底：`read_summary` 返回空串不崩、`open_song` 失败走只读降级，与 FLAC/MP3 一致。
+
+## 关键技术决策
+
+- **D3 `.mp4` 纳入收集白名单**（本变更新增拍板）：`.mp4` 与 `.m4a` 同为 MP4 容器、lofty 走同一 `FileType::Mp4` 路径，纳入成本为零；漏收会让用户需改名才能编辑，体验不一致。proposal 原留实现期评估，本设计拍板。
+- **写侧零结构改动、仅实测补臂**：现状 ItemKey 统一分派比「每格式独立 apply 分支表」维护成本低、与既有架构相悖最小；三格式只核对落点、实测不符才加显式 match 臂。
+- **先文档（PRD/design）后代码**：改产品行为必先同步 `docs/V1-PRD.md` 与 `docs/design/design.md`（D5，项目硬约束），tasks 组 1 即此。
+- **样例构造走 lofty `write_to_path`**：lofty 0.24 对三种新格式均支持写出最小可解析容器，比 FLAC/MP3 手工拼字节省成本且无外部二进制 fixture（D4）。
+- **WAV 写 ID3v2、APE 绝不写 ID3v2**：WAV 主流标签为内嵌 ID3v2，与 MP3 同臂复用；APE 的 ID3v2 用于只读（foobar 兼容），写侧经 `primary_tag_mut()` 只置 APE 标签，断言测试防回归（D2.4、A6）。
+
+## 变更域判定
+
+**domain = `both`（backend 为主、附带 docs）**：
+
+- **backend**：`is_audio_file` 白名单、`apply_lyrics`/`apply_cover`（可能）TagType 分支、WAV 双标签读侧 fallback（可能）、三格式往返/坏标签/回归测试——全部 Rust。
+- **docs**：FR-1 扩展名、§5 映射表、PRD §7 技术栈「统一处理 FLAC/MP3」句与 §4 兼容行、design.md §10.0 `meta.rs` 行同步。
+- **frontend**：明确零改动——格式差异收敛在 Rust 侧，IPC 契约（含 `Song.cover` base64 data URL）不变。
+
+**依赖顺序**：纯 backend + 文档同步，无 Rust→Vue 跨端串行（前端无工作项）。唯一依赖约束为「先文档后代码」（tasks 组 1 → 组 2–4），驱动顺序即依赖序。
+
+## 任务拆分建议（对应 tasks.md 组 1–5）
+
+1. **组 1 文档同步**（唯一前置，无代码依赖）：PRD + design 先改，`openspec validate` 兜底通过。
+2. **组 2 收集过滤**（纯逻辑，最小改动）：`is_audio_file` 白名单 + list_songs/missing 测试，校验两处调用点语义自动同步。
+3. **组 3 写侧往返实测**（本变更主体，TDD 红→绿）：common 三格式样壳 → `save_song` 全字段+歌词+封面往返（按 A1–A6 锚点补臂）→ WAV 双标签读侧 → `open_song` 三格式读侧。
+4. **组 4 缺失扫描与回归**：`scan_missing` 范围 + MP3 ID3v2.4 版本断言。
+5. **组 5 全量验证**：cargo check/test + openspec validate。
 
 ## Migration Plan
 

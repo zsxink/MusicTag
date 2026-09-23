@@ -11,8 +11,8 @@
 ## 3. 写侧往返实测（TDD 红 → 实现）
 
 - [ ] 3.1 `tests/common/mod.rs` 新增三格式样例构造辅助（D4：优先 lofty `write_to_path` 产出可解析容器，失败再评估手工最小壳）+ `full_song` 数据；验证：辅助函数能被后续测试调用且 `cargo test` 编译通过
-- [ ] 3.2 先写失败测试：`tests/save_song.rs` 三格式各一条全字段+歌词+封面写→读回往返断言（含年份 `RecordingDate`、清空字段即删除、APE 不产生 ID3v2 写入）（红）；按 D2 实测结果补齐 `apply_lyrics` 等 TagType 显式分支至绿；验证：`cargo test --manifest-path src-tauri/Cargo.toml save_song`
-- [ ] 3.3 WAV 双标签读侧：测试固化 RIFF INFO 与 ID3v2 并存时 `primary_tag()` 取内嵌 ID3v2；不符则 `reader.rs` 加 fallback 链后转绿；验证：`cargo test --manifest-path src-tauri/Cargo.toml`（reader 相关用例）
+- [ ] 3.2 先写失败测试：`tests/save_song.rs` 三格式各一条全字段+歌词+封面写→读回往返断言（含年份 `RecordingDate`、清空字段即删除、APE 不产生 ID3v2 写入）（红）；按 D2 实测结果补齐 `apply_lyrics` 等 TagType 显式分支至绿；验证：`cargo test --manifest-path src-tauri/Cargo.toml save_song`。**锚点 A2/A3/A4/A5/A6**：M4A 兜底歌词、APE 兜底歌词、APE 封面、APE/M4A 年份、APE 不写 ID3v2 各一条断言；实测不符才加显式臂
+- [ ] 3.3 WAV 双标签读侧：测试固化 RIFF INFO 与 ID3v2 并存时 `primary_tag()` 取内嵌 ID3v2（**锚点 A1**）；不符则 `reader.rs` 加 fallback 链后转绿；验证：`cargo test --manifest-path src-tauri/Cargo.toml`（reader 相关用例）
 - [ ] 3.4 `tests/open_song.rs` 三格式读侧全字段+歌词+封面断言；坏标签三格式文件仍返回 Err（走只读降级）；验证：`cargo test --manifest-path src-tauri/Cargo.toml open_song`
 
 ## 4. 缺失扫描与回归
