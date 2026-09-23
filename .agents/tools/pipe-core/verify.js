@@ -33,7 +33,9 @@ function buildPlan({ change, domain, root }) {
     plans.push({
       step: 'pipe-core/workflow-core 全量测试',
       command: 'node',
-      args: ['--test', path.join(root, '.agents', 'tools', 'pipe-core', 'test'), path.join(root, 'tests', 'workflow-core')],
+      // glob 形式而非目录：Node v24 对目录形式 `node --test <dir>` 报 MODULE_NOT_FOUND；
+      // 测试 glob 由 test runner 自身展开（shell=false 下目录参数不会 glob）。
+      args: ['--test', path.join(root, '.agents', 'tools', 'pipe-core', 'test', '*.test.js'), path.join(root, 'tests', 'workflow-core', '*.test.cjs')],
       cwd: root, timeoutMs: 600_000,
     });
     plans.push({ step: 'self-check', command: 'node', args: [path.join(root, '.agents', 'tools', 'pipe-core', 'run.js'), '--self-check'], cwd: root, timeoutMs: 120_000 });

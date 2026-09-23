@@ -33,7 +33,7 @@ function writeExecutable(dir, name, source) {
   return file;
 }
 
-test('shared conformance: real drivers classify HTTP auth failure instead of silently treating it as agent retry', () => {
+test('shared conformance: real drivers classify HTTP auth failure instead of silently treating it as agent retry', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-core-driver-error-'));
   const failing = writeExecutable(dir, 'runtime.js', "process.stderr.write('HTTP 401 Unauthorized\\n'); process.exit(1);");
   const claude = require('../../.agents/tools/pipe-core/drivers/claude.js');
@@ -41,11 +41,11 @@ test('shared conformance: real drivers classify HTTP auth failure instead of sil
   const opencode = require('../../.agents/tools/pipe-core/drivers/opencode.js');
   const task = { id: 'n1', role: 'tester', prompt: 'P' };
   try {
-    const results = [
+    const results = await Promise.all([
       claude.runAgent(task, { claudeBin: failing }),
       codex.runAgent(task, { codexBin: failing }),
       opencode.runAgent(task, { opencodeBin: failing }),
-    ];
+    ]);
     for (const result of results) {
       assert.equal(result.ok, false);
       assert.equal(result.error.kind, 'auth', `HTTP 401 不应被分类为 ${result.error.kind}`);

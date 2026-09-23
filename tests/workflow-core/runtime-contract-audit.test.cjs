@@ -25,13 +25,13 @@ function tempRepo() {
   return repo;
 }
 
-test('P6 shared contract: every runtime returns a structured spawn error for a missing binary', () => {
+test('P6 shared contract: every runtime returns a structured spawn error for a missing binary', async () => {
   const task = { id: 'n1', role: 'tester', prompt: 'P' };
-  const results = [
+  const results = await Promise.all([
     claude.runAgent(task, { claudeBin: '/definitely-missing-claude' }),
     codex.runAgent(task, { codexBin: '/definitely-missing-codex' }),
     opencode.runAgent(task, { opencodeBin: '/definitely-missing-opencode' }),
-  ];
+  ]);
   for (const result of results) {
     assert.equal(result.ok, false);
     assert.equal(typeof result.error, 'object', 'DriverResult.error 必须是标准错误对象');

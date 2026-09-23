@@ -107,11 +107,11 @@ test('P4 adaptive verify conformance: backend/frontend/both 含业务基线且 O
   }
 });
 
-test('P6 shared conformance: all registered drivers preserve cwd and structured output', () => {
+test('P6 shared conformance: all registered drivers preserve cwd and structured output', async () => {
   const h = harness();
   try {
     for (const [name, runtime] of Object.entries(h.runtimes)) {
-      const result = runtime.module.runAgent(task(), { ...runtime.ctx, cwd: h.cwd });
+      const result = await runtime.module.runAgent(task(), { ...runtime.ctx, cwd: h.cwd });
       assert.equal(result.ok, true, `${name} success result`);
       assert.deepEqual(result.structured, { ready: true }, `${name} structured result`);
       assert.equal(fs.realpathSync(fs.readFileSync(h.marker, 'utf8')), fs.realpathSync(h.cwd), `${name} child cwd`);
@@ -122,11 +122,11 @@ test('P6 shared conformance: all registered drivers preserve cwd and structured 
   }
 });
 
-test('P6 shared conformance: all registered drivers classify damaged output as protocol', () => {
+test('P6 shared conformance: all registered drivers classify damaged output as protocol', async () => {
   const h = harness();
   try {
     for (const [name, runtime] of Object.entries(h.runtimes)) {
-      const result = runtime.module.runAgent(task(), { ...runtime.badProtocol, cwd: h.cwd });
+      const result = await runtime.module.runAgent(task(), { ...runtime.badProtocol, cwd: h.cwd });
       assert.equal(result.ok, false, `${name} malformed output must fail`);
       assert.equal(result.error.kind, 'protocol', `${name} malformed output kind`);
     }
@@ -135,11 +135,11 @@ test('P6 shared conformance: all registered drivers classify damaged output as p
   }
 });
 
-test('P6 shared conformance: all registered drivers expose timeout termination', () => {
+test('P6 shared conformance: all registered drivers expose timeout termination', async () => {
   const h = harness();
   try {
     for (const [name, runtime] of Object.entries(h.runtimes)) {
-      const result = runtime.module.runAgent(task(), { ...runtime.timeout, cwd: h.cwd, timeoutMs: 20 });
+      const result = await runtime.module.runAgent(task(), { ...runtime.timeout, cwd: h.cwd, timeoutMs: 20 });
       assert.equal(result.ok, false, `${name} timeout must fail`);
       assert.equal(result.error.kind, 'timeout', `${name} timeout kind`);
       assert.equal(result.error.retryable, true, `${name} timeout retryability`);

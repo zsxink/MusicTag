@@ -161,14 +161,14 @@ test('state boundary: a new node persists pending before ready/running', async (
   assert.deepEqual(snapshots.slice(1, 3), ['ready', 'running']);
 });
 
-test('Claude driver boundary: exit 0 with damaged JSON is protocol failure', () => {
+test('Claude driver boundary: exit 0 with damaged JSON is protocol failure', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-core-claude-protocol-'));
   const fake = path.join(dir, 'fake-claude.js');
   fs.writeFileSync(fake, '#!/usr/bin/env node\nprocess.stdout.write("not-json");\n');
   fs.chmodSync(fake, 0o755);
   try {
     const claude = require('../../.agents/tools/pipe-core/drivers/claude.js');
-    const result = claude.runAgent({ id: 'n1', role: 'tester', prompt: 'P' }, { claudeBin: fake });
+    const result = await claude.runAgent({ id: 'n1', role: 'tester', prompt: 'P' }, { claudeBin: fake });
     assert.equal(result.ok, false);
     assert.equal(result.error.kind, 'protocol');
   } finally {
