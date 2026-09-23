@@ -34,4 +34,4 @@
 - 前端：预期零改动（格式差异收敛在 Rust 侧；封面仍走 base64 data URL）。
 - 依赖：lofty 已具备三种格式能力，无新增依赖。
 - 文档：`docs/V1-PRD.md`、`docs/design/design.md` 同步（拍板决策变更须先同步文档再改代码）。
-- 关联 Issue：#128。
+- 关联 GitHub Issue：`#128`。
