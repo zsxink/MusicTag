@@ -1,9 +1,4 @@
-# workflow-core Specification
-
-## Purpose
-定义 MusicTag pipe 由当前主会话调度宿主原生子 Agent，并通过共享 Markdown 进度、证据门禁和集成 checkpoint 完成可恢复开发闭环。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 模型无关编排核心
 pipe SHALL 由当前与用户对话的主会话 Agent 担任 Leader，按共享阶段依赖推进变更。主 Agent SHALL 使用宿主原生子 Agent 能力派发 Architect、Dev、Tester、CR 等角色任务；正式入口 SHALL NOT 通过 Node、`codex exec`、`claude -p` 或 OpenCode CLI 启动 Agent 或完整子流水线。普通 git/cargo/npm/openspec/gh 命令由主 Agent 的命令工具直接执行。
@@ -301,12 +296,25 @@ Codex 的 `AGENTS.md`、Claude Code 的 `/pipe` 和 OpenCode 的 `/pipe` SHALL �
 - **WHEN** 改动涉及取词、换源、并发或离线判定
 - **THEN** 主 Agent 追加单源换源、跨 kind 串扰和离线判定的专项检查并记录结果。
 
-### Requirement: CR 复盘专项维度（继承 workflow-optimize 既有门禁）
-CR 审查 SHALL 在一致性/遗漏/缺陷之外，保留复盘专项三检（跨模块状态语义 / 竞态与串扰 / 网络与离线判定）；阻断/major 每项含 file + issue + specReference + suggestion；`pass=true` 仅当无阻断且无 major。该门禁在新核心（leader 决断节点 + CR 节点）中原样保留。（继承标注：同「统一验证基线」——继承自已归档变更 `workflow-optimize`，作为 `workflow-core` 规格基线，不挂主规格锚点。）
+## REMOVED Requirements
 
-#### Scenario: 复盘维度保留
-- **WHEN** 新核心跑 CR 节点
-- **THEN** CR prompt 与角色定义仍含复盘三检与问题分级证据要求，与既有 `workflow-optimize` 规格一致
+### Requirement: 跨模型 driver（P5）
+**Reason**: 正式 pipe 改为当前主会话调用宿主原生子 Agent，不再以 CLI driver 运行角色。
+**Migration**: 宿主入口加载共享 skill 和角色规则；缺少原生能力时明确停止。
+
+### Requirement: Agent Runtime Adapter 契约（P6）
+**Reason**: `runAgent` 的 CLI 输出、超时、schema 契约不再是正式 pipe 的 Agent 调度边界。
+**Migration**: 采用共享派发/返回/提问协议和 Markdown checkpoint，主 Agent 核对真实产物。
+
+### Requirement: OpenCode driver（P6）
+**Reason**: OpenCode 角色由当前主会话通过原生 Task/subagent 能力派发。
+**Migration**: 建立 OpenCode 原生角色配置与共享 pipe 入口。
+
+### Requirement: driver 一致性测试（P6）
+**Reason**: 旧 CLI driver conformance 不再对应正式入口。
+**Migration**: 改为跨宿主入口、权限映射、角色规则与 Markdown 恢复的契约检查。
+
+## ADDED Requirements
 
 ### Requirement: Markdown 记录的唯一写入者与旧状态迁移
 主 Agent SHALL 是 progress.md 与开发阶段 tasks.md 完成标记的唯一写入者；Architect 只在设计阶段细化 tasks.md。旧 `state.json` SHALL 作为只读迁移输入，迁移时保留已成功节点的提交/验证证据与未完成节点，不能把旧记录直接视作通过。

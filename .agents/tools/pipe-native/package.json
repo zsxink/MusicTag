@@ -1,0 +1,6 @@
+{
+  "name": "pipe-native-runtime",
+  "private": true,
+  "type": "commonjs",
+  "description": "Native-subagent pipe Markdown runtime; no process or Agent launcher."
+}
