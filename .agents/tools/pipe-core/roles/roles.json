@@ -1,15 +1,16 @@
 {
   "leader": {
-    "name": "Leader（编排者）",
+    "name": "Leader（当前主会话）",
     "file": "leader.md",
+    "hostOnly": true,
     "sandbox": "workspace-write",
-    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read"]
+    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read", "git_write", "network"]
   },
   "architect": {
     "name": "Architect（架构设计师）",
     "file": "architect.md",
     "sandbox": "workspace-write",
-    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read", "network"]
+    "capabilities": ["shell", "read_files", "write_files", "search_files", "git_read"]
   },
   "rust-backend": {
     "name": "Rust-Dev（Rust 后端专家）",
@@ -27,7 +28,7 @@
     "name": "CR（代码审查者，只读）",
     "file": "cr-agent.md",
     "sandbox": "read-only",
-    "capabilities": ["shell", "read_files", "search_files", "git_read"]
+    "capabilities": ["read_files", "search_files"]
   },
   "verify-agent": {
     "name": "Verify/CI（验证角色，只验证不修复）",

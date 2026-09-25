@@ -7,13 +7,19 @@ change_dir="openspec/changes/${change_name}"
 
 run_bootstrap() {
   test "$(git branch --show-current)" = "$change_name"
+  bash .agents/workflows/assert-linked-worktree.sh
   test -z "$(git status --porcelain)"
   test -f "$change_dir/proposal.md"
-  find "$change_dir/specs" -type f -name '*.md' -print -quit | grep -q .
+  test -n "$(rg --files "$change_dir/specs" -g '*.md' | head -1)"
   git merge-base --is-ancestor main HEAD
-  node .agents/tools/pipe-core/run.js --self-check
+  node .agents/tools/pipe-native/self-check.js
+  node --check .agents/tools/pipe-native/progress.js
+  node --check .agents/tools/pipe-native/progress-cli.js
+  node --check .agents/tools/pipe-native/self-check.js
+  bash -n .agents/workflows/pipe-preflight.sh
+  bash -n .agents/workflows/pipe-epic-preflight.sh
 
-  issue_num=$(grep -oE 'GitHub Issue：`#[0-9]+`' "$change_dir/proposal.md" | grep -oE '[0-9]+' | head -1)
+  issue_num=$(rg -o 'GitHub Issue[：:][[:space:]]*`?#[0-9]+`?' "$change_dir/proposal.md" | head -1 | rg -o '[0-9]+' | head -1 || true)
   if [ -z "$issue_num" ]; then
     echo "✗ [bootstrap] 变更 '$change_name' 未关联 GitHub Issue" >&2
     exit 1
@@ -27,8 +33,8 @@ run_bootstrap() {
 run_spec_gate() {
   test -f "$change_dir/design.md"
   test -f "$change_dir/tasks.md"
-  find "$change_dir/specs" -type f -name '*.md' -print -quit | grep -q .
-  openspec validate "$change_name" --strict --no-interactive
+  test -n "$(rg --files "$change_dir/specs" -g '*.md' | head -1)"
+  npx openspec validate "$change_name" --strict --no-interactive
 }
 
 case "$stage" in
