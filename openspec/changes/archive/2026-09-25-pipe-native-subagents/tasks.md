@@ -20,4 +20,4 @@
 
 - [x] 4.1 严格验证 OpenSpec，检查脚本语法和适用测试，并核对源码/规格未被验证过程改写。
 - [x] 4.2 由独立只读 CR 审查规格与实现，修复 blocker/major 后复审；在进度记录中保留结论。
-- [ ] 4.3 提交归档与实现并创建关联 Issue #132 的 PR，核对 required CI；在进度记录中保留 checkpoint。
+- [x] 4.3 提交归档与实现并创建关联 Issue #132 的 PR，核对 required CI；在进度记录中保留 checkpoint。
