@@ -11,10 +11,23 @@ use lofty::tag::items::ENGLISH;
 use lofty::tag::{ItemKey, ItemValue, Tag, TagItem};
 use std::path::Path;
 
-/// 是否为可收录的音频扩展名（`.flac`/`.mp3`，大小写不敏感）。
+/// 可收录的音频扩展名白名单（大小写不敏感，无扩展名一律拒绝）。
+///
+/// `.m4a` 与 `.mp4` 同为 MP4 容器、lofty 走同一 `FileType::Mp4` 路径，一并纳入
+/// 免得用户得改名才能编辑（PRD §5）。
+const AUDIO_EXTENSIONS: [&str; 6] = ["flac", "mp3", "ape", "wav", "m4a", "mp4"];
+
+/// 是否为可收录的音频扩展名（白名单六格式，大小写不敏感）。
+///
+/// `list_songs`（`commands/folder.rs`）与缺失扫描（`service/missing.rs`）共用本
+/// 函数，改一处两处语义自动同步。
 pub fn is_audio_file(path: &Path) -> bool {
     path.extension()
-        .map(|ext| ext.eq_ignore_ascii_case("flac") || ext.eq_ignore_ascii_case("mp3"))
+        .map(|ext| {
+            AUDIO_EXTENSIONS
+                .iter()
+                .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+        })
         .unwrap_or(false)
 }
 

@@ -3,7 +3,7 @@
 // 原 `#[cfg(test)] mod tests` 内嵌块整体迁出（production `src/` 零 `#[cfg(test)]`）。
 // 覆盖 design.md D2–D5：
 // - `split_track_pair` TRCK 合串兜底拆分；
-// - `is_audio_file` 扩展名过滤（大小写不敏感）。
+// - `is_audio_file` 扩展名过滤（六格式白名单，大小写不敏感）。
 // 被测函数经 `app_lib::service::meta::`（Cargo.toml `[lib] name = "app_lib"`）。
 
 mod common;
@@ -36,7 +36,29 @@ fn is_audio_file_accepts_case_insensitive_flac_mp3() {
     assert!(is_audio_file(Path::new("song.FLAC")));
     assert!(is_audio_file(Path::new("song.mp3")));
     assert!(is_audio_file(Path::new("song.MP3")));
+}
+
+/// 白名单六格式全部放行（PRD FR-1 / design D1、D3）。
+///
+/// `.mp4` 与 `.m4a` 同为 MP4 容器，一并纳入以免用户需改名才能编辑（D3）。
+#[test]
+fn is_audio_file_accepts_case_insensitive_ape_wav_m4a_mp4() {
+    assert!(is_audio_file(Path::new("song.ape")));
+    assert!(is_audio_file(Path::new("song.APE")));
+    assert!(is_audio_file(Path::new("song.wav")));
+    assert!(is_audio_file(Path::new("song.WAV")));
+    assert!(is_audio_file(Path::new("song.m4a")));
+    assert!(is_audio_file(Path::new("song.M4A")));
+    assert!(is_audio_file(Path::new("song.mp4")));
+    assert!(is_audio_file(Path::new("song.MP4")));
+}
+
+/// 放开新格式不得放宽到非音频：`.jpeg` 等图片与无扩展名仍拒绝。
+#[test]
+fn is_audio_file_still_rejects_non_audio() {
     assert!(!is_audio_file(Path::new("song.txt")));
     assert!(!is_audio_file(Path::new("cover.jpg")));
+    assert!(!is_audio_file(Path::new("cover.jpeg")));
     assert!(!is_audio_file(Path::new("noext")));
+    assert!(!is_audio_file(Path::new("a.invalid")));
 }

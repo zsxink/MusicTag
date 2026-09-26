@@ -59,6 +59,43 @@ fn non_audio_files_are_ignored() {
     assert!(songs[0].path.ends_with("keep.flac"));
 }
 
+/// 收集白名单放开到 APE/WAV/M4A/MP4（PRD FR-1.3、design D1/D3）。
+///
+/// 此处只断言**进入列表**（收集过滤语义）。样例字节不是合法容器，标签读不出
+/// 属预期——`read_summary` 读失败返回空串保列表，与既有用例
+/// `corrupt_file_yields_blank_not_error` 同语义。三格式的标签往返由组 3 断言。
+#[test]
+fn new_formats_enter_list_case_insensitively() {
+    let tmp = TempDir::new().unwrap();
+    // 大写变体验证大小写不敏感（PRD FR-1.3）
+    for name in [
+        "a.ape", "b.wav", "c.m4a", "d.mp4", "e.APE", "f.WAV", "g.M4A", "h.MP4",
+    ] {
+        fs::write(tmp.path().join(name), b"placeholder").unwrap();
+    }
+    // 非音频仍不进入
+    fs::write(tmp.path().join("notes.txt"), b"x").unwrap();
+    fs::write(tmp.path().join("cover.jpeg"), b"x").unwrap();
+    write_tagged_flac(tmp.path(), "keep.flac", "Keep", "K");
+
+    let songs = app_lib::commands::folder::list_songs(tmp.path().to_string_lossy().into_owned());
+
+    assert_eq!(
+        songs.len(),
+        9,
+        "应收录 8 个新格式文件 + keep.flac，实际 {:?}",
+        songs.iter().map(|s| &s.path).collect::<Vec<_>>()
+    );
+    for name in [
+        "a.ape", "b.wav", "c.m4a", "d.mp4", "e.APE", "f.WAV", "g.M4A", "h.MP4", "keep.flac",
+    ] {
+        assert!(
+            songs.iter().any(|s| s.path.ends_with(name)),
+            "应收录 {name}"
+        );
+    }
+}
+
 #[test]
 fn empty_dir_returns_empty_list() {
     let tmp = TempDir::new().unwrap();
