@@ -6,7 +6,10 @@
 mod common;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use common::{add_tags, tiny_png_bytes, write_tagged_flac, write_tagged_mp3};
+use common::{
+    add_tags, tiny_png_bytes, write_tagged_flac, write_tagged_m4a, write_tagged_mp3,
+    write_tagged_wav,
+};
 use std::fs;
 use tempfile::TempDir;
 
@@ -168,4 +171,112 @@ fn open_song_command_returns_err_for_missing_path() {
     let res =
         app_lib::commands::song::open_song("/nonexistent/definitely/missing.flac".to_string());
     assert!(res.is_err());
+}
+
+// ==== APE / WAV / M4A 读侧（specs: open-song / song-save 读侧）====
+
+/// 三格式读侧全字段 + 歌词 + 封面（各用对应 fixture 建好标签后写入）。
+#[test]
+fn open_song_new_formats_read_all_fields_lyrics_cover() {
+    let tmp = TempDir::new().unwrap();
+    let cases: [(&str, fn(&std::path::Path, &str, &str, &str)); 3] = [
+        ("s.ape", common::write_tagged_ape),
+        ("s.wav", common::write_tagged_wav),
+        ("s.m4a", common::write_tagged_m4a),
+    ];
+    for (name, write) in cases {
+        write(tmp.path(), name, "T", "A");
+        add_tags(
+            &tmp.path().join(name),
+            Some("[00:00.00]读回歌词"),
+            Some(tiny_png_bytes()),
+        );
+
+        let song = app_lib::service::reader::read_song_meta(&tmp.path().join(name))
+            .unwrap_or_else(|e| panic!("{name} 应可读：{e}"));
+        assert_eq!(song.title, "T", "{name} title");
+        assert_eq!(song.artist, "A", "{name} artist");
+        assert_eq!(song.album, "Album", "{name} album");
+        assert_eq!(song.album_artist, "AlbumArtist", "{name} album_artist");
+        assert_eq!(song.track, "3", "{name} track");
+        assert_eq!(song.track_total, "12", "{name} track_total");
+        assert_eq!(song.year, "2021", "{name} year");
+        assert_eq!(song.genre, "Pop", "{name} genre");
+        assert_eq!(song.lyrics, "[00:00.00]读回歌词", "{name} lyrics");
+        assert_eq!(song.lyrics_source, app_lib::model::LyricsSource::Embedded, "{name}");
+
+        let cover = song.cover.unwrap_or_else(|| panic!("{name} 应有封面"));
+        let b64 = cover.split_once(";base64,").map(|(_, b)| b).unwrap();
+        assert_eq!(BASE64.decode(b64).unwrap(), tiny_png_bytes(), "{name} cover 字节");
+    }
+}
+
+/// WAV 同时含 RIFF INFO 与内嵌 ID3v2 时，读侧取内嵌 ID3v2（TDD 锚点 A1）。
+#[test]
+fn open_song_wav_prefers_embedded_id3v2_over_riff_info() {
+    let tmp = TempDir::new().unwrap();
+    write_tagged_wav(tmp.path(), "dual.wav", "ID3标题", "ID3艺术家");
+    let p = tmp.path().join("dual.wav");
+
+    // 在 `fmt ` 之前插入 RIFF INFO（LIST 块）：lofty iff/wav/read.rs:72 匹配 b"LIST"，
+    // 其体首 4 字节为 "INFO"，其后为 INAM/IART 子块。裸 INFO chunk 会让整体解析失败。
+    fn sub_chunk(key: &[u8; 4], value: &str) -> Vec<u8> {
+        let mut body = value.as_bytes().to_vec();
+        body.push(0); // NUL 终止
+        let mut c = key.to_vec();
+        c.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        c.extend_from_slice(&body);
+        if body.len() % 2 == 1 {
+            c.push(0);
+        }
+        c
+    }
+    let mut list_body = Vec::from(b"INFO");
+    list_body.extend(sub_chunk(b"INAM", "RIFF标题"));
+    list_body.extend(sub_chunk(b"IART", "RIFF艺术家"));
+    let mut list = Vec::from(b"LIST");
+    list.extend_from_slice(&(list_body.len() as u32).to_le_bytes());
+    list.extend_from_slice(&list_body);
+    if list_body.len() % 2 == 1 {
+        list.push(0);
+    }
+
+    let raw = fs::read(&p).unwrap();
+    let fmt_pos = raw.windows(4).position(|w| w == b"fmt ").expect("fixture 有 fmt 块");
+    const BODY_START: usize = 12; // "RIFF" + size + "WAVE"
+    let new_len = (raw.len() - BODY_START + list.len()) as u32;
+    let mut out = Vec::new();
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&new_len.to_le_bytes());
+    out.extend_from_slice(&raw[8..fmt_pos]);
+    out.extend_from_slice(&list);
+    out.extend_from_slice(&raw[fmt_pos..]);
+    fs::write(&p, out).unwrap();
+
+    let song = app_lib::service::reader::read_song_meta(&p).expect("双标签 WAV 应可读");
+    assert_eq!(
+        song.title, "ID3标题",
+        "内嵌 ID3v2 应压过 RIFF INFO 的 INAM"
+    );
+    assert_eq!(song.artist, "ID3艺术家", "内嵌 ID3v2 应压过 RIFF INFO 的 IART");
+}
+
+/// 坏标签三格式仍返回 Err（走只读降级，PRD 关键约束）。
+#[test]
+fn open_song_corrupt_tag_in_new_formats_returns_err() {
+    let tmp = TempDir::new().unwrap();
+    for name in ["bad.ape", "bad.wav", "bad.m4a"] {
+        // 合法容器 magic + 截断/垃圾负载 → 标签解析失败
+        let head: &[u8] = match name {
+            "bad.ape" => b"MAC \x9e\x0f\x00\x00",
+            "bad.wav" => b"RIFF\x40\x00\x00\x00WAVEfmt ",
+            _ => b"\x00\x00\x00\x20ftypM4A \x00\x00\x00\x00M4A isom",
+        };
+        let mut bytes = head.to_vec();
+        bytes.extend(std::iter::repeat_n(0xABu8, 64));
+        fs::write(tmp.path().join(name), bytes).unwrap();
+
+        let res = app_lib::service::reader::read_song_meta(&tmp.path().join(name));
+        assert!(res.is_err(), "{name} 坏标签应返回 Err 以触发只读降级");
+    }
 }

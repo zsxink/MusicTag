@@ -6,7 +6,10 @@
 mod common;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use common::{add_tags, full_song, tiny_png_bytes, write_tagged_flac, write_tagged_mp3};
+use common::{
+    add_tags, full_song, tiny_png_bytes, write_tagged_flac, write_tagged_m4a, write_tagged_mp3,
+    write_tagged_wav,
+};
 use lofty::prelude::TaggedFileExt;
 use lofty::probe::Probe;
 use std::fs;
@@ -405,4 +408,100 @@ fn save_song_mp3_embeds_compressed_cover_not_original() {
         embedded_img.width(),
         embedded_img.height()
     );
+}
+
+// ==== APE / WAV / M4A 三格式往返（specs: song-save / lyrics-lrc / cover-embed）====
+
+/// WAV 全字段 + 歌词 + 封面往返（内嵌 ID3v2：WAV 的 `primary_tag_type()` 即 Id3v2）。
+#[test]
+fn save_song_wav_roundtrips_all_fields() {
+    let tmp = TempDir::new().unwrap();
+    write_tagged_wav(tmp.path(), "song.wav", "旧标题", "旧艺术家");
+    let path = tmp.path().join("song.wav").to_string_lossy().into_owned();
+
+    app_lib::service::writer::save_song(full_song(path.clone()), false).expect("WAV 保存应成功");
+
+    let saved = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("保存后应可读");
+    assert_eq!(saved.title, "保存标题");
+    assert_eq!(saved.artist, "保存艺术家");
+    assert_eq!(saved.album, "保存专辑");
+    assert_eq!(saved.album_artist, "保存专辑艺术家");
+    assert_eq!(saved.track, "7");
+    assert_eq!(saved.track_total, "9");
+    assert_eq!(saved.year, "2022");
+    assert_eq!(saved.genre, "Rock");
+    assert_eq!(saved.lyrics, "[00:00.00]保存歌词第一行\n[00:10.00]第二行");
+    assert_eq!(saved.lyrics_source, app_lib::model::LyricsSource::Embedded);
+
+    let cover = saved.cover.expect("WAV 应有封面");
+    let b64 = cover.split_once(";base64,").map(|(_, b)| b).unwrap();
+    assert_eq!(BASE64.decode(b64).unwrap(), tiny_png_bytes());
+}
+
+/// WAV 封面落到内嵌 ID3v2 的 APIC（PRD §5.5、cover-embed 规格「WAV 封面写入」）。
+#[test]
+fn save_song_wav_cover_lands_in_embedded_id3v2_apic() {
+    let tmp = TempDir::new().unwrap();
+    write_tagged_wav(tmp.path(), "cover.wav", "T", "A");
+    let path = tmp.path().join("cover.wav").to_string_lossy().into_owned();
+
+    app_lib::service::writer::save_song(full_song(path.clone()), false).expect("WAV 保存应成功");
+
+    let tagged = Probe::open(&path).and_then(|p| p.read()).expect("应可读");
+    let tag = tagged.primary_tag().expect("应有主标签");
+    assert_eq!(
+        tag.tag_type(),
+        lofty::tag::TagType::Id3v2,
+        "WAV 主标签应为内嵌 ID3v2"
+    );
+    assert_eq!(
+        tag.pictures().len(),
+        1,
+        "封面应作为 APIC 写入内嵌 ID3v2，而非 RIFF INFO"
+    );
+}
+
+/// M4A 全字段 + 歌词 + 封面往返。
+#[test]
+fn save_song_m4a_roundtrips_all_fields() {
+    let tmp = TempDir::new().unwrap();
+    write_tagged_m4a(tmp.path(), "song.m4a", "旧标题", "旧艺术家");
+    let path = tmp.path().join("song.m4a").to_string_lossy().into_owned();
+
+    app_lib::service::writer::save_song(full_song(path.clone()), false).expect("M4A 保存应成功");
+
+    let saved = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("保存后应可读");
+    assert_eq!(saved.title, "保存标题");
+    assert_eq!(saved.artist, "保存艺术家");
+    assert_eq!(saved.album, "保存专辑");
+    assert_eq!(saved.album_artist, "保存专辑艺术家");
+    assert_eq!(saved.track, "7");
+    assert_eq!(saved.track_total, "9");
+    assert_eq!(saved.year, "2022", "M4A 年份应写入并可读回");
+    assert_eq!(saved.genre, "Rock");
+    assert_eq!(
+        saved.lyrics,
+        "[00:00.00]保存歌词第一行\n[00:10.00]第二行",
+        "M4A 歌词应走 ©lyr 兜底路径"
+    );
+    assert_eq!(saved.lyrics_source, app_lib::model::LyricsSource::Embedded);
+
+    let cover = saved.cover.expect("M4A 应有封面");
+    let b64 = cover.split_once(";base64,").map(|(_, b)| b).unwrap();
+    assert_eq!(BASE64.decode(b64).unwrap(), tiny_png_bytes());
+}
+
+/// M4A 封面写入 ilst `covr`（cover-embed 规格「M4A 封面写入」）。
+#[test]
+fn save_song_m4a_cover_lands_in_ilst_covr() {
+    let tmp = TempDir::new().unwrap();
+    write_tagged_m4a(tmp.path(), "cover.m4a", "T", "A");
+    let path = tmp.path().join("cover.m4a").to_string_lossy().into_owned();
+
+    app_lib::service::writer::save_song(full_song(path.clone()), false).expect("M4A 保存应成功");
+
+    let tagged = Probe::open(&path).and_then(|p| p.read()).expect("应可读");
+    let tag = tagged.primary_tag().expect("应有主标签");
+    assert_eq!(tag.tag_type(), lofty::tag::TagType::Mp4Ilst);
+    assert_eq!(tag.pictures().len(), 1, "M4A 封面应写入 ilst covr");
 }

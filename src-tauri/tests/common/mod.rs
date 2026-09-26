@@ -4,6 +4,7 @@
 // - `tiny_png_bytes`：生成 2x2 红色 PNG 字节；
 // - `add_tags`：往已写好的音频文件覆写全字段标签（含歌词、封面）；
 // - `write_tagged_flac` / `write_tagged_mp3`：构造最小合法 FLAC/MP3；
+// - `write_tagged_ape` / `write_tagged_wav` / `write_tagged_m4a`：构造最小合法 APE/WAV/M4A；
 // - `full_song`：构造完整表单（全字段 + 歌词 + 封面 data URL）。
 //
 // 各测试 crate 按需引用子集，未用到的 fixture 属预期，不产生 dead_code 告警。
@@ -209,4 +210,244 @@ pub fn full_song(path: String) -> app_lib::model::Song {
         cover: Some(cover),
         cover_mime: Some("image/png".into()),
     }
+}
+
+/// 最小合法 Monkey's Audio（.ape）：MAC 描述符 + 头 + APEv2 tag。
+///
+/// lofty 无法凭空产出 APE 音频 payload，故手工拼字节（与 FLAC/MP3 fixture 同思路）。
+pub fn write_tagged_ape(dir: &Path, name: &str, title: &str, artist: &str) {
+    fn item(key: &str, value: &str) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&(value.len() as u32).to_le_bytes()); // value size
+        v.extend_from_slice(&0u32.to_le_bytes()); // flags: 0 = UTF-8 text
+        v.extend_from_slice(key.as_bytes());
+        v.push(0);
+        v.extend_from_slice(value.as_bytes());
+        v
+    }
+    fn ape_tag(items: &[Vec<u8>]) -> Vec<u8> {
+        let body: Vec<u8> = items.concat();
+        let size = (body.len() + 32) as u32; // items + footer
+        let mut t = Vec::new();
+        t.extend_from_slice(b"APETAGEX");
+        t.extend_from_slice(&2000u32.to_le_bytes()); // version
+        t.extend_from_slice(&size.to_le_bytes());
+        t.extend_from_slice(&(items.len() as u32).to_le_bytes());
+        t.extend_from_slice(&0u32.to_le_bytes()); // flags
+        t.extend_from_slice(&[0u8; 8]); // reserved
+        t.extend_from_slice(&body);
+        // footer
+        t.extend_from_slice(b"APETAGEX");
+        t.extend_from_slice(&2000u32.to_le_bytes());
+        t.extend_from_slice(&size.to_le_bytes());
+        t.extend_from_slice(&(items.len() as u32).to_le_bytes());
+        t.extend_from_slice(&0u32.to_le_bytes());
+        t.extend_from_slice(&[0u8; 8]);
+        t
+    }
+
+    // MAC 描述符。lofty `properties_gt_3980` 在 `MAC ` 之后**恰好**读 46 字节
+    // descriptor、并取 `descriptor[2..6]` 当 descriptor_len，故 46 字节里偏移 2 放
+    // 46 自身（见下方断言），偏移 6 起放 24 字节 MAC header 的字段。
+    let mut mac = Vec::new();
+    mac.extend_from_slice(b"MAC ");
+    mac.extend_from_slice(&3990u16.to_le_bytes()); // version >= 3980
+    let mut desc = Vec::new();
+    desc.extend_from_slice(&46u32.to_le_bytes()); // descriptor[2..6]，lofty 取作 descriptor_len
+    desc.extend_from_slice(&0u32.to_le_bytes()); // descriptor[6..10] 未读
+    desc.extend_from_slice(&0u32.to_le_bytes()); // blocks_per_frame
+    desc.extend_from_slice(&0u32.to_le_bytes()); // final_frame_blocks
+    desc.extend_from_slice(&1u32.to_le_bytes()); // total_frames（须非 0，见 lofty verify）
+    desc.extend_from_slice(&0u32.to_le_bytes()); // MAC header[0..4]（compression/flags）未读
+    desc.extend_from_slice(&16u16.to_le_bytes()); // MAC header bit_depth
+    desc.extend_from_slice(&1u16.to_le_bytes()); // MAC header channels（1..=32）
+    desc.extend_from_slice(&44100u32.to_le_bytes()); // MAC header sample_rate
+    desc.extend_from_slice(&[0u8; 14]); // 补齐 descriptor 尾部
+    assert_eq!(desc.len(), 46, "MAC descriptor after magic must be 46 bytes");
+    mac.extend_from_slice(&desc);
+    mac.extend_from_slice(&[0u8; 24]); // MAC header（字段已在 descriptor 尾部读走）
+
+    let mut out = mac;
+    out.extend_from_slice(&ape_tag(&[
+        item("Title", title),
+        item("Artist", artist),
+    ]));
+    fs::write(dir.join(name), &out).expect("写入测试 APE 失败");
+}
+
+/// 最小合法 WAV（RIFF/WAVE + fmt + data + ID3 chunk）。
+///
+/// 走内嵌 ID3v2 chunk 而非 RIFF INFO：WAV 的 `primary_tag_type()` 是 Id3v2，
+/// 且 MusicTag 写侧封面落到内嵌 APIC（PRD §5.5）。
+pub fn write_tagged_wav(dir: &Path, name: &str, title: &str, artist: &str) {
+    fn synchsafe(n: usize) -> [u8; 4] {
+        let n = n as u32;
+        [(n >> 21) as u8, (n >> 14) as u8, (n >> 7) as u8, n as u8]
+    }
+    fn text_frame(id: &str, text: &str) -> Vec<u8> {
+        let mut f = Vec::new();
+        f.extend_from_slice(id.as_bytes());
+        f.extend_from_slice(&synchsafe(text.len() + 1)[..]);
+        f.extend_from_slice(&[0, 0]);
+        f.push(0x03); // UTF-8
+        f.extend_from_slice(text.as_bytes());
+        f
+    }
+    fn chunk(id: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut c = Vec::from(id);
+        c.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        c.extend_from_slice(body);
+        if body.len() % 2 == 1 {
+            c.push(0); // pad to even boundary
+        }
+        c
+    }
+
+    let mut fmt = Vec::new();
+    fmt.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    fmt.extend_from_slice(&1u16.to_le_bytes()); // mono
+    fmt.extend_from_slice(&44100u32.to_le_bytes());
+    fmt.extend_from_slice(&88200u32.to_le_bytes()); // byte rate
+    fmt.extend_from_slice(&2u16.to_le_bytes()); // block align
+    fmt.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+
+    let mut frames = Vec::new();
+    frames.extend(text_frame("TIT2", title));
+    frames.extend(text_frame("TPE1", artist));
+    let mut id3 = Vec::from(b"ID3\x04\x00\x00");
+    id3.extend_from_slice(&synchsafe(frames.len()));
+    id3.extend_from_slice(&frames);
+
+    let mut body = chunk(b"fmt ", &fmt);
+    body.extend(chunk(b"data", &vec![0u8; 64]));
+    body.extend(chunk(b"ID3 ", &id3));
+
+    let mut out = Vec::from(b"RIFF");
+    out.extend_from_slice(&((body.len() + 4) as u32).to_le_bytes());
+    out.extend_from_slice(b"WAVE");
+    out.extend_from_slice(&body);
+    fs::write(dir.join(name), &out).expect("写入测试 WAV 失败");
+}
+
+/// 最小合法 M4A：ftyp + mdat + moov(mvhd/trak/mdia/minf/stbl/stsd/udta/meta/ilst)。
+///
+/// 手工拼 MP4 atom（尺寸前缀 + 4 字节类型，大端），与 FLAC/MP3 fixture 同思路。
+pub fn write_tagged_m4a(dir: &Path, name: &str, title: &str, artist: &str) {
+    fn atom(id: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut a = Vec::from(((body.len() + 8) as u32).to_be_bytes());
+        a.extend_from_slice(id);
+        a.extend_from_slice(body);
+        a
+    }
+    fn full_atom(id: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut b = vec![0u8, 0, 0, 0]; // version + flags
+        b.extend_from_slice(body);
+        atom(id, &b)
+    }
+    fn data_atom(text: &str) -> Vec<u8> {
+        // version(1) + flags(3)=UTF8(1) + locale(4) + text
+        let mut d = vec![0u8, 0, 0, 1];
+        d.extend_from_slice(&[0, 0, 0, 0]);
+        d.extend_from_slice(text.as_bytes());
+        atom(b"data", &d)
+    }
+
+    let mut ilst = Vec::new();
+    ilst.extend(atom(b"\xa9nam", &data_atom(title)));
+    ilst.extend(atom(b"\xa9ART", &data_atom(artist)));
+
+    // meta 至少要一个 hdlr（lofty 靠它识别 handler），照抄真实文件的 hdlr 内容
+    let hdlr_body = [
+        &full_atom(b"hdlr", &[0u8, 0, 0, 0, 0, 0, 0, 0, b'm', b'd', b'i', b'r', b'a', b'p',
+            b'l', b'i', b's', b't', 0, 0, 0, 0, 0, 0])[..],
+    ]
+    .concat();
+    let mut meta_body = vec![0u8, 0, 0, 0];
+    meta_body.extend_from_slice(&hdlr_body);
+    meta_body.extend_from_slice(&atom(b"ilst", &ilst));
+    let meta = atom(b"meta", &meta_body);
+
+    let udta = atom(b"udta", &meta);
+
+    // trak → mdia → {mdhd, hdlr(="soun"), minf}。lofty `find_audio_trak` 要求
+    // hdlr.handler_type == "soun" 且存在 mdhd，否则报 "File contains no audio tracks"。
+    let mut mdhd = Vec::new(); // version 0
+    mdhd.extend_from_slice(&0u32.to_be_bytes()); // creation time
+    mdhd.extend_from_slice(&0u32.to_be_bytes()); // modification time
+    mdhd.extend_from_slice(&44100u32.to_be_bytes()); // timescale
+    mdhd.extend_from_slice(&44100u32.to_be_bytes()); // duration
+    mdhd.extend_from_slice(&[0u8; 4]); // language + quality
+    let mdhd = full_atom(b"mdhd", &mdhd);
+
+    // hdlr：full_atom 已补 version/flags(4)，故 body 从 pre_defined 起算。
+    // lofty 读法：atom 头后**前跳 8 字节**再读 4 字节当 handler_type
+    // （`find_audio_trak`），即 pre_defined(4) 之后必须正好是 "soun"。
+    let mut hdlr_body = vec![0u8; 4]; // pre_defined
+    hdlr_body.extend_from_slice(b"soun"); // handler type
+    hdlr_body.extend_from_slice(&[0u8; 12]); // reserved
+    let hdlr_mdia = full_atom(b"hdlr", &hdlr_body);
+
+    // minf → stbl → stsd（音频 codec 描述）。lofty 在此判读 codec/声道/采样率。
+    let mut esds_body = vec![0u8, 0, 0, 0]; // version + flags
+    esds_body.push(0x03); // ES_DescrTag
+    esds_body.extend_from_slice(&[0, 0, 0, 0]); // len 占位
+    esds_body.push(0x40); // flags: MPEG-4 audio
+    esds_body.push(0x15); // object type = AAC
+    esds_body.extend_from_slice(&44100u32.to_be_bytes()); // buffer size DB (hi/lo)
+    esds_body.extend_from_slice(&0u32.to_be_bytes()); // max bitrate
+    esds_body.extend_from_slice(&0u32.to_be_bytes()); // avg bitrate
+    esds_body.push(0x05); // DecoderConfigDescrTag
+    esds_body.extend_from_slice(&[0, 0, 0, 0]); // len 占位
+    esds_body.push(0x02); // object type = AAC LC
+    esds_body.push(0x1b); // buffer size (90000)
+    esds_body.extend_from_slice(&0u32.to_be_bytes()); // max bitrate
+    esds_body.extend_from_slice(&0u32.to_be_bytes()); // avg bitrate
+    esds_body.push(0x05); // DecSpecificInfoTag
+    esds_body.push(0x02); // len = 2
+    esds_body.extend_from_slice(&[0x12, 0x10]); // AAC LC, 44100Hz
+    esds_body.push(0x06); // SLConfigDescrTag
+    esds_body.push(0x01); // len = 1
+    esds_body.push(0x02); // predefined = 2
+    let esds = full_atom(b"esds", &esds_body);
+
+    let mut mp4a_body = Vec::new(); // reserved
+    mp4a_body.extend_from_slice(&[0u8; 6]);
+    mp4a_body.extend_from_slice(&1u16.to_be_bytes()); // data reference index
+    mp4a_body.extend_from_slice(&[0u8; 8]); // version/revision/vendor
+    mp4a_body.extend_from_slice(&1u16.to_be_bytes()); // channels
+    mp4a_body.extend_from_slice(&16u16.to_be_bytes()); // sample size
+    mp4a_body.extend_from_slice(&[0u8, 0]); // compression id
+    mp4a_body.extend_from_slice(&[0u8; 2]); // packet size
+    mp4a_body.extend_from_slice(&44100u32.to_be_bytes()); // sample rate (16.16 fixed → high word)
+    mp4a_body.extend_from_slice(&esds);
+    let mut stsd_body = vec![0u8, 0, 0, 0]; // version + flags
+    stsd_body.extend_from_slice(&1u32.to_be_bytes()); // entry count
+    let mut stsd_body_inner = vec![0u8; 6]; // sample entry reserved
+    stsd_body_inner.extend_from_slice(&mp4a_body);
+    stsd_body.extend_from_slice(&atom(b"mp4a", &stsd_body_inner));
+    let stsd = full_atom(b"stsd", &stsd_body);
+
+    let stbl = atom(b"stbl", &stsd);
+    let minf = atom(b"minf", &stbl);
+    let mut mdia_body = mdhd;
+    mdia_body.extend_from_slice(&hdlr_mdia);
+    mdia_body.extend_from_slice(&minf);
+    let mdia = atom(b"mdia", &mdia_body);
+    let trak = atom(b"trak", &atom(b"tkhd", &[0u8; 4]).into_iter().chain(mdia.into_iter()).collect::<Vec<u8>>());
+
+    let mut moov = full_atom(b"mvhd", &[0u8; 100]);
+    moov.extend_from_slice(&trak);
+    moov.extend_from_slice(&udta);
+    let moov = atom(b"moov", &moov);
+
+    let ftyp = atom(
+        b"ftyp",
+        &[b'M', b'4', b'A', b' ', 0, 0, 0, 0, b'M', b'4', b'A', b' ', b'i', b's', b'o', b'm'],
+    );
+    let mdat = atom(b"mdat", &[0u8; 16]);
+
+    let mut out = ftyp;
+    out.extend_from_slice(&mdat);
+    out.extend_from_slice(&moov);
+    fs::write(dir.join(name), &out).expect("写入测试 M4A 失败");
 }
