@@ -15,6 +15,13 @@
 - **WHEN** 节点定义包含 id、kind、依赖、runner 或 role、schema、retry 与 maxRounds
 - **THEN** 核心按定义调度，不在执行器中硬编码节点顺序
 
+#### Scenario: 主会话保持调度权
+- **WHEN** 用户从任一受支持宿主启动 pipe
+- **THEN** 当前主会话 Agent 读取共享 skill、执行阶段推进，并在本会话中派发原生子 Agent，任务结果返回主会话决策
+
+#### Scenario: 无原生能力
+- **WHEN** 当前宿主不能派发所需原生子 Agent 或不能保障角色最小权限
+- **THEN** 主 Agent 在写入阶段前明确停止并说明缺失能力，不回退至旧 CLI driver
 ### Requirement: 节点状态机与断点续跑（P1）
 核心 SHALL 为每个节点维护 `pending → ready → running → succeeded | failed | suspended` 状态，并将版本化状态原子写入以仓库根锚定的 `.agents/runs/<change>/state.json`。状态 SHALL 保留逐 attempt 历史而非覆盖前次结果；resume SHALL 校验已成功节点的落地事实与输入指纹，只重跑失败、未完成或已被依赖污染的节点。旧 schema SHALL 可确定性迁移且不得丢失累计 attempts。
 
@@ -34,6 +41,41 @@
 - **WHEN** resume 加载旧 schema 的 state.json
 - **THEN** core 保留原节点状态与累计 attempts 完成迁移，迁移结果原子落盘
 
+#### Scenario: 上下文压缩或新会话恢复
+- **WHEN** 主会话上下文中断后重新触发同一 change
+- **THEN** 主 Agent 读取 tasks.md/progress.md，核对 branch、worktree、Git HEAD/diff/提交、产物和远端 PR 状态，从首个未完成且依赖满足的阶段继续
+
+#### Scenario: 标记与事实不一致
+- **WHEN** Markdown 标记某阶段成功但提交不存在、输入已变或验证 HEAD 不再适用
+- **THEN** 主 Agent 标记该阶段及受影响下游待重做，不能依靠勾选框宣布成功
+
+#### Scenario: 中断的原生子 Agent
+- **WHEN** progress.md 记录子 Agent 正在写入而恢复时无法确认其仍活跃
+- **THEN** 主 Agent 将任务标为中断待核查，检查遗留差异及所有权后再续派，不能与可能仍在工作的 Agent 并行写同一范围
+
+#### Scenario: 挂起后接管已释放的锁
+- **WHEN** 主 Agent 将阶段设为 suspended 并释放运行锁，后续会话确认旧主会话和所有写入子 Agent 均已结束
+- **THEN** 新主 Agent 使用旧 owner、显式无活动写入者确认和核查依据，在原子接管事务中认领新锁并记录决定；未挂起的无锁记录不能以此方式接管。
+
+#### Scenario: 接管事务中断后恢复
+- **WHEN** 接管 journal 属于已确认退出的主会话 A，后续会话 B 核实 A 和写入子 Agent 均不再活动
+- **THEN** B 使用 takeover-recover 命令核对 journal 与 lock/progress 的部分提交状态后恢复或完成接管，并记录 journal ID 和核查依据；未知/不匹配状态 fail-closed，不要求手工删除 journal。
+
+#### Scenario: 初始化锁写入中断后恢复
+- **WHEN** 初始化会话在原子创建完整 lock 后、首次 progress.md 写入前中断
+- **THEN** 新会话必须提供匹配的 previous-owner、无活动写入者确认和非空核查依据，通过排他恢复 claim 隔离旧 lock 后重新初始化；无核查依据或 progress 已存在时拒绝恢复。
+
+#### Scenario: 无核查依据拒绝接管
+- **WHEN** 调用 takeover 或 takeover-recover 时缺少非空 evidence
+- **THEN** 命令 fail-closed，不更改 lock、progress 或 takeover journal。
+
+#### Scenario: worktree 清理后继续记录
+- **WHEN** 集成流程删除实现用的 linked worktree
+- **THEN** 主 Agent 仍能在共享主仓读取运行进度，并写入 `cleanup-local` checkpoint 和最终阶段状态。
+
+#### Scenario: merge 后完成态恢复
+- **WHEN** PR 已合并、verify-remote 和 cleanup-local 事实均已核实，但会话在 integrate 最终标记前中断，或后续再次恢复
+- **THEN** 主 Agent 以 main 分支、merge 后 HEAD 和 worktree 已删除作为生命周期事实，确认验证 HEAD 仍可从 main 到达后保留原验证/集成证据，只补完 integrate 或报告完成，不要求伪造已删除 worktree 的旧事实。
 ### Requirement: 决断链（P2）
 节点失败 SHALL 先由确定性错误分类器判定 error kind 与可恢复性。`auth/config/schema/permission` 等永久错误 SHALL 立即失败或挂起；`timeout/network/protocol` 等瞬态错误 SHALL 仅在累计预算内按退避策略重试；`branch-behind/no-checks-yet/already-merged` SHALL 由 integrate 状态机处理。只有无法分类且确需技术判断时才调用 leader 决断节点。所有 retry 预算 SHALL 跨 `--resume` 累计生效，超过预算只有显式 `--force-retry <node>` 才可继续。
 
@@ -61,6 +103,13 @@
 - **WHEN** 问题涉及产品方向、需求歧义、CR 三轮不过或累计预算耗尽
 - **THEN** core 写入挂起报告并退出 suspended，等待主会话中的用户决策
 
+#### Scenario: 子 Agent 请求主 Agent 判断
+- **WHEN** 子 Agent 返回问题、规格依据、建议、备选影响和阻塞状态
+- **THEN** 主 Agent 依据已批准规格及用户授权给出答复并记录，再续派原子 Agent 或剩余任务
+
+#### Scenario: 有界 CR 修复
+- **WHEN** CR 指出 blocker/major 或验证失败
+- **THEN** 主 Agent 按文件所有权派发有界修复、重跑受影响检查并重新审查；轮次与判断被记录，不能直接放行
 ### Requirement: 中立工作流与确定性命令（P6）
 核心 SHALL 只依赖 `.agents/workflows/` 与 `.agents/commands/` 下的中立模块，不依赖宿主 UI 命令。bootstrap、spec-gate、verify 与 integrate SHALL 由 core 直接调用可测试的确定性实现；driver 不得接管这些步骤或决定命令顺序。
 
@@ -92,6 +141,25 @@
 - **WHEN** 从 Claude、Codex 或 OpenCode 启动相同 change
 - **THEN** 三个入口执行同一 core 与确定性 runner，仅 Agent 节点的 driver 不同
 
+#### Scenario: 集成幂等
+- **WHEN** 恢复时已有该分支 PR 或远端已合并
+- **THEN** 主 Agent 复用 GitHub 事实，继续下一 checkpoint，不重复创建 PR、等待新一轮 CI 或再次合并
+
+#### Scenario: 归档与 PR 顺序
+- **WHEN** 主 Agent 准备创建 PR
+- **THEN** 先核对活动 change 已归档且归档规格与实现同在分支 diff 中，缺一则停止
+
+#### Scenario: 集成证据失效
+- **WHEN** progress 记录 CI、PR 或合并 checkpoint 成功，但恢复时 GitHub/本地事实缺少必要字段或与记录不匹配
+- **THEN** 主 Agent 将该 checkpoint 与 integrate 标记为无效，从首个未证实 checkpoint 重新核查，不复用旧的成功标记。
+
+#### Scenario: Verify 后源码改变
+- **WHEN** Verify succeeded 后到任一集成副作用前，源码快照与 Verify 指纹不一致
+- **THEN** 主 Agent 拒绝进入 Integrate 或推进该 checkpoint，并让 Verify/Integrate 失效；OpenSpec 归档/规格文件变化只有在源码指纹仍一致时可继续。
+
+#### Scenario: 跨宿主复算源码指纹
+- **WHEN** 不同宿主、cwd 或 linked worktree 恢复 Verify/Integrate
+- **THEN** 使用 `source-fingerprint.js` 的版本化 UTF-8 路径清单算法复算，并在 Verify 与 checkpoint evidence 记录版本、指纹、manifest 摘要和清单；同一源码状态得到同一指纹，OpenSpec 归档移动不改变源码指纹。
 ### Requirement: 统一验证基线（继承 workflow-optimize 既有门禁）
 最终验证 SHALL 是同一 commit 上唯一一次本地完整基线。代码域按适用范围执行 cargo check、cargo test、npm test、npm build 与 OpenSpec strict validate；docs/spec/infra 域执行对应文档审计或脚本静态自检、pipe-core/workflow-core 全量测试与 OpenSpec validate。Rust 与前端 lane MAY 在资源允许时并行，但 OpenSpec 和汇总门禁 SHALL 在 lane 汇合后执行。任一步失败均为 verify_failed，Verify 只验证不修复。
 
@@ -115,6 +183,13 @@
 - **WHEN** 变更涉及取词、换源、并发或离线判定
 - **THEN** verify.steps 仍逐项记录单源换源、跨 kind 串扰与离线判定回归结果，缺失必选项即失败
 
+#### Scenario: 验证只读源码
+- **WHEN** 最终验证命令写出构建产物或缓存
+- **THEN** 允许白名单构建路径变化，但 HEAD、源码和规格变化使验证失败
+
+#### Scenario: 失败阻断
+- **WHEN** 任一适用验证命令失败或缺少必要专项回归项
+- **THEN** 主 Agent 标记 Verify 失败，记录命令与退出码，不能创建 PR
 ### Requirement: CR 复盘专项维度（继承 workflow-optimize 既有门禁）
 CR SHALL 仅使用当前 change 的真实 specs、design、Tester 结果、diff stat、commit SHA 与定向 `git diff main...HEAD` 作为证据，不得注入其他 change 的测试数量或固定结论。CR 保持源码只读，并检查一致性、遗漏、缺陷以及 Issue #46/#47 复盘专项三检；阻断或 major 问题必须包含 file、issue、specReference、suggestion，只有无阻断且无 major 时 `pass=true`。
 

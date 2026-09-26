@@ -44,3 +44,9 @@
 | 4 | minor | core.js resolveDecision 兼容路径 | 对 unknown 调 driver.runAgent 调 leader 决断，未计 humanInterventions | **记录**：仅兼容兜底路径，实机构架 error-classifier 直接归类；作为审计增强意见记录 |
 
 **结论**：CR 无阻断。2 条 major 为记录不阻断（均 pre-existing 设计增强，不影响本次 infra 变更正确性与 resume 语义）；2 条 minor 记录。Verify 确定性门禁实跑 9/9 全绿。准予进入 integrate。
+
+## 2026-09-26 收尾复核
+
+- **4.1–4.3**：已在原实现 PR #131（合并提交 `581f662`）完成。原始执行记录与测试映射见本文件上方“任务组 4 完成状态”；CR 动态输入、三项复盘专项/四要素/三轮上限，以及 Dev/Tester 分层均有当时对应测试证据。后续 PR #133 将旧 Node pipe core 替换为主会话原生 Agent 工作流，故相关实现文件已迁移或删除；本次依据已合并实现提交和当时测试记录核实历史任务完成状态。
+- **8.1**：由后续 PR #133（合并提交 `2347bce`）补齐并同步至 main：`AGENTS.md`、`.agents/skills/pipe/SKILL.md`、`.agents/skills/pipe/WORKFLOW.md`、公共角色、`.claude/CLAUDE.md`、`.claude/commands/pipe.md` 与 OpenCode 入口均切换到共享主会话/原生子 Agent 流程。
+- **归档规格校验**：本变更 delta 与当前 canonical `workflow-core` 的 MODIFIED requirement 需保留 PR #133 新增的场景；归档将使用 `openspec archive --skip-specs`，只归档已完成 change，不覆盖 PR #133 已更新的 canonical spec。
