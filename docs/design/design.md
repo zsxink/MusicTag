@@ -5,7 +5,7 @@
 | 产品 | MusicTag |
 | 版本 | V1 |
 | 类型 | 桌面应用（Tauri 2 + Rust，WebView 前端） |
-| 定位 | 工具线 · 自用 · 逐首补全 FLAC/MP3 元数据 |
+| 定位 | 工具线 · 自用 · 逐首补全 FLAC/MP3/APE/WAV/M4A 元数据 |
 | 日期 | 2026-08-01 |
 | 配套 | 界面草图 `design/mockup.{html,css,js}` · 需求见 `V1-PRD.md` 第二部分 |
 
@@ -224,7 +224,7 @@ IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/c
 | 目录/文件 | 职责 | 允许触碰的依赖 |
 |---|---|---|
 | `commands/` | Tauri command 薄壳：`#[tauri::command]`、参数接收、对 service 委托；lofty/IO/编解码逻辑**一律不出现** | `model`、`service` |
-| `service/` | 纯业务层：`reader.rs`（标签读）、`writer.rs`（保存编排）、`meta.rs`（字段映射/格式分支）、`cover.rs`（封面 data URL 编解码）、`fs_atomic.rs`（原子写回） | `model`、lofty、`image` |
+| `service/` | 纯业务层：`reader.rs`（标签读）、`writer.rs`（保存编排）、`meta.rs`（字段映射 + **多格式分支（FLAC/MP3/APE/WAV/M4A）**：`is_audio_file` 扩展名白名单 + `apply_meta`/`apply_lyrics`/`apply_cover` 按 TagType 分派；映射表以 PRD §5 为准）、`cover.rs`（封面 data URL 编解码）、`fs_atomic.rs`（原子写回） | `model`、lofty、`image` |
 | `model.rs` | 数据类型：`Song` / `SongSummary` / `LyricsSource` / `MusicSourceId`（与前端 TS 类型对齐） | 无业务依赖 |
 | `lib.rs` | `pub mod model/commands/service` + `generate_handler![...]` 注册 command；模块声明必须 `pub`，供 `src-tauri/tests/` 集成测试经 `app_lib::` 访问 | — |
 
@@ -353,9 +353,9 @@ interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; 
 | `pick_folder()` | `() → Option<String>` | 打开原生文件夹选择器（rfd）；有上次目录 → 默认定位到该目录；取消返回 `None`，否则返回目录绝对路径 |
 | `get_last_dir()` | `() → Option<String>` | 读取持久化的上次打开目录（config.json `last_dir`）；无记忆/目录已删 → `None`（启动自动加载用） |
 | `save_last_dir(dir)` | `String → ()` | 记住本次打开目录（config.json 原子写）；fire-and-forget，失败静默 |
-| `list_songs(dir)` | `String → Vec<SongSummary>` | 打开文件夹，深度遍历；**只读列表项**（`path`/`title`/`artist`，歌名/作者空时前端回退显示文件名） |
-| `open_song(path)` | `String → Result<Song, String>` | 读取一首的**完整**标签 + 封面 base64，放进编辑区（按需读取；坏标签 → `Err`，表单只读） |
-| `save_song(song, exportLrc)` | `Song, bool → Result<(), String>` | 写回原文件（cover 为 base64，Rust 侧解码）；`exportLrc` 勾选时同步写同目录同名 `.lrc`（空歌词忽略） |
+| `list_songs(dir)` | `String → Vec<SongSummary>` | 打开文件夹，深度遍历；**只读列表项**（`path`/`title`/`artist`，歌名/作者空时前端回退显示文件名）；收集范围为扩展名白名单 `.flac`/`.mp3`/`.ape`/`.wav`/`.m4a`/`.mp4`（大小写不敏感，`service::meta::is_audio_file`） |
+| `open_song(path)` | `String → Result<Song, String>` | 读取一首的**完整**标签 + 封面 base64，放进编辑区（按需读取；各格式取 `primary_tag()`；坏标签 → `Err`，表单只读） |
+| `save_song(song, exportLrc)` | `Song, bool → Result<(), String>` | 写回原文件（cover 为 base64，Rust 侧解码）；标签写入按格式分派（FLAC/MP3/APE/WAV/M4A，映射见 PRD §5）；`exportLrc` 勾选时同步写同目录同名 `.lrc`（空歌词忽略） |
 | `rename_song(path, new_name)` | `String, String → Result<(), String>` | 音频 + `.lrc` 改名 |
 | `pick_cover_file()` | `() → Option<CoverInput>` | 原生封面文件选择器（jpg/png/webp）；取消返回 `None`，选中 → 压缩后 data URL + mime |
 | `read_cover_path(path)` | `String → Result<CoverInput, String>` | 拖拽封面路径 → 读文件 + 压缩 + data URL；读失败/非图片 → `Err(中文原因)` |
@@ -373,7 +373,7 @@ interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; 
 
 **测试放置约定（Rust / 前端统一）**：
 
-- **Rust 集成测试（文件 I/O）**：外置到 `src-tauri/tests/`（当前 `list_songs.rs` / `open_song.rs` / `save_song.rs`），经 `app_lib::` 访问生产代码，**不落 src/ 内**；共享 fixture（构造最小合法 FLAC/MP3、全字段标签、封面 data URL、`mock_http_once`）收 `tests/common/mod.rs`，各测试 crate 按需引用子集。
+- **Rust 集成测试（文件 I/O）**：外置到 `src-tauri/tests/`（当前 `list_songs.rs` / `open_song.rs` / `save_song.rs`），经 `app_lib::` 访问生产代码，**不落 src/ 内**；共享 fixture（构造最小合法 FLAC/MP3/APE/WAV/M4A、全字段标签、封面 data URL、`mock_http_once`）收 `tests/common/mod.rs`，各测试 crate 按需引用子集。
 - **Rust 单测（纯逻辑）**：**一律外置** `src-tauri/tests/`（与集成测试同目录，`*_tests.rs`），`src/` 生产代码**零 `#[cfg(test)]`**；共用测试工具收 `tests/common/`；被测试直接引用的私有项提 `pub`（集成测试是独立 crate，仅 `pub` 可见），测试专用 helper（fake 源、`png_of_size` 等）复制进测试文件。
 - **前端测试**：co-located `*.test.ts` 与被测文件同目录（`src/api/*.test.ts`、`src/store/*.test.ts`、`src/lib/*.test.ts`、`src/components/*.test.ts`）；`@tauri-apps/api/core` 的 mock 只依赖 `api/client.ts` 的 import 源。
 - **结构守卫测试**：`src/styles/design-layering.test.ts`（扫描本文件 §10 断言分层/测试放置/落位说明齐全）+ `src/styles/command-contract.test.ts`（扫描 `lib.rs` `generate_handler!` 实际注册集 vs 本文件 §10.3 / `V1-PRD.md §7` / `openspec/config.yaml` 契约清单，断言四源一致——新增 command 时须同步四处契约表，否则守卫失败）+ `src/components/layering.test.ts`（扫描 components/ 断言零 invoke 直呼）——分层规范改代码时须同步本文件，否则守卫失败。
