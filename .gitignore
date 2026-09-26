@@ -17,6 +17,9 @@ src-tauri/gen/schemas/
 .agents/runs/
 .worktrees/
 
+# 本地会话交接文档（不进版本控制）
+.tmp/
+
 # macOS / Finder 元数据
 .DS_Store
 .AppleDouble
