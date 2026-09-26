@@ -32,9 +32,9 @@
 
 **依赖：** 任务组 3。CR 与 Tester 必须消费可信的 core commit SHA、文件范围审计和结构化测试证据。
 
-- [ ] 4.1 用当前 change 的 specs/design、Tester 结果、HEAD、diff stat 和提交列表生成 CR prompt，删除固定 191 测试等历史结论；验证 prompt fixture 只包含当前变更证据且允许定向只读 diff
-- [ ] 4.2 保留 CR 三项复盘专项、finding 四要素与三轮上限，验证不适用标记、blocker/major reroute 和三轮挂起测试通过
-- [ ] 4.3 将 Dev/Tester 自验证缩小为相关测试并以 scenario 清单驱动 Tester，验证同一 HEAD 不在 Dev/Tester 重复运行完整本地基线
+- [x] 4.1 用当前 change 的 specs/design、Tester 结果、HEAD、diff stat 和提交列表生成 CR prompt，删除固定 191 测试等历史结论；验证 prompt fixture 只包含当前变更证据且允许定向只读 diff
+- [x] 4.2 保留 CR 三项复盘专项、finding 四要素与三轮上限，验证不适用标记、blocker/major reroute 和三轮挂起测试通过
+- [x] 4.3 将 Dev/Tester 自验证缩小为相关测试并以 scenario 清单驱动 Tester，验证同一 HEAD 不在 Dev/Tester 重复运行完整本地基线
 
 ## 5. 确定性 Verify
 
@@ -67,6 +67,6 @@
 
 **依赖：** 任务组 7。先用端到端证据确认最终行为，再同步所有入口文档并执行 infra 全量门禁。
 
-- [ ] 8.1 更新 pipe skill、AGENTS 入口、角色说明和 workflow 注释以匹配新 DAG/权限/恢复语义，并验证 prompt/skill 漂移审计通过
+- [x] 8.1 更新 pipe skill、AGENTS 入口、角色说明和 workflow 注释以匹配新 DAG/权限/恢复语义，并验证 prompt/skill 漂移审计通过
 - [x] 8.2 运行 `node --check`、`bash -n`、`node --test .agents/tools/pipe-core/test/*.test.js tests/workflow-core/*.test.cjs`、`node .agents/tools/pipe-core/run.js --self-check`，验证全部静态与回归门禁通过
 - [x] 8.3 运行 `npx openspec validate optimize-pipe-single-change --strict --no-interactive` 并逐项核对 specs scenarios、tasks 完成状态和 Issue #127 九条验收标准均有证据
