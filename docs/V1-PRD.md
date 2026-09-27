@@ -205,9 +205,9 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 / APE / WAV / M4A
 | 年份 Year | `Year` |
 | 流派 Genre | `Genre` |
 | 歌词 Lyrics | `Lyrics` |
-| 封面 Cover | APE picture item（`CoverFront`） |
+| 封面 Cover | APEv2 binary item `Cover Art (Front)`（图片原始字节；`CoverFront`） |
 
-APE 仅写 APE 标签；不创建或写入只读的 ID3v2 标签。
+APE 仅写 APE 标签；不创建或写入只读的 ID3v2 标签。lofty 0.24 的通用 `Tag` 写入路径不序列化 APE 图片，因此封面通过 `ApeTag` 专用转换和写入路径保存，并在原子临时文件上完成。
 
 ### 5.1b WAV → ID3v2
 

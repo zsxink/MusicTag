@@ -14,11 +14,11 @@
 
 | 容器 | lofty `FileType` | primary `TagType` | 歌词写入 | 年份 | 封面 |
 |---|---|---|---|---|---|
-| APE | `Ape` | `Ape` | `ItemKey::Lyrics`，映射为 `Lyrics` | `ItemKey::RecordingDate`，映射为 `Year` | `push_picture` 写 APE 封面项 |
+| APE | `Ape` | `Ape` | `ItemKey::Lyrics`，映射为 `Lyrics` | `ItemKey::RecordingDate`，映射为 `Year` | `ApeTag` 专用写入 `Cover Art (Front)` binary item；读取使用 `ApeFile` 专用 API |
 | WAV | `Wav` | `Id3v2` | `ItemKey::UnsyncLyrics` + `lang=eng`，写 USLT | `ItemKey::RecordingDate`，写 TDRC | `push_picture` 写 ID3v2 APIC |
 | M4A | `Mp4` | `Mp4Ilst` | `ItemKey::Lyrics`，映射为 `©lyr`（与 `UnsyncLyrics` 读取兼容） | `ItemKey::RecordingDate`，映射为 `©day` | `push_picture` 写 MP4 `covr` |
 
-标题、作者、专辑、专辑作者、音轨号、音轨总数、流派继续使用 `TrackTitle`、`TrackArtist`、`AlbumTitle`、`AlbumArtist`、`TrackNumber`、`TrackTotal`、`Genre`，由 lofty 针对各 `TagType` 映射到 APE/WAV ID3v2/MP4 ilst 或现有 FLAC/MP3 标签。保存前清空 primary tag，再写入非空表单字段；空字段依靠 `clear()` 后不重新插入实现删除。APE 只操作 `TagType::Ape`，不得创建或写入 ID3v2。
+标题、作者、专辑、专辑作者、音轨号、音轨总数、流派继续使用 `TrackTitle`、`TrackArtist`、`AlbumTitle`、`AlbumArtist`、`TrackNumber`、`TrackTotal`、`Genre`，由 lofty 针对各 `TagType` 映射到 APE/WAV ID3v2/MP4 ilst 或现有 FLAC/MP3 标签。保存前清空 primary tag，再写入非空表单字段；空字段依靠 `clear()` 后不重新插入实现删除。lofty 0.24 的 generic `Tag` APE 转换不会把 APE 图片项放入 `Tag::pictures()`，因此写侧从已构建的 generic 表单 `Tag` 转成 `ApeTag`，在同目录临时副本上调用 `ApeTag::save_to`，随后原子替换原文件；其他格式继续使用 `TaggedFile::save_to`。读侧对 APE 使用 `ApeFile::read_from` 获取 `Cover Art (Front)` binary item，剥离描述分隔符后按图片字节探测 MIME。APE 只操作 `TagType::Ape`，不得创建或写入 ID3v2。
 
 歌词分支保持现有规则：仅 `TagType::Id3v2` 使用 `UnsyncLyrics`/USLT，其余新增格式使用 `Lyrics`。读取先取 `Lyrics`，为空再取 `UnsyncLyrics`，所以 APE、WAV、M4A 与现有 FLAC/MP3 的读侧保持对称；侧载 `.lrc` 和 `LyricsSource` 不变。封面继续使用 `CoverFront` 和现有 data URL 解码，格式写入由 lofty primary tag 负责。
 
