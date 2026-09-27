@@ -6,7 +6,10 @@
 mod common;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use common::{add_tags, full_song, tiny_png_bytes, write_tagged_flac, write_tagged_mp3};
+use common::{
+    add_tags, full_song, tiny_png_bytes, write_tagged_ape, write_tagged_flac, write_tagged_m4a,
+    write_tagged_mp3, write_tagged_wav,
+};
 use lofty::prelude::TaggedFileExt;
 use lofty::probe::Probe;
 use std::fs;
@@ -72,6 +75,48 @@ fn save_song_mp3_roundtrips_all_fields_id3v24() {
     let cover = saved.cover.expect("应有封面");
     let b64 = cover.split_once(";base64,").map(|(_, b)| b).unwrap();
     assert_eq!(BASE64.decode(b64).unwrap(), tiny_png_bytes());
+}
+
+#[test]
+fn save_song_new_formats_roundtrip_all_fields() {
+    let cases = [
+        (
+            "song.wav",
+            write_tagged_wav as fn(&std::path::Path, &str, &str, &str),
+        ),
+        ("song.m4a", write_tagged_m4a),
+        ("song.ape", write_tagged_ape),
+    ];
+    for (name, write_fixture) in cases {
+        let tmp = TempDir::new().unwrap();
+        write_fixture(tmp.path(), name, "旧标题", "旧艺术家");
+        let path = tmp.path().join(name).to_string_lossy().into_owned();
+        app_lib::service::writer::save_song(full_song(path.clone()), false)
+            .expect("新增格式保存应成功");
+        let saved = app_lib::service::reader::read_song_meta(Path::new(&path)).expect("应可重读");
+        assert_eq!(saved.title, "保存标题");
+        assert_eq!(saved.artist, "保存艺术家");
+        assert_eq!(saved.album, "保存专辑");
+        assert_eq!(saved.track, "7");
+        assert_eq!(saved.track_total, "9");
+        assert_eq!(saved.year, "2022");
+        assert_eq!(saved.genre, "Rock");
+        assert_eq!(saved.lyrics, "[00:00.00]保存歌词第一行\n[00:10.00]第二行");
+        assert!(saved.cover.is_some(), "{name} should retain cover");
+        if name.ends_with(".ape") {
+            let tagged = Probe::open(&path)
+                .and_then(|p| p.read())
+                .expect("APE 应可读");
+            assert_eq!(
+                tagged.primary_tag().unwrap().tag_type(),
+                lofty::tag::TagType::Ape
+            );
+            assert!(
+                tagged.tag(lofty::tag::TagType::Id3v2).is_none(),
+                "APE 不得写 ID3v2"
+            );
+        }
+    }
 }
 
 #[test]
@@ -217,6 +262,20 @@ fn save_song_corrupt_file_returns_err_not_panic() {
     let song = full_song(path.to_string_lossy().into_owned());
     let res = app_lib::service::writer::save_song(song, false);
     assert!(res.is_err(), "坏标签文件应返回 Err（不 panic）");
+}
+
+#[test]
+fn save_song_corrupt_new_formats_returns_err() {
+    for ext in ["ape", "wav", "m4a"] {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join(format!("broken.{ext}"));
+        fs::write(&path, b"garbage bytes").unwrap();
+        let song = full_song(path.to_string_lossy().into_owned());
+        assert!(
+            app_lib::service::writer::save_song(song, false).is_err(),
+            "坏 {ext} 标签不得保存"
+        );
+    }
 }
 
 #[test]
