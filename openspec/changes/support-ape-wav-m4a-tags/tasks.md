@@ -9,7 +9,7 @@
 ## 文档与验证任务
 
 - [x] T4（docs，所有权：`docs/V1-PRD.md`、`docs/design/design.md`）：同步支持格式、扩展名边界、lofty 标签映射和 primary tag 选择；记录 `.mp4` 不纳入的产品理由，并保持 command 契约与分层约束一致。
-- [ ] T5（主会话验证）：运行 Rust check/test、适用前端 test/build 和 OpenSpec strict 校验；逐项记录真实退出码，失败时停止后续集成。
+- [x] T5（主会话验证）：运行 Rust check/test、适用前端 test/build 和 OpenSpec strict 校验；逐项记录真实退出码，失败时停止后续集成。
 
 ## 任务依赖
 
