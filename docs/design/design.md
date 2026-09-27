@@ -5,7 +5,7 @@
 | 产品 | MusicTag |
 | 版本 | V1 |
 | 类型 | 桌面应用（Tauri 2 + Rust，WebView 前端） |
-| 定位 | 工具线 · 自用 · 逐首补全 FLAC/MP3 元数据 |
+| 定位 | 工具线 · 自用 · 逐首补全 FLAC/MP3/APE/WAV/M4A 元数据 |
 | 日期 | 2026-08-01 |
 | 配套 | 界面草图 `design/mockup.{html,css,js}` · 需求见 `V1-PRD.md` 第二部分 |
 
@@ -213,6 +213,14 @@
 > `src/styles/design-layering.test.ts` / `src/components/layering.test.ts` 校验）**——后续子变更的
 > Architect 必须服从：新逻辑落位到已定目录，不得新建平级目录或把逻辑放错层；新增测试按 §10.4 放置。
 > 改动本文件 §10 分层段落会触发守卫测试失败，须与代码一并提交。
+
+## 9.1 音频格式与标签写入边界
+
+文件夹扫描收集 `.flac`、`.mp3`、`.ape`、`.wav`、`.m4a`，扩展名匹配不区分大小写；通用 `.mp4` 不收集。`.mp4` 可能是视频容器，扩展名不足以可靠判断音频内容；若未来要支持它，需要单独定义内容探测和视频排除规则。
+
+lofty 0.24 的 primary tag 选择决定写入位置：APE 使用 `TagType::Ape`，WAV 使用内嵌 `TagType::Id3v2`，M4A 使用 `TagType::Mp4Ilst`。标题、作者、专辑、专辑作者、音轨号、音轨总数、年份和流派继续经 `ItemKey` 统一映射；年份写 `ItemKey::RecordingDate`。歌词只有 `TagType::Id3v2` 使用 `ItemKey::UnsyncLyrics` 并设置 `lang=eng` 写 USLT，其余新增格式使用 `ItemKey::Lyrics`；封面统一使用 `CoverFront`，由 lofty 写入 APE picture、ID3v2 APIC 或 MP4 `covr`。APE 只写 APE 标签，禁止写只读 ID3v2。
+
+保存流程仍是读取并校验 → 清空 primary tag → 按表单写入非空字段 → 既有原子写回；空字段删除、侧载 `.lrc`、坏标签只读和 MP3 ID3v2.4 约束均不变。WAV 同时存在 RIFF INFO 与 ID3v2 时，应用按 lofty `primary_tag()` 使用并重建 ID3v2，不在应用层合并两套标签。
 
 ### 10.0 目录分层规范（Rust + 前端）
 

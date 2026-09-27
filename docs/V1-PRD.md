@@ -16,7 +16,7 @@
 ## 1. 产品概述
 
 ### 1.1 一句话定位
-MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 **逐首**补全元数据（歌名、作者、专辑、封面、歌词等）。打开歌曲自动联网搜索歌词与封面，候选点选填入，改完直接写回原文件。
+MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 / APE / WAV / M4A **逐首**补全元数据（歌名、作者、专辑、封面、歌词等）。打开歌曲自动联网搜索歌词与封面，候选点选填入，改完直接写回原文件。
 
 ### 1.2 目标用户与场景
 - **使用者**：自己。给自己本地音乐库里的裸文件补标签、塞歌词和封面。
@@ -41,7 +41,7 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 **逐首**补全�
 ## 2. 核心用户流程
 
 ```
-打开文件夹 ──▶ 深度遍历收集 FLAC/MP3 ──▶ 左栏展平列表（作者+歌名）
+打开文件夹 ──▶ 深度遍历收集 FLAC/MP3/APE/WAV/M4A ──▶ 左栏展平列表（作者+歌名）
                     │
                     └──▶ 点击一首 ──▶ 右栏表单
                                       │
@@ -68,7 +68,7 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 **逐首**补全�
 |---|---|
 | 1 | 「打开文件夹」按钮位于**左侧栏顶部**（列表上方），另有快捷键 `⌘O`（Win/Linux: `Ctrl+O`） |
 | 2 | 弹出系统原生文件夹选择器 |
-| 3 | **深度遍历**（递归子目录）收集全部 `.flac` / `.mp3`（扩展名不区分大小写） |
+| 3 | **深度遍历**（递归子目录）收集全部 `.flac` / `.mp3` / `.ape` / `.wav` / `.m4a`（扩展名不区分大小写；不收集通用 `.mp4`，避免把视频容器当作音频） |
 | 4 | 顶栏显示当前文件夹绝对路径 |
 | 5 | 重新打开文件夹时整体替换列表 |
 | 5a | **换目录有未保存修改**：若 `dirty`，弹窗三选一（保存/丢弃/取消，同切歌弹窗）；**取消则不换目录**；保存写当前编辑歌的原路径 |
@@ -193,6 +193,42 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 **逐首**补全�
 | 歌词 Lyrics | `LYRICS` |
 | 封面 Cover | **PICTURE 块**（block type 6，`PictureType.COVER_FRONT`=3） |
 
+### 5.1a APE → APE 标签
+
+| 界面字段 | APE key |
+|---|---|
+| 歌名 Title | `Title` |
+| 作者 Artist | `Artist` |
+| 专辑 Album | `Album` |
+| 专辑作者 Album Artist | `Album Artist` / `ALBUMARTIST` |
+| 音轨号 Track / 音轨总数 | `Track`（由 lofty 的 `TrackNumber` / `TrackTotal` 映射处理） |
+| 年份 Year | `Year` |
+| 流派 Genre | `Genre` |
+| 歌词 Lyrics | `Lyrics` |
+| 封面 Cover | APE picture item（`CoverFront`） |
+
+APE 仅写 APE 标签；不创建或写入只读的 ID3v2 标签。
+
+### 5.1b WAV → ID3v2
+
+WAV 的 primary tag 使用 lofty 的内嵌 ID3v2：字段映射沿用本节 MP3 的 `TIT2`、`TPE1`、`TALB`、`TPE2`、`TRCK`、`TDRC`、`TCON`、USLT 和 APIC。若 WAV 同时含 RIFF INFO 与 ID3v2，应用按 lofty `primary_tag()` 读取和重建内嵌 ID3v2，不在应用层合并两套标签。
+
+### 5.1c M4A → iTunes ilst
+
+| 界面字段 | ilst key |
+|---|---|
+| 歌名 Title | `©nam` |
+| 作者 Artist | `©ART` |
+| 专辑 Album | `©alb` |
+| 专辑作者 Album Artist | `aART` |
+| 音轨号 / 音轨总数 | `trkn` |
+| 年份 Year | `©day` |
+| 流派 Genre | `©gen` |
+| 歌词 Lyrics | `©lyr` |
+| 封面 Cover | `covr` |
+
+APE、WAV、M4A 的字段通过 lofty 0.24 `ItemKey` 映射读写；应用层保持统一的全量覆盖和空字段删除语义。
+
 ### 5.2 MP3 → ID3v2 帧
 
 | 界面字段 | 帧 ID |
@@ -287,7 +323,7 @@ enum SearchError {
 |---|---|---|
 | 外壳 | **Tauri 2** | 单窗口桌面应用，WebView 前端 + Rust 后端 |
 | 前端框架 | **Vue 3 + Vite + TypeScript** | `<script setup>` 组合式 API；`create-tauri-app` 官方模板起步 |
-| 标签读写 | **`lofty`** | 统一处理 FLAC/MP3，内建格式校验，写回风险低；MP3 写 **ID3v2.4**（lofty 默认，不转 v2.3）；`ItemKey::UnsyncLyrics`+`TagItem::set_lang(lofty::tag::items::ENGLISH)` 写 USLT；`.lrc` 侧载与文件改名由应用层处理 |
+| 标签读写 | **`lofty`** | 统一处理 FLAC/MP3/APE/WAV/M4A，内建格式校验，写回风险低；MP3/WAV 写 **ID3v2.4**（lofty 默认，不转 v2.3）；APE 写 APE 标签，M4A 写 iTunes ilst；`ItemKey::UnsyncLyrics`+`TagItem::set_lang(lofty::tag::items::ENGLISH)` 写 ID3v2 USLT，其余格式按各自映射写歌词；`.lrc` 侧载与文件改名由应用层处理 |
 | 图片处理 | `image` | 封面读取 / 压缩至 2048 |
 | 文件遍历 | `walkdir` | 深度遍历收集音频文件 |
 | 对话框 | `rfd` | 原生文件夹选择器 |
