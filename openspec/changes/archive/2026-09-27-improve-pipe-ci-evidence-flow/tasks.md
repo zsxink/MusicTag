@@ -12,7 +12,7 @@
 
 ## 集成归档
 
-- [ ] T4（spec/infra，所有权：主会话；Integrate `archive` checkpoint；文件：本 change 的 spec、design/tasks 归档路径及 canonical 同步位置）：仅在 CR 通过、T5 静态/手工验证和 Verify 成功后，执行 OpenSpec 归档与 canonical 文档/规则同步；归档失败保留 active change 并挂起后续集成，恢复时重新核对差异和证据后从 archive 重试。
+- [x] T4（spec/infra，所有权：主会话；Integrate `archive` checkpoint；文件：本 change 的 spec、design/tasks 归档路径及 canonical 同步位置）：仅在 CR 通过、T5 静态/手工验证和 Verify 成功后，执行 OpenSpec 归档与 canonical 文档/规则同步；归档失败保留 active change 并挂起后续集成，恢复时重新核对差异和证据后从 archive 重试。
 
 ## 依赖与顺序
 
