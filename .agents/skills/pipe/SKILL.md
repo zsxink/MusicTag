@@ -1,6 +1,6 @@
 ---
 name: pipe
-description: MusicTag 多 Agent 开发流程。当前主会话 Agent 调度宿主原生子 Agent，使用 OpenSpec tasks.md 和 Markdown progress.md 记录、恢复；用于新功能、行为修改和 Bug 修复。
+description: MusicTag 多 Agent 开发流程。当前主会话 Agent 调度宿主原生子 Agent，使用 OpenSpec tasks.md 和 Markdown progress.md 记录、恢复；包含与 CI 对齐的验证门禁、fixture 早检和集成恢复；用于新功能、行为修改和 Bug 修复。
 ---
 
 # pipe
@@ -11,6 +11,6 @@ description: MusicTag 多 Agent 开发流程。当前主会话 Agent 调度宿�
 - Claude Code：`/pipe <change>` 在当前会话执行，使用 Agent 工具。
 - OpenCode：`/pipe <change>` 在当前会话执行，使用 Task/原生 subagent。
 - Epic：`/pipe:epic <epic>` 依共享流程的 Epic 章节推进。
-- 恢复：再次触发同一 change，先读 `tasks.md` 与 `.agents/runs/<change>/progress.md`，核对 Git/GitHub 事实。
+- 恢复：再次触发同一 change，先读 `tasks.md` 与 `.agents/runs/<change>/progress.md`，核对 Git/GitHub 事实；可用 `status <change> --compact` 查看摘要，checkpoint typed evidence 优先保存为 JSON 文件并用 `--evidence-file` 录入。
 
 公共角色文案在 `.agents/tools/pipe-core/roles/`；宿主文件只做注册和权限边界。Leader 规则由当前主会话执行，不派 Leader 子 Agent。若缺少原生子 Agent 或必要的只读能力，在写入前停止并说明，不能回退 CLI driver。Claude 的 `.claude/skills/pipe` 是指向本目录的 symlink，不维护第二份 skill。

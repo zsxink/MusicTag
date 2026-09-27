@@ -203,6 +203,27 @@ function evidenceSummary(record) {
 function firstIncompletePhase(progress) {
   return PHASES.find((phase) => progress.phases[phase].status !== 'succeeded') || null;
 }
+function compactProgress(progress) {
+  validateProgress(progress);
+  const phases = Object.fromEntries(PHASES.map((name) => {
+    const phase = progress.phases[name];
+    return [name, { status: phase.status, attempt: phase.attempt }];
+  }));
+  const checkpoints = Object.fromEntries(INTEGRATION_CHECKPOINTS.map((id) => {
+    const latest = [...(progress.checkpoints || [])].reverse().find((item) => item.id === id);
+    return [id, latest ? { status: latest.status, attempt: Number.isInteger(latest.attempt) ? latest.attempt : 0 } : { status: 'unknown', attempt: 0 }];
+  }));
+  return {
+    change: progress.change,
+    issue: progress.issue,
+    branch: progress.branch,
+    worktree: progress.worktree,
+    owner: progress.owner,
+    phases,
+    checkpoints,
+    nextStep: progress.nextStep,
+  };
+}
 function renderProgress(progress) {
   validateProgress(progress);
   const phaseRows = PHASES.map((phase) => {
@@ -1222,4 +1243,4 @@ function selfCheck(root) {
   return { ok: issues.length === 0, issues, template };
 }
 
-module.exports = { PROGRESS_SCHEMA_VERSION, LOCK_SCHEMA_VERSION, PHASES, PHASE_STATUSES, TASK_STATUSES, EPIC_ITEM_STATUSES, EPIC_BLOCK_ITEM, INTEGRATION_CHECKPOINTS, ProgressLockError, runDir, progressFile, lockFile, takeoverFile, takeoverRecoveryFile, legacyStateFile, atomicWrite, newProgress, parseMachineRecord, validateProgress, renderProgress, loadProgress, readLock, readTakeover, acquireLock, assertLockOwner, touchLock, releaseLock, takeoverProgress, recoverStaleTakeover, recoverInitialization, saveProgress, initializeProgress, mutateProgress, setPhase, setTask, recordDecision, recordCheckpoint, migrateLegacyState, validateResume, applyResumeValidation, applyResumeFacts, validateEpicResume, applyEpicResumeFacts, firstIncompletePhase, validateEpicDefinition, epicReadyItems, initializeEpicProgress, loadEpicProgress, setEpicItem, selfCheck };
+module.exports = { PROGRESS_SCHEMA_VERSION, LOCK_SCHEMA_VERSION, PHASES, PHASE_STATUSES, TASK_STATUSES, EPIC_ITEM_STATUSES, EPIC_BLOCK_ITEM, INTEGRATION_CHECKPOINTS, ProgressLockError, runDir, progressFile, lockFile, takeoverFile, takeoverRecoveryFile, legacyStateFile, atomicWrite, newProgress, parseMachineRecord, validateProgress, renderProgress, loadProgress, readLock, readTakeover, acquireLock, assertLockOwner, touchLock, releaseLock, takeoverProgress, recoverStaleTakeover, recoverInitialization, saveProgress, initializeProgress, mutateProgress, setPhase, setTask, recordDecision, recordCheckpoint, migrateLegacyState, validateResume, applyResumeValidation, applyResumeFacts, validateEpicResume, applyEpicResumeFacts, firstIncompletePhase, compactProgress, validateEpicDefinition, epicReadyItems, initializeEpicProgress, loadEpicProgress, setEpicItem, selfCheck };
