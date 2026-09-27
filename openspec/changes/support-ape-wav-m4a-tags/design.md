@@ -31,7 +31,7 @@
 
 ## 测试策略
 
-- `meta::is_audio_file`：六种受支持扩展名的大小写变体均为 true，`.mp4`、非音频扩展名为 false。
+- `meta::is_audio_file`：五种受支持格式扩展名的大小写变体均为 true，`.mp4`、非音频扩展名为 false。
 - 列表集成测试：递归收集 APE/WAV/M4A 与 FLAC/MP3，确认摘要和排序输入不变；`.mp4` 被忽略。
 - 三种新增格式的读写集成测试：构造有标签与无 primary tag 的有效 fixture，验证首次补标签、完整文本字段、年份、歌词和封面保存后重读一致；清空表单字段时确认相应标签项删除；同时检查 APE 结果没有 ID3v2，WAV/M4A 使用各自 primary tag。
 - 现有 FLAC/MP3 测试继续运行，特别保留 MP3 ID3v2.4 断言。

@@ -32,7 +32,7 @@ fn list_songs_recurses_filters_and_reads_tags() {
 
     let songs = app_lib::commands::folder::list_songs(tmp.path().to_string_lossy().into_owned());
 
-    assert_eq!(songs.len(), 7, "应收录六种音频格式并排除 video.mp4");
+    assert_eq!(songs.len(), 7, "应收录七个音频文件并排除 video.mp4");
     assert!(songs.iter().any(|s| s.path.ends_with("song.FLAC")));
     assert!(songs.iter().any(|s| s.path.ends_with("b.flac")));
     assert!(songs.iter().any(|s| s.path.ends_with("c.mp3")));
