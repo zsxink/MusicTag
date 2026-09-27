@@ -15,12 +15,12 @@ function usage() {
     '  lock|unlock <change> --owner <host:session>',
     '  takeover <change> --owner <new> --previous-owner <old> --confirmed-no-live-writer true [--evidence <text>] [--epic]',
     '  takeover-recover <change> --owner <new> --previous-owner <old> --stale-takeover-owner <stale> --confirmed-no-live-writer true --evidence <text> [--epic]',
-    '  status <change> [--epic] [--json]',
+    '  status <change> [--epic] [--json] [--compact]',
     '  phase <change> <phase> <status> --owner <host:session> [--attempt <n>] [--cr-round <n>] [--cr-result pass] [--source-manifest <output.json>] [--evidence <text>]',
     '    Verify succeeded additionally requires --verification-head, --source-manifest, --spec-fingerprint, --command-id, --expected-command-id, and --command-evidence <json-file> with exact successful command facts.',
     '  task <change> <task-id> <status> --owner <host:session> [--phase <phase>]',
     '  decision <change> --owner <host:session> --question <text> --decision <text> --basis <text>',
-    '  checkpoint <change> <name> <status> --owner <host:session> --evidence-json <typed-json>',
+    '  checkpoint <change> <name> <status> --owner <host:session> (--evidence-file <typed-json-file> | --evidence-json <typed-json>)',
     '  migrate <change> --owner <host:session> [--issue <n> --branch <branch> --worktree <path>]',
     '  resume-plan <change> --facts <facts.json> [--epic]',
     '  resume-apply <change> --owner <host:session> --facts <facts.json> [--epic]',
@@ -165,7 +165,8 @@ function run(argv) {
   if (command === 'status') {
     const progress = options.epic ? runtime.loadEpicProgress(root, change) : runtime.loadProgress(root, change);
     if (!progress) throw new Error('没有 ' + change + ' 的 progress.md');
-    output(progress, options); return 0;
+    if (options.epic && options.compact) throw new Error('status --compact 当前仅支持 change progress');
+    output(options.compact ? runtime.compactProgress(progress) : progress, options); return 0;
   }
   if (command === 'phase') {
     if (!arg3 || !arg4) throw new Error('phase 需要 <phase> <status>');
@@ -180,7 +181,13 @@ function run(argv) {
   }
   if (command === 'checkpoint') {
     if (!arg3 || !arg4) throw new Error('checkpoint 需要 <name> <status>');
-    output(runtime.recordCheckpoint(root, change, required(options, 'owner'), { id: arg3, status: arg4, evidence: options['evidence-json'] ? inlineJson(options['evidence-json'], '--evidence-json') : undefined, nextStep: options['next-step'] }), options); return 0;
+    const hasEvidenceFile = Object.hasOwn(options, 'evidence-file');
+    const hasInlineEvidence = Object.hasOwn(options, 'evidence-json');
+    if (hasEvidenceFile && hasInlineEvidence) throw new Error('--evidence-file 与 --evidence-json 不能同时使用');
+    const evidence = hasEvidenceFile
+      ? loadJson(required(options, 'evidence-file'), '--evidence-file typed evidence')
+      : hasInlineEvidence ? inlineJson(required(options, 'evidence-json'), '--evidence-json') : undefined;
+    output(runtime.recordCheckpoint(root, change, required(options, 'owner'), { id: arg3, status: arg4, evidence, nextStep: options['next-step'] }), options); return 0;
   }
   if (command === 'migrate') {
     output(runtime.migrateLegacyState(root, { change, owner: required(options, 'owner'), issue: options.issue, branch: options.branch, worktree: options.worktree, host: options.host, session: options.session }), options); return 0;
