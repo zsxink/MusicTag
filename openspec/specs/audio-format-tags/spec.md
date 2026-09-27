@@ -1,7 +1,7 @@
 # audio-format-tags Specification
 
 ## Purpose
-允许用户通过现有单曲编辑流程，为 APE、WAV、M4A 音频文件读取、补全和保存元数据。
+允许用户通过现有单曲编辑流程，为 APE、WAV、M4A 音频文件读取、补全并保存元数据，兼容无标签文件和已有受支持标签的文件。
 
 ## Requirements
 
