@@ -220,7 +220,7 @@
 
 lofty 0.24 的 primary tag 选择决定写入位置：APE 使用 `TagType::Ape`，WAV 使用内嵌 `TagType::Id3v2`，M4A 使用 `TagType::Mp4Ilst`。标题、作者、专辑、专辑作者、音轨号、音轨总数、年份和流派继续经 `ItemKey` 统一映射；年份写 `ItemKey::RecordingDate`。歌词只有 `TagType::Id3v2` 使用 `ItemKey::UnsyncLyrics` 并设置 `lang=eng` 写 USLT，其余新增格式使用 `ItemKey::Lyrics`。封面统一使用 `CoverFront`；WAV/M4A 由通用 lofty 标签路径写入 APIC 或 MP4 `covr`，APE 使用 `ApeTag` 专用路径写入 APEv2 `Cover Art (Front)` binary item，因为 lofty 0.24 的 generic `Tag` 转换路径不会映射 APE 图片。APE 读取也通过 `ApeFile` 专用 API 读取该图片项。APE 只写 APE 标签，禁止写只读 ID3v2。
 
-保存流程仍是读取并校验 → 清空 primary tag → 按表单写入非空字段 → 在同目录临时副本完成唯一格式标签写入并原子替换；APE 直接保存转换后的 `ApeTag`，其他格式保存 `TaggedFile`。空字段删除、侧载 `.lrc`、坏标签只读和 MP3 ID3v2.4 约束均不变。WAV 同时存在 RIFF INFO 与 ID3v2 时，应用按 lofty `primary_tag()` 使用并重建 ID3v2，不在应用层合并两套标签。
+保存流程仍是读取并校验 → 若有效容器没有 primary tag，按 lofty 的 `primary_tag_type()` 创建对应空标签 → 清空 primary tag → 按表单写入非空字段 → 在同目录临时副本完成唯一格式标签写入并原子替换；APE 直接保存转换后的 `ApeTag`，其他格式保存 `TaggedFile`。该首次创建路径支持 APE、WAV 的 ID3v2 和 M4A 的 Mp4Ilst。空字段删除、侧载 `.lrc`、坏标签只读和 MP3 ID3v2.4 约束均不变。WAV 同时存在 RIFF INFO 与 ID3v2 时，应用按 lofty `primary_tag()` 使用并重建 ID3v2，不在应用层合并两套标签。
 
 ### 10.0 目录分层规范（Rust + 前端）
 

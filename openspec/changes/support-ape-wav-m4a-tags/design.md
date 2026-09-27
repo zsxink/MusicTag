@@ -26,14 +26,14 @@
 
 1. `list_songs` 递归遍历，使用 `meta::is_audio_file` 做扩展名过滤；只读摘要字段。
 2. `open_song` 通过现有 reader 读取 primary tag、歌词和第一张封面；任何 probe/read 错误仍返回错误，由前端沿用坏标签只读状态。
-3. `save_song` 通过现有 writer 读取并校验文件，清空 primary tag，调用 `apply_meta`，再经既有原子写回；`.lrc` 导出顺序和失败语义不变。
+3. `save_song` 通过现有 writer 读取并校验文件；若有效容器没有 primary tag，则按 lofty 的 `primary_tag_type()` 创建对应空标签（APE/WAV/M4A 分别为 Ape/Id3v2/Mp4Ilst），随后清空并调用 `apply_meta`，再经既有原子写回；`.lrc` 导出顺序和失败语义不变。
 4. 不改变路径改名、搜索、封面压缩、IPC 类型和 MP3 ID3v2.4 写入行为。
 
 ## 测试策略
 
 - `meta::is_audio_file`：六种受支持扩展名的大小写变体均为 true，`.mp4`、非音频扩展名为 false。
 - 列表集成测试：递归收集 APE/WAV/M4A 与 FLAC/MP3，确认摘要和排序输入不变；`.mp4` 被忽略。
-- 三种新增格式的读写集成测试：构造可被 lofty 解析的 fixture，验证完整文本字段、年份、歌词和封面保存后重读一致；同时检查 APE 结果没有 ID3v2，WAV/M4A 使用各自 primary tag。
+- 三种新增格式的读写集成测试：构造有标签与无 primary tag 的有效 fixture，验证首次补标签、完整文本字段、年份、歌词和封面保存后重读一致；清空表单字段时确认相应标签项删除；同时检查 APE 结果没有 ID3v2，WAV/M4A 使用各自 primary tag。
 - 现有 FLAC/MP3 测试继续运行，特别保留 MP3 ID3v2.4 断言。
 
 验证命令由主会话在后续阶段执行：`cargo test --manifest-path src-tauri/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`，以及适用的前端 test/build 和 `openspec validate support-ape-wav-m4a-tags --strict --no-interactive`。

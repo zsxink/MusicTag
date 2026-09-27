@@ -227,7 +227,7 @@ pub fn write_tagged_mp3(dir: &Path, name: &str, title: &str, artist: &str) {
 /// ffmpeg 生成真实的音频容器和最小音频轨道；metadata 参数确保 lofty 创建
 /// 对应的 primary tag，后续 `add_tags` 再通过 ItemKey 写全字段。
 pub fn write_tagged_wav(dir: &Path, name: &str, title: &str, artist: &str) {
-    write_ffmpeg_fixture(dir, name, "wav", "pcm_s16le", title, artist);
+    write_ffmpeg_fixture(dir, name, "wav", "pcm_s16le", Some(title), Some(artist));
     let path = dir.join(name);
     let mut bytes = fs::read(&path).expect("读取 WAV fixture 失败");
     let id3 = id3v24_text_tag(title, artist);
@@ -243,7 +243,16 @@ pub fn write_tagged_wav(dir: &Path, name: &str, title: &str, artist: &str) {
 }
 
 pub fn write_tagged_m4a(dir: &Path, name: &str, title: &str, artist: &str) {
-    write_ffmpeg_fixture(dir, name, "ipod", "alac", title, artist);
+    write_ffmpeg_fixture(dir, name, "ipod", "alac", Some(title), Some(artist));
+}
+
+/// 真实容器但不含 primary tag 的 fixture，用于验证首次保存时创建标签。
+pub fn write_tagless_wav(dir: &Path, name: &str) {
+    write_ffmpeg_fixture(dir, name, "wav", "pcm_s16le", None, None);
+}
+
+pub fn write_tagless_m4a(dir: &Path, name: &str) {
+    write_ffmpeg_fixture(dir, name, "ipod", "alac", None, None);
 }
 
 fn write_ffmpeg_fixture(
@@ -251,31 +260,36 @@ fn write_ffmpeg_fixture(
     name: &str,
     format: &str,
     codec: &str,
-    title: &str,
-    artist: &str,
+    title: Option<&str>,
+    artist: Option<&str>,
 ) {
     let output = dir.join(name);
+    let mut args = vec![
+        "-hide_banner".to_string(),
+        "-loglevel".to_string(),
+        "error".to_string(),
+        "-f".to_string(),
+        "lavfi".to_string(),
+        "-i".to_string(),
+        "anullsrc=r=8000:cl=mono".to_string(),
+        "-t".to_string(),
+        "0.1".to_string(),
+        "-c:a".to_string(),
+        codec.to_string(),
+    ];
+    if let Some(title) = title {
+        args.extend(["-metadata".to_string(), format!("title={title}")]);
+    }
+    if let Some(artist) = artist {
+        args.extend(["-metadata".to_string(), format!("artist={artist}")]);
+    }
+    args.extend([
+        "-f".to_string(),
+        format.to_string(),
+        output.to_str().expect("fixture 路径应为 UTF-8").to_string(),
+    ]);
     let status = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "anullsrc=r=8000:cl=mono",
-            "-t",
-            "0.1",
-            "-c:a",
-            codec,
-            "-metadata",
-            &format!("title={title}"),
-            "-metadata",
-            &format!("artist={artist}"),
-            "-f",
-            format,
-            output.to_str().expect("fixture 路径应为 UTF-8"),
-        ])
+        .args(&args)
         .status()
         .expect("测试需要 ffmpeg 生成真实 WAV/M4A fixture");
     assert!(status.success(), "ffmpeg 生成 fixture 失败: {output:?}");
@@ -312,7 +326,8 @@ pub fn write_tagged_ape(dir: &Path, name: &str, title: &str, artist: &str) {
     out.extend_from_slice(&3980u16.to_le_bytes());
     out.extend_from_slice(&52u32.to_le_bytes()); // descriptor length
     out.extend_from_slice(&[0u8; 42]);
-    out.extend_from_slice(&0u16.to_le_bytes()); // compression / flags
+    out.extend_from_slice(&0u16.to_le_bytes()); // compression level
+    out.extend_from_slice(&0u16.to_le_bytes()); // format flags
     out.extend_from_slice(&73728u32.to_le_bytes());
     out.extend_from_slice(&1u32.to_le_bytes()); // final frame blocks
     out.extend_from_slice(&1u32.to_le_bytes()); // total frames
@@ -346,6 +361,15 @@ pub fn write_tagged_ape(dir: &Path, name: &str, title: &str, artist: &str) {
         .expect("创建 APE fixture 失败")
         .write_all(&out)
         .expect("写入 APE fixture 失败");
+}
+
+pub fn write_tagless_ape(dir: &Path, name: &str) {
+    write_tagged_ape(dir, name, "", "");
+    let path = dir.join(name);
+    let mut bytes = fs::read(&path).expect("读取 APE fixture 失败");
+    // MAC header (52-byte descriptor + 24-byte header) and one placeholder frame.
+    bytes.truncate(52 + 24 + 1);
+    fs::write(path, bytes).expect("写入无标签 APE fixture 失败");
 }
 
 /// 构造一个完整表单（全字段 + 歌词 + 封面 data URL），path 由调用方填。
