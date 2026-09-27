@@ -24,7 +24,7 @@ Verify 在源码和规格指纹固定后，必须对当前仓库中适用 workfl
 
 每个 fixture 场景在业务断言前执行确定性有效性检查：生成命令退出码为 0（若由程序生成则检查返回结果）、输出路径存在且为普通文件、大小非零，并由目标 reader 成功解析；需要特定结构时再检查 magic/container、标签类型和关键字段。检查失败必须报告 fixture 名称、依赖命令、路径和原始错误，不能被业务断言吞掉。至少覆盖已有标签、无标签首次写入、清空字段/封面、损坏输入和既有格式回归；每格注明是静态 fixture、生成 fixture 还是不适用。
 
-本 change 本身不新增业务 fixture，也不添加或运行测试；后续实现阶段仅更新流程和 CLI，并用静态/手工验证证明门禁与证据契约。
+本 change 不新增业务 fixture。T5 是实现阶段的静态/手工检查，不添加或运行测试；这不改变后续 Verify 门禁。完整 Verify 仍须运行当前 workflow `if` 条件启用的全部 CI 命令，包括 `npm run test` 和 `cargo test --all-targets`，不论变更域或是否修改测试代码。静态/手工检查不能替代这些命令。
 
 ## CR 后集成期 CI remediation
 
@@ -69,7 +69,7 @@ OpenSpec 归档和 canonical 同步属于 Integrate 的 `archive` checkpoint，�
 
 上述静态/手工检查不能替代适用 workflow `if` 条件下的 CI 全量命令；它们只补充语法、入口和证据投影检查。
 
-当前任务明确不添加或运行测试；实现阶段若变更已有测试代码，主会话再按 CI parity 规则决定适用验证。
+T5 明确不添加或运行测试，但后续 Verify 必须按 CI parity 规则运行所有适用命令；不能把 T5 的局部限制延伸为跳过 Verify 门禁的理由。
 
 ## 兼容性与风险
 
