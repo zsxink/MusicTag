@@ -8,7 +8,7 @@
 
 ## 规格与归档
 
-- [ ] T4（spec/infra，所有权：主会话；文件：本 change 的 spec、design/tasks 归档路径及 canonical 同步位置）：按批准 spec 完成 OpenSpec 归档与 canonical 文档/规则同步；核对归档内容保留 CI parity、fixture 早检、post-CR remediation、evidence-file 和 compact status 的可追溯要求。
+- [x] T4（spec/infra，所有权：主会话；文件：本 change 的 spec、design/tasks 归档路径及 canonical 同步位置）：按批准 spec 完成 OpenSpec 归档与 canonical 文档/规则同步；核对归档内容保留 CI parity、fixture 早检、post-CR remediation、evidence-file 和 compact status 的可追溯要求。
 
 ## 验证
 
