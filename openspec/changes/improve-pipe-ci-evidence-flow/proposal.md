@@ -13,5 +13,5 @@ Issue #128 的 pipe 在集成阶段连续发现 OpenSpec 全量校验不一致�
 
 ## Impact
 - Affected specs: `pipe-native`
-- Affected code: `.agents/skills/pipe/WORKFLOW.md`, `.agents/skills/pipe/SKILL.md`, `.agents/tools/pipe-native/progress-cli.js`
+- Affected code: `.agents/skills/pipe/WORKFLOW.md`, `.agents/skills/pipe/SKILL.md`, `.agents/tools/pipe-native/progress-cli.js`, `.agents/tools/pipe-native/progress.js`
 - No product runtime behavior changes.

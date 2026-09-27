@@ -16,7 +16,7 @@ Architect 只写本设计与任务文件；主会话仍是 `tasks.md` 勾选、p
 | `package.json` 存在 | Node 24、`npm ci` 可安装 lockfile 依赖 | `npm ci`、`npm run build`、`npm run test` |
 | `src-tauri/Cargo.toml` 存在 | Ubuntu 系统包：`ffmpeg`、`libwebkit2gtk-4.1-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev`、`patchelf`、`build-essential`、`curl`、`wget`、`file`、`libxdo-dev`、`libssl-dev`；stable Rust | 在 `src-tauri` 执行 `cargo check --all-targets`、`cargo test --all-targets` |
 
-Verify 在源码和规格指纹固定后，按 CI 条件生成逐命令证据：命令 ID、实际命令、退出码、验证 HEAD、源码指纹、规格指纹和必要的输出摘要。任何 CI job 使用但本地 Verify 未覆盖的门禁都使 Verify 失败；工作流变更必须同时检查 workflow 的条件表达式、工作目录、依赖安装步骤和命令是否仍与设计一致。
+Verify 在源码和规格指纹固定后，必须对当前仓库中适用 workflow `if` 条件下的每一条 CI 命令执行同等门禁，并按 CI 条件生成逐命令证据：命令 ID、实际命令、退出码、验证 HEAD、源码指纹、规格指纹和必要的输出摘要。领域特定的 `node --check`、`bash -n`、入口自检等静态检查只能作为补充，不能替代任何适用的 CI 命令。任何 CI job 使用但本地 Verify 未覆盖的门禁都使 Verify 失败；工作流变更必须同时检查 workflow 的条件表达式、工作目录、依赖安装步骤和命令是否仍与设计一致。
 
 ## Architect/Tester 的依赖与 fixture 早检
 
@@ -46,6 +46,12 @@ CR 的三轮上限只统计同一实现差异的 blocker/major 修复循环，�
 
 `status <change> --compact` 返回稳定的恢复摘要：change、Issue、branch/worktree、owner、各阶段 status/attempt、各集成 checkpoint 的最新 status/attempt，以及 nextStep。摘要不包含完整 command log、evidence 数组、source manifest、manifestSha256 或 manifest 内容；默认 `status` 和 `status --json` 保留现有完整输出，以保证恢复和旧脚本兼容。compact 输出使用固定字段顺序或稳定 JSON 结构，便于人工和脚本比较。
 
+## 集成归档与失败恢复
+
+OpenSpec 归档和 canonical 同步属于 Integrate 的 `archive` checkpoint，必须排在 CR 通过、T5 静态/手工验证和 Verify 成功之后；它们不是 Dev、CR 或 Verify 的前置写入。归档前主会话核对源码/规格快照、当前阶段证据和变更范围，归档后核对 active change 消失且归档内容与 canonical 规则同时出现在待集成 diff。
+
+`archive` 失败时保留 active change、工作树和失败输出，不执行 commit、push、PR 或 merge；主会话记录 checkpoint failed 及可重试的 nextStep。恢复时先重新核对当前分支、HEAD、active change、规格文件和工作树差异，再从 archive 重试；若归档期间发生规格或源码变化，则使后续 Verify/Integrate 证据失效，重新执行受影响阶段后再归档。归档成功后才允许进入 commit checkpoint。
+
 ## 文件所有权与验证
 
 主会话拥有 workflow/skill、`progress-cli.js`/`progress.js`、OpenSpec 归档和 canonical 同步文件；开发者不得并行修改这些重叠路径。CLI 实现保持纯本地读写，不启动 subprocess、Agent 或网络请求。
@@ -60,6 +66,8 @@ CR 的三轮上限只统计同一实现差异的 blocker/major 修复循环，�
 - `node .agents/tools/pipe-native/self-check.js`
 - `npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive`
 - 手工检查 CI workflow 的 Node/Rust/system dependency 条件与 Verify 命令矩阵；手工检查 `--evidence-file` 与 inline 互斥、`status --compact` 无 manifest。
+
+上述静态/手工检查不能替代适用 workflow `if` 条件下的 CI 全量命令；它们只补充语法、入口和证据投影检查。
 
 当前任务明确不添加或运行测试；实现阶段若变更已有测试代码，主会话再按 CI parity 规则决定适用验证。
 
