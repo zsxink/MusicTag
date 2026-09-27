@@ -5,9 +5,14 @@
 // 函数提升 `pub` 供 `src-tauri/tests/` 集成测试经 `app_lib::service::writer::` 访问。
 
 use crate::model::Song;
-use crate::service::fs_atomic::write_atomic;
+use crate::service::fs_atomic::write_atomic_with;
 use crate::service::meta::apply_meta;
+use lofty::ape::ApeTag;
+use lofty::config::WriteOptions;
+use lofty::file::AudioFile;
 use lofty::prelude::{TagExt, TaggedFileExt};
+use lofty::tag::TagType;
+use lofty::tag::Tag;
 use lofty::probe::Probe;
 use std::path::Path;
 
@@ -28,6 +33,14 @@ pub fn save_song(song: Song, export_lrc: bool) -> Result<(), String> {
         .map_err(|e| format!("读取标签失败: {e}"))?;
 
     // D2：primary tag `clear()` 重建，保证「最终标签 == 表单内容」。
+    // 无标签但格式可写时先创建 lofty 为该容器选择的 primary tag。
+    if tagged_file.primary_tag().is_none() {
+        let tag_type = tagged_file.primary_tag_type();
+        if !matches!(tag_type, TagType::Ape | TagType::Id3v2 | TagType::Mp4Ilst) {
+            return Err("读取标签失败: 文件缺少可写的主标签".to_string());
+        }
+        tagged_file.insert_tag(Tag::new(tag_type));
+    }
     let tag = tagged_file
         .primary_tag_mut()
         .ok_or_else(|| "读取标签失败: 文件缺少可写的主标签".to_string())?;
@@ -35,7 +48,20 @@ pub fn save_song(song: Song, export_lrc: bool) -> Result<(), String> {
 
     apply_meta(tag, &song)?;
 
-    write_atomic(path, &tagged_file).map_err(|e| format!("写回文件失败: {e}"))?;
+    let ape_tag = (tag.tag_type() == TagType::Ape).then(|| ApeTag::from(tag.clone()));
+
+    write_atomic_with(path, move |file| {
+        if let Some(ape_tag) = ape_tag {
+            use lofty::prelude::TagExt;
+            ape_tag.save_to(file, WriteOptions::default()).map_err(std::io::Error::other)?;
+        } else {
+            tagged_file
+                .save_to(file, WriteOptions::default())
+                .map_err(std::io::Error::other)?;
+        }
+        Ok(())
+    })
+    .map_err(|e| format!("写回文件失败: {e}"))?;
 
     if export_lrc {
         crate::service::lyrics::export_lrc(path, &song.lyrics)

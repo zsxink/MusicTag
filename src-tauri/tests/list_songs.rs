@@ -4,7 +4,9 @@
 
 mod common;
 
-use common::{write_tagged_flac, write_tagged_mp3};
+use common::{
+    write_tagged_ape, write_tagged_flac, write_tagged_m4a, write_tagged_mp3, write_tagged_wav,
+};
 use std::fs;
 use tempfile::TempDir;
 
@@ -23,18 +25,22 @@ fn list_songs_recurses_filters_and_reads_tags() {
     let sub = tmp.path().join("sub");
     fs::create_dir(&sub).unwrap();
     write_tagged_mp3(&sub, "deep.mp3", "Deep", "D");
+    write_tagged_ape(tmp.path(), "ape.APE", "Ape", "A");
+    write_tagged_wav(tmp.path(), "wave.WAV", "Wave", "W");
+    write_tagged_m4a(tmp.path(), "m4a.M4A", "M4a", "M");
+    fs::write(tmp.path().join("video.mp4"), b"not an audio file").unwrap();
 
     let songs = app_lib::commands::folder::list_songs(tmp.path().to_string_lossy().into_owned());
 
-    assert_eq!(
-        songs.len(),
-        4,
-        "应只收录 song.FLAC、b.flac、c.mp3、sub/deep.mp3"
-    );
+    assert_eq!(songs.len(), 7, "应收录七个音频文件并排除 video.mp4");
     assert!(songs.iter().any(|s| s.path.ends_with("song.FLAC")));
     assert!(songs.iter().any(|s| s.path.ends_with("b.flac")));
     assert!(songs.iter().any(|s| s.path.ends_with("c.mp3")));
     assert!(songs.iter().any(|s| s.path.ends_with("deep.mp3")));
+    assert!(songs.iter().any(|s| s.path.ends_with("ape.APE")));
+    assert!(songs.iter().any(|s| s.path.ends_with("wave.WAV")));
+    assert!(songs.iter().any(|s| s.path.ends_with("m4a.M4A")));
+    assert!(!songs.iter().any(|s| s.path.ends_with("video.mp4")));
 
     let song = songs
         .iter()
@@ -45,6 +51,17 @@ fn list_songs_recurses_filters_and_reads_tags() {
     let deep = songs.iter().find(|s| s.path.ends_with("deep.mp3")).unwrap();
     assert_eq!(deep.title, "Deep");
     assert_eq!(deep.artist, "D");
+    for (suffix, title, artist) in [
+        ("ape.APE", "Ape", "A"),
+        ("wave.WAV", "Wave", "W"),
+        ("m4a.M4A", "M4a", "M"),
+    ] {
+        let summary = songs.iter().find(|s| s.path.ends_with(suffix)).unwrap();
+        assert_eq!(
+            (&summary.title, &summary.artist),
+            (&title.to_string(), &artist.to_string())
+        );
+    }
 }
 
 #[test]

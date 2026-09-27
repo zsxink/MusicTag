@@ -37,7 +37,7 @@ pub fn save_last_dir(dir: String) {
     let _ = config::save_last_dir(&config::default_config_path(), &dir);
 }
 
-/// 深度遍历 `dir` 收集全部 FLAC/MP3，返回只读列表项。
+/// 深度遍历 `dir` 收集全部受支持音频格式，返回只读列表项。
 #[tauri::command]
 pub fn list_songs(dir: String) -> Vec<SongSummary> {
     WalkDir::new(&dir)

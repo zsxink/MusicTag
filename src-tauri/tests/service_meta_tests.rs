@@ -36,6 +36,10 @@ fn is_audio_file_accepts_case_insensitive_flac_mp3() {
     assert!(is_audio_file(Path::new("song.FLAC")));
     assert!(is_audio_file(Path::new("song.mp3")));
     assert!(is_audio_file(Path::new("song.MP3")));
+    for ext in ["ape", "APE", "wav", "WAV", "m4a", "M4A"] {
+        assert!(is_audio_file(Path::new(&format!("song.{ext}"))), "{ext}");
+    }
+    assert!(!is_audio_file(Path::new("video.mp4")));
     assert!(!is_audio_file(Path::new("song.txt")));
     assert!(!is_audio_file(Path::new("cover.jpg")));
     assert!(!is_audio_file(Path::new("noext")));

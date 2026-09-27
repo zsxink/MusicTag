@@ -18,6 +18,18 @@ use std::path::Path;
 /// 再对临时文件写标签，最后 `rename`（同卷原子替换）覆盖原路径。任一环节失败
 /// 返回 `Err`，原文件零触碰（临时文件由 `Drop` 自动清理）。
 pub fn write_atomic(path: &Path, tagged_file: &TaggedFile) -> std::io::Result<()> {
+    write_atomic_with(path, |dst| {
+        tagged_file
+            .save_to(dst, WriteOptions::default())
+            .map_err(std::io::Error::other)
+    })
+}
+
+/// 原子写回，并由调用方决定临时文件上的唯一标签写入策略。
+pub fn write_atomic_with<F>(path: &Path, write_tags: F) -> std::io::Result<()>
+where
+    F: FnOnce(&mut fs::File) -> std::io::Result<()>,
+{
     let dir = path
         .parent()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "路径缺少父目录"))?;
@@ -32,14 +44,12 @@ pub fn write_atomic(path: &Path, tagged_file: &TaggedFile) -> std::io::Result<()
         dst.flush()?;
     }
 
-    // 2. 对临时文件写标签。`save_to` 会 probe 临时文件内容猜测格式——临时文件
-    //    已含完整音频字节，格式可识别。写失败时临时文件被 Drop 清理，原文件未动。
+    // 2. 对临时文件写标签。临时文件已含完整音频字节，格式可识别。写失败时
+    //    临时文件被 Drop 清理，原文件未动。
     {
         let mut dst = temp.as_file_mut();
         dst.rewind()?;
-        tagged_file
-            .save_to(&mut dst, WriteOptions::default())
-            .map_err(std::io::Error::other)?;
+        write_tags(&mut dst)?;
         dst.flush()?;
         dst.sync_all()?;
     }

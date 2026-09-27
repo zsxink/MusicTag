@@ -11,10 +11,18 @@ use lofty::tag::items::ENGLISH;
 use lofty::tag::{ItemKey, ItemValue, Tag, TagItem};
 use std::path::Path;
 
-/// 是否为可收录的音频扩展名（`.flac`/`.mp3`，大小写不敏感）。
+/// 是否为可收录的音频扩展名（`.flac`/`.mp3`/`.ape`/`.wav`/`.m4a`，大小写不敏感）。
+///
+/// `.mp4` 刻意不在此列表中：它是通用容器扩展名，可能代表视频文件。
 pub fn is_audio_file(path: &Path) -> bool {
     path.extension()
-        .map(|ext| ext.eq_ignore_ascii_case("flac") || ext.eq_ignore_ascii_case("mp3"))
+        .map(|ext| {
+            ext.eq_ignore_ascii_case("flac")
+                || ext.eq_ignore_ascii_case("mp3")
+                || ext.eq_ignore_ascii_case("ape")
+                || ext.eq_ignore_ascii_case("wav")
+                || ext.eq_ignore_ascii_case("m4a")
+        })
         .unwrap_or(false)
 }
 
@@ -57,7 +65,7 @@ pub fn set_text(tag: &mut Tag, key: ItemKey, value: &str) {
 
 /// 歌词写入（design.md D5）：
 /// - MP3 → USLT 帧：`ItemKey::UnsyncLyrics` + `set_lang(ENGLISH)`（lofty 写 ID3v2 要求 lang 非空）。
-/// - FLAC → Vorbis `LYRICS` 帧：`ItemKey::Lyrics`（无需 lang）。
+/// - APE/FLAC/M4A → 各自标签的歌词字段：`ItemKey::Lyrics`（无需 lang）。
 ///
 /// 按 tag 类型分支：`ItemKey::Lyrics` 在 ID3v2 不受支持（lofty 会静默丢弃），
 /// `UnsyncLyrics` 在 Vorbis 映射为多余的 `UNSYNCEDLYRICS` comment，故只写对应格式的 key。
@@ -92,4 +100,3 @@ pub fn apply_cover(tag: &mut Tag, cover: &Option<String>) -> Result<(), String> 
     tag.push_picture(picture);
     Ok(())
 }
-

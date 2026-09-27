@@ -6,7 +6,10 @@
 mod common;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use common::{add_tags, tiny_png_bytes, write_tagged_flac, write_tagged_mp3};
+use common::{
+    add_ape_tags_with_picture, add_tags, tiny_png_bytes, write_tagged_ape, write_tagged_flac,
+    write_tagged_m4a, write_tagged_mp3, write_tagged_wav,
+};
 use std::fs;
 use tempfile::TempDir;
 
@@ -82,6 +85,35 @@ fn open_song_mp3_reads_all_fields_with_uslt_and_apic() {
 }
 
 #[test]
+fn open_song_new_formats_reads_all_fields_with_lyrics_and_cover() {
+    let cases = [
+        (
+            "song.wav",
+            write_tagged_wav as fn(&std::path::Path, &str, &str, &str),
+        ),
+        ("song.m4a", write_tagged_m4a),
+        ("song.ape", write_tagged_ape),
+    ];
+    for (name, write_fixture) in cases {
+        let tmp = TempDir::new().unwrap();
+        write_fixture(tmp.path(), name, "Song", "Artist");
+        let path = tmp.path().join(name);
+        if name.ends_with(".ape") {
+            add_ape_tags_with_picture(&path, tiny_png_bytes());
+        } else {
+            add_tags(&path, Some("歌词"), Some(tiny_png_bytes()));
+        }
+        let song = app_lib::service::reader::read_song_meta(&path).expect("新增格式应可读");
+        assert_eq!(song.title, "Song");
+        assert_eq!(song.artist, "Artist");
+        assert_eq!(song.album, "Album");
+        assert_eq!(song.year, "2021");
+        assert_eq!(song.lyrics, "歌词");
+        assert!(song.cover.is_some(), "{name} should retain cover");
+    }
+}
+
+#[test]
 fn open_song_mp3_track_pair_merged_frame_reads_split() {
     // 部分 MP3 的 TRCK 写成合并串 `03/12`。lofty 读侧已拆（design.md D2），
     // 这里直接手工拼一个含 `/` 的 TRCK 文本帧注入 ID3v2.4 tag，验证读路径端到端拆分。
@@ -147,6 +179,17 @@ fn open_song_corrupt_file_returns_err_not_blank() {
     let res = app_lib::service::reader::read_song_meta(&tmp.path().join("broken.mp3"));
     assert!(res.is_err(), "坏标签文件应返回 Err，而非空 Song");
     assert!(!res.unwrap_err().is_empty(), "错误原因不应为空串");
+}
+
+#[test]
+fn open_song_corrupt_new_formats_returns_err() {
+    for ext in ["ape", "wav", "m4a"] {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join(format!("broken.{ext}"));
+        fs::write(&path, b"garbage bytes").unwrap();
+        let res = app_lib::service::reader::read_song_meta(&path);
+        assert!(res.is_err(), "坏 {ext} 标签应进入只读错误路径");
+    }
 }
 
 #[test]

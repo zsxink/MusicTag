@@ -17,6 +17,7 @@ use lofty::tag::{items::ENGLISH, ItemValue, TagItem};
 use std::fs;
 use std::io::Cursor;
 use std::path::Path;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 /// 启动极简 HTTP 服务器（一次请求后关闭），返回 mock URL。
@@ -118,6 +119,37 @@ pub fn add_tags(path: &Path, lyrics: Option<&str>, picture: Option<Vec<u8>>) {
         .expect("写回 fixture 失败");
 }
 
+/// 为 APE fixture 写入原生 APEv2 picture item。通用 `Tag::save_to_path` 会先
+/// 转换成抽象 Tag，lofty 0.24 对 APE picture 的转换不保留 cover item；这里直接
+/// 使用 `ApeTag`/`ApeItem`，让 open 测试验证真实的 `Cover Art (Front)` 数据。
+pub fn add_ape_tags_with_picture(path: &Path, picture: Vec<u8>) {
+    use lofty::ape::{ApeItem, ApeTag};
+    use lofty::picture::{MimeType, Picture, PictureType};
+    use lofty::tag::{ItemValue, TagExt};
+    use std::fs::OpenOptions;
+
+    let mut tag = ApeTag::new();
+    tag.insert(ApeItem::new("Title".into(), ItemValue::Text("Song".into())).unwrap());
+    tag.insert(ApeItem::new("Artist".into(), ItemValue::Text("Artist".into())).unwrap());
+    tag.insert(ApeItem::new("Album".into(), ItemValue::Text("Album".into())).unwrap());
+    tag.insert(ApeItem::new("Year".into(), ItemValue::Text("2021".into())).unwrap());
+    tag.insert(ApeItem::new("Lyrics".into(), ItemValue::Text("歌词".into())).unwrap());
+    let ape_picture = Picture::unchecked(picture)
+        .pic_type(PictureType::CoverFront)
+        .mime_type(MimeType::Png)
+        .build()
+        .as_ape_bytes();
+    tag.insert(ApeItem::new("Cover Art (Front)".into(), ItemValue::Binary(ape_picture)).unwrap());
+    assert!(tag.get("Cover Art (Front)").is_some());
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .expect("打开 APE fixture 失败");
+    tag.save_to(&mut file, lofty::config::WriteOptions::default())
+        .expect("写入原生 APE picture fixture 失败");
+}
+
 /// 构造带 title/artist 的最小合法 FLAC（STREAMINFO + VORBIS_COMMENT 块）。
 ///
 /// lofty 无法凭空产出无损音频 payload，故手工拼字节：`fLaC` magic + STREAMINFO
@@ -188,6 +220,156 @@ pub fn write_tagged_mp3(dir: &Path, name: &str, title: &str, artist: &str) {
         audio.extend(std::iter::repeat_n(0u8, 413));
     }
     fs::write(dir.join(name), &audio).expect("写入测试 MP3 失败");
+}
+
+/// 构造可被 lofty 读取和写回的 WAV/M4A fixture。
+///
+/// ffmpeg 生成真实的音频容器和最小音频轨道；metadata 参数确保 lofty 创建
+/// 对应的 primary tag，后续 `add_tags` 再通过 ItemKey 写全字段。
+pub fn write_tagged_wav(dir: &Path, name: &str, title: &str, artist: &str) {
+    write_ffmpeg_fixture(dir, name, "wav", "pcm_s16le", Some(title), Some(artist));
+    let path = dir.join(name);
+    let mut bytes = fs::read(&path).expect("读取 WAV fixture 失败");
+    let id3 = id3v24_text_tag(title, artist);
+    bytes.extend_from_slice(b"ID3 ");
+    bytes.extend_from_slice(&(id3.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&id3);
+    if id3.len() % 2 != 0 {
+        bytes.push(0);
+    }
+    let riff_size = (bytes.len() - 8) as u32;
+    bytes[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    fs::write(path, bytes).expect("写入 WAV ID3 fixture 失败");
+}
+
+pub fn write_tagged_m4a(dir: &Path, name: &str, title: &str, artist: &str) {
+    write_ffmpeg_fixture(dir, name, "ipod", "alac", Some(title), Some(artist));
+}
+
+/// 真实容器但不含 primary tag 的 fixture，用于验证首次保存时创建标签。
+pub fn write_tagless_wav(dir: &Path, name: &str) {
+    write_ffmpeg_fixture(dir, name, "wav", "pcm_s16le", None, None);
+}
+
+pub fn write_tagless_m4a(dir: &Path, name: &str) {
+    write_ffmpeg_fixture(dir, name, "ipod", "alac", None, None);
+}
+
+fn write_ffmpeg_fixture(
+    dir: &Path,
+    name: &str,
+    format: &str,
+    codec: &str,
+    title: Option<&str>,
+    artist: Option<&str>,
+) {
+    let output = dir.join(name);
+    let mut args = vec![
+        "-hide_banner".to_string(),
+        "-loglevel".to_string(),
+        "error".to_string(),
+        "-f".to_string(),
+        "lavfi".to_string(),
+        "-i".to_string(),
+        "anullsrc=r=8000:cl=mono".to_string(),
+        "-t".to_string(),
+        "0.1".to_string(),
+        "-c:a".to_string(),
+        codec.to_string(),
+    ];
+    if let Some(title) = title {
+        args.extend(["-metadata".to_string(), format!("title={title}")]);
+    }
+    if let Some(artist) = artist {
+        args.extend(["-metadata".to_string(), format!("artist={artist}")]);
+    }
+    args.extend([
+        "-f".to_string(),
+        format.to_string(),
+        output.to_str().expect("fixture 路径应为 UTF-8").to_string(),
+    ]);
+    let status = Command::new("ffmpeg")
+        .args(&args)
+        .status()
+        .expect("测试需要 ffmpeg 生成真实 WAV/M4A fixture");
+    assert!(status.success(), "ffmpeg 生成 fixture 失败: {output:?}");
+}
+
+fn id3v24_text_tag(title: &str, artist: &str) -> Vec<u8> {
+    fn synchsafe(n: usize) -> [u8; 4] {
+        let n = n as u32;
+        [(n >> 21) as u8, (n >> 14) as u8, (n >> 7) as u8, n as u8]
+    }
+    fn frame(id: &[u8; 4], value: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(id);
+        out.extend_from_slice(&synchsafe(value.len() + 1));
+        out.extend_from_slice(&[0, 0, 3]);
+        out.extend_from_slice(value.as_bytes());
+        out
+    }
+    let mut frames = frame(b"TIT2", title);
+    frames.extend(frame(b"TPE1", artist));
+    let mut tag = b"ID3\x04\x00\x00".to_vec();
+    tag.extend_from_slice(&synchsafe(frames.len()));
+    tag.extend_from_slice(&frames);
+    tag
+}
+
+/// 构造最小但合法的 Monkey's Audio 3.98 文件，并附带一个 APEv2 标题项。
+/// APE 的属性读取只要求合法 MAC descriptor/header 和至少一个 frame；音频 frame
+/// 本身不被 lofty 解码，故用一个占位字节即可，标签仍通过 lofty 完整读写。
+pub fn write_tagged_ape(dir: &Path, name: &str, title: &str, artist: &str) {
+    use std::io::Write;
+    let mut out = Vec::new();
+    out.extend_from_slice(b"MAC ");
+    out.extend_from_slice(&3980u16.to_le_bytes());
+    out.extend_from_slice(&52u32.to_le_bytes()); // descriptor length
+    out.extend_from_slice(&[0u8; 42]);
+    out.extend_from_slice(&0u16.to_le_bytes()); // compression level
+    out.extend_from_slice(&0u16.to_le_bytes()); // format flags
+    out.extend_from_slice(&73728u32.to_le_bytes());
+    out.extend_from_slice(&1u32.to_le_bytes()); // final frame blocks
+    out.extend_from_slice(&1u32.to_le_bytes()); // total frames
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&8000u32.to_le_bytes());
+    out.push(0); // placeholder frame byte
+
+    let mut items = Vec::new();
+    for (key, value) in [("Title", title), ("Artist", artist)] {
+        items.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        items.extend_from_slice(&0u32.to_le_bytes());
+        items.extend_from_slice(key.as_bytes());
+        items.push(0);
+        items.extend_from_slice(value.as_bytes());
+    }
+    let tag_size = (items.len() + 32) as u32;
+    let mut header = Vec::new();
+    header.extend_from_slice(b"APETAGEX");
+    header.extend_from_slice(&2000u32.to_le_bytes());
+    header.extend_from_slice(&tag_size.to_le_bytes());
+    header.extend_from_slice(&2u32.to_le_bytes());
+    header.extend_from_slice(&0xE0000000u32.to_le_bytes());
+    header.extend_from_slice(&[0u8; 8]);
+    out.extend_from_slice(&header);
+    out.extend_from_slice(&items);
+    let mut footer = header;
+    footer[20..24].copy_from_slice(&0xC0000000u32.to_le_bytes());
+    out.extend_from_slice(&footer);
+    fs::File::create(dir.join(name))
+        .expect("创建 APE fixture 失败")
+        .write_all(&out)
+        .expect("写入 APE fixture 失败");
+}
+
+pub fn write_tagless_ape(dir: &Path, name: &str) {
+    write_tagged_ape(dir, name, "", "");
+    let path = dir.join(name);
+    let mut bytes = fs::read(&path).expect("读取 APE fixture 失败");
+    // MAC header (52-byte descriptor + 24-byte header) and one placeholder frame.
+    bytes.truncate(52 + 24 + 1);
+    fs::write(path, bytes).expect("写入无标签 APE fixture 失败");
 }
 
 /// 构造一个完整表单（全字段 + 歌词 + 封面 data URL），path 由调用方填。

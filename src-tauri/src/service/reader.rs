@@ -8,8 +8,30 @@ use crate::model::{LyricsSource, Song, SongSummary};
 use crate::service::cover::encode_cover;
 use crate::service::meta::split_track_pair;
 use lofty::prelude::{Accessor, TaggedFileExt};
+use lofty::ape::ApeFile;
+use lofty::config::ParseOptions;
+use lofty::file::AudioFile;
+use lofty::picture::{Picture, PictureType};
+use lofty::tag::ItemValue;
 use lofty::probe::Probe;
+use std::fs::File;
 use std::path::Path;
+
+fn read_ape_cover(path: &Path) -> Option<Picture> {
+    let mut file = File::open(path).ok()?;
+    let ape = ApeFile::read_from(&mut file, ParseOptions::new().read_properties(false)).ok()?;
+    let item = ape.ape()?.get("Cover Art (Front)")?;
+    let ItemValue::Binary(bytes) = item.value() else {
+        return None;
+    };
+    let separator = bytes.iter().position(|&byte| byte == 0)?;
+    let data = bytes.get(separator + 1..)?.to_vec();
+    Some(
+        Picture::unchecked(data)
+            .pic_type(PictureType::CoverFront)
+            .build(),
+    )
+}
 
 /// 读取单文件 title/artist。任何读取失败均返回空串，使列表层保持健壮。
 pub fn read_summary(path: &Path) -> SongSummary {
@@ -94,6 +116,11 @@ pub fn read_song_meta(path: &Path) -> Result<Song, String> {
 
     let (cover, cover_mime) = tag
         .and_then(|t| t.pictures().first().cloned())
+        .or_else(|| {
+            path.extension()
+                .filter(|ext| ext.eq_ignore_ascii_case("ape"))
+                .and_then(|_| read_ape_cover(path))
+        })
         .map(encode_cover)
         .unwrap_or((None, None));
 
