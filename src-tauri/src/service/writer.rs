@@ -12,6 +12,7 @@ use lofty::config::WriteOptions;
 use lofty::file::AudioFile;
 use lofty::prelude::{TagExt, TaggedFileExt};
 use lofty::tag::TagType;
+use lofty::tag::Tag;
 use lofty::probe::Probe;
 use std::path::Path;
 
@@ -32,6 +33,14 @@ pub fn save_song(song: Song, export_lrc: bool) -> Result<(), String> {
         .map_err(|e| format!("读取标签失败: {e}"))?;
 
     // D2：primary tag `clear()` 重建，保证「最终标签 == 表单内容」。
+    // 无标签但格式可写时先创建 lofty 为该容器选择的 primary tag。
+    if tagged_file.primary_tag().is_none() {
+        let tag_type = tagged_file.primary_tag_type();
+        if !matches!(tag_type, TagType::Ape | TagType::Id3v2 | TagType::Mp4Ilst) {
+            return Err("读取标签失败: 文件缺少可写的主标签".to_string());
+        }
+        tagged_file.insert_tag(Tag::new(tag_type));
+    }
     let tag = tagged_file
         .primary_tag_mut()
         .ok_or_else(|| "读取标签失败: 文件缺少可写的主标签".to_string())?;
