@@ -5,9 +5,13 @@
 // 函数提升 `pub` 供 `src-tauri/tests/` 集成测试经 `app_lib::service::writer::` 访问。
 
 use crate::model::Song;
-use crate::service::fs_atomic::write_atomic;
+use crate::service::fs_atomic::write_atomic_with;
 use crate::service::meta::apply_meta;
+use lofty::ape::ApeTag;
+use lofty::config::WriteOptions;
+use lofty::file::AudioFile;
 use lofty::prelude::{TagExt, TaggedFileExt};
+use lofty::tag::TagType;
 use lofty::probe::Probe;
 use std::path::Path;
 
@@ -35,7 +39,20 @@ pub fn save_song(song: Song, export_lrc: bool) -> Result<(), String> {
 
     apply_meta(tag, &song)?;
 
-    write_atomic(path, &tagged_file).map_err(|e| format!("写回文件失败: {e}"))?;
+    let ape_tag = (tag.tag_type() == TagType::Ape).then(|| ApeTag::from(tag.clone()));
+
+    write_atomic_with(path, move |file| {
+        if let Some(ape_tag) = ape_tag {
+            use lofty::prelude::TagExt;
+            ape_tag.save_to(file, WriteOptions::default()).map_err(std::io::Error::other)?;
+        } else {
+            tagged_file
+                .save_to(file, WriteOptions::default())
+                .map_err(std::io::Error::other)?;
+        }
+        Ok(())
+    })
+    .map_err(|e| format!("写回文件失败: {e}"))?;
 
     if export_lrc {
         crate::service::lyrics::export_lrc(path, &song.lyrics)
