@@ -8,7 +8,7 @@
 
 ## 验证
 
-- [ ] T5（infra，所有权：主会话；不新增或运行测试）：执行 `node --check`（progress.js、progress-cli.js、self-check.js）、相关 workflow 的 `bash -n`、`node .agents/tools/pipe-native/self-check.js` 和 `npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive`；手工核对 CI 与 Verify 矩阵、evidence-file/inline 互斥和 compact 输出不含 manifest，并记录实际退出码。
+- [x] T5（infra，所有权：主会话；不新增或运行测试）：执行 `node --check`（progress.js、progress-cli.js、self-check.js）、相关 workflow 的 `bash -n`、`node .agents/tools/pipe-native/self-check.js` 和 `npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive`；手工核对 CI 与 Verify 矩阵、evidence-file/inline 互斥和 compact 输出不含 manifest，并记录实际退出码。
 
 ## 集成归档
 
