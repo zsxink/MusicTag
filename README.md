@@ -5,7 +5,7 @@
 # MusicTag
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v0.1.1-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/版本-v0.1.2-blue.svg" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
@@ -21,7 +21,7 @@ MusicTag 是一个跨平台桌面工具，**逐首**为本地音乐文件补全�
 
 ## 功能特性
 
-- **支持格式**：FLAC / MP3
+- **支持格式**：FLAC / MP3 / APE / WAV / M4A
 - **编辑音乐标签**：歌名、作者、专辑、专辑作者、音轨号、年份、流派
 - **编辑封面**：点选或拖拽嵌入图片
 - **编辑歌词**：内嵌歌词，可同时导出 .lrc
