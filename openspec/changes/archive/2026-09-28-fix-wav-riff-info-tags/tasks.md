@@ -24,6 +24,6 @@
 - [x] 5. **保存场景与回归验证** — owner: Tester；paths: `src-tauri/tests/save_song.rs`
   - 覆盖 RIFF INFO 保留/镜像、ID3v2 完整字段、歌词/封面仍写 ID3v2、空值清理和不创建新 RIFF INFO。
   - 保留并运行既有 FLAC、MP3（含 ID3v2.4）、APE、M4A 保存回归。
-- [ ] 6. **验证门禁** — owner: 主会话；paths: `openspec/changes/fix-wav-riff-info-tags/design.md`, `openspec/changes/fix-wav-riff-info-tags/tasks.md`
+- [x] 6. **验证门禁** — owner: 主会话；paths: `openspec/changes/fix-wav-riff-info-tags/design.md`, `openspec/changes/fix-wav-riff-info-tags/tasks.md`
   - 按 design.md 顺序运行定向 Rust 测试、全量 Rust 测试、`cargo check` 和 OpenSpec strict 校验。
   - 若 fixture 早检失败、实现跨出上述文件所有权或出现规格冲突，停止扩展并回报主会话。

@@ -38,6 +38,16 @@
 - **WHEN** 用户打开有效 WAV 文件、修改表单字段并保存
 - **THEN** 支持的文本字段、年份、歌词和封面写入 WAV 支持的标签，重读后与保存值一致
 
+#### Scenario: M4A 标签往返
+
+- **WHEN** 用户打开有效 M4A 文件、修改表单字段并保存
+- **THEN** 支持的文本字段、年份、歌词和封面写入 iTunes ilst，重读后与保存值一致
+
+#### Scenario: 坏标签只读
+
+- **WHEN** 新增格式的文件标签读取失败或结构损坏
+- **THEN** 文件沿用现有只读降级行为，不能保存标签
+
 #### Scenario: RIFF INFO-only WAV 读取
 
 - **WHEN** 用户打开只含 RIFF INFO 标签、没有 ID3v2 标签的有效 WAV
@@ -57,16 +67,6 @@
 
 - **WHEN** 用户清空某个 RIFF INFO 可表示字段并保存含 RIFF INFO 的 WAV
 - **THEN** 该字段从 ID3v2 与 RIFF INFO 中移除，不留下旧值
-
-#### Scenario: M4A 标签往返
-
-- **WHEN** 用户打开有效 M4A 文件、修改表单字段并保存
-- **THEN** 支持的文本字段、年份、歌词和封面写入 iTunes ilst，重读后与保存值一致
-
-#### Scenario: 坏标签只读
-
-- **WHEN** 新增格式的文件标签读取失败或结构损坏
-- **THEN** 文件沿用现有只读降级行为，不能保存标签
 
 ### Requirement: 保持单曲保存边界
 
