@@ -1,5 +1,7 @@
 # 修复 WAV RIFF INFO 标签兼容
 
+GitHub Issue: #138
+
 ## Why
 
 Issue #128 的 WAV 测试只覆盖 ID3v2 chunk。实际 WAV 也可只包含 RIFF INFO；当前读取与保存都只操作 primary ID3v2 标签，导致 RIFF INFO 元数据打开时显示为空，保存后旧客户端仍看到旧值。
