@@ -6,6 +6,26 @@
 
 应用 SHALL 使用文件实际支持的标签类型读写 APE、WAV 与 M4A 的歌名、作者、专辑、专辑作者、音轨号、年份、流派、歌词和封面。WAV SHALL 支持读取 ID3v2 与 RIFF INFO：字段级优先采用 ID3v2 的非空值，缺失时回退到 RIFF INFO。WAV 保存 SHALL 将完整表单写入 ID3v2；若文件原本含 RIFF INFO，则同步其可表示的字段，且空表单字段 SHALL 从两种标签中清除。RIFF INFO 不支持的歌词和封面继续由 ID3v2 承载。M4A 采用 iTunes ilst，APE 采用 APE 标签；APE SHALL NOT 写入不受支持的 ID3v2 标签。格式可读时的坏标签 SHALL 沿用只读降级行为。
 
+#### Scenario: APE 标签往返
+
+- **WHEN** 用户打开有效 APE 文件、修改表单字段并保存
+- **THEN** 支持的文本字段、年份、歌词和封面写入 APE 标签，重读后与保存值一致，文件中未写入 ID3v2
+
+#### Scenario: WAV 标签往返
+
+- **WHEN** 用户打开有效 WAV 文件、修改表单字段并保存
+- **THEN** 支持的文本字段、年份、歌词和封面写入 WAV 支持的标签，重读后与保存值一致
+
+#### Scenario: M4A 标签往返
+
+- **WHEN** 用户打开有效 M4A 文件、修改表单字段并保存
+- **THEN** 支持的文本字段、年份、歌词和封面写入 iTunes ilst，重读后与保存值一致
+
+#### Scenario: 坏标签只读
+
+- **WHEN** 新增格式的文件标签读取失败或结构损坏
+- **THEN** 文件沿用现有只读降级行为，不能保存标签
+
 #### Scenario: RIFF INFO-only WAV 读取
 
 - **WHEN** 用户打开只含 RIFF INFO 标签、没有 ID3v2 标签的有效 WAV
