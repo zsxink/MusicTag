@@ -7,13 +7,14 @@
 use crate::model::{LyricsSource, Song, SongSummary};
 use crate::service::cover::encode_cover;
 use crate::service::meta::split_track_pair;
-use lofty::prelude::{Accessor, TaggedFileExt};
 use lofty::ape::ApeFile;
 use lofty::config::ParseOptions;
 use lofty::file::AudioFile;
+use lofty::file::FileType;
 use lofty::picture::{Picture, PictureType};
-use lofty::tag::ItemValue;
+use lofty::prelude::TaggedFileExt;
 use lofty::probe::Probe;
+use lofty::tag::{ItemKey, ItemValue, Tag, TagType};
 use std::fs::File;
 use std::path::Path;
 
@@ -33,19 +34,48 @@ fn read_ape_cover(path: &Path) -> Option<Picture> {
     )
 }
 
+fn tag_value(tag: Option<&Tag>, key: ItemKey) -> String {
+    tag.and_then(|tag| tag.get_string(key))
+        .map(ToOwned::to_owned)
+        .unwrap_or_default()
+}
+
+/// WAV 的 ID3v2 是完整表单的权威来源；RIFF INFO 只为缺失文本字段提供回退。
+fn wav_text_value(primary: Option<&Tag>, riff_info: Option<&Tag>, key: ItemKey) -> String {
+    let primary_value = tag_value(primary, key);
+    if primary_value.is_empty() {
+        tag_value(riff_info, key)
+    } else {
+        primary_value
+    }
+}
+
+fn wav_year_value(primary: Option<&Tag>, riff_info: Option<&Tag>) -> String {
+    for key in [ItemKey::RecordingDate, ItemKey::Year] {
+        let value = tag_value(primary, key);
+        if !value.is_empty() {
+            return value;
+        }
+    }
+    for key in [ItemKey::RecordingDate, ItemKey::Year] {
+        let value = tag_value(riff_info, key);
+        if !value.is_empty() {
+            return value;
+        }
+    }
+    String::new()
+}
+
 /// 读取单文件 title/artist。任何读取失败均返回空串，使列表层保持健壮。
 pub fn read_summary(path: &Path) -> SongSummary {
     let (title, artist) = match Probe::open(path).and_then(|probed| probed.read()) {
         Ok(tagged_file) => {
             let tag = tagged_file.primary_tag();
-            let title = tag
-                .and_then(Accessor::title)
-                .map(|s| s.to_string())
-                .unwrap_or_default();
-            let artist = tag
-                .and_then(Accessor::artist)
-                .map(|s| s.to_string())
-                .unwrap_or_default();
+            let riff_info = (tagged_file.file_type() == FileType::Wav)
+                .then(|| tagged_file.tag(TagType::RiffInfo))
+                .flatten();
+            let title = wav_text_value(tag, riff_info, ItemKey::TrackTitle);
+            let artist = wav_text_value(tag, riff_info, ItemKey::TrackArtist);
             (title, artist)
         }
         Err(_) => (String::new(), String::new()),
@@ -65,13 +95,12 @@ pub fn read_song_meta(path: &Path) -> Result<Song, String> {
         .map_err(|e| format!("读取标签失败: {e}"))?;
 
     let tag = tagged_file.primary_tag();
+    let riff_info = (tagged_file.file_type() == FileType::Wav)
+        .then(|| tagged_file.tag(TagType::RiffInfo))
+        .flatten();
 
     // 文本字段统一经 ItemKey 读取，未设置读空串（PRD §6），Rust 不 trim。
-    let get = |key: lofty::tag::ItemKey| {
-        tag.and_then(|t| t.get_string(key))
-            .map(|s| s.to_owned())
-            .unwrap_or_default()
-    };
+    let get = |key: ItemKey| wav_text_value(tag, riff_info, key);
 
     let track = get(lofty::tag::ItemKey::TrackNumber);
     let track_total = get(lofty::tag::ItemKey::TrackTotal);
@@ -105,14 +134,7 @@ pub fn read_song_meta(path: &Path) -> Result<Song, String> {
     // 实际映射：Vorbis `DATE` → RecordingDate、ID3v2 `TDRC` → RecordingDate；仅
     // Vorbis `YEAR` 落 `ItemKey::Year`）。故 RecordingDate 优先、Year 兜底，保证
     // FLAC `DATE=...` 与 MP3 `TDRC=...` 均能读到。
-    let year = {
-        let y = get(lofty::tag::ItemKey::RecordingDate);
-        if y.is_empty() {
-            get(lofty::tag::ItemKey::Year)
-        } else {
-            y
-        }
-    };
+    let year = wav_year_value(tag, riff_info);
 
     let (cover, cover_mime) = tag
         .and_then(|t| t.pictures().first().cloned())
@@ -126,14 +148,14 @@ pub fn read_song_meta(path: &Path) -> Result<Song, String> {
 
     Ok(Song {
         path: path.to_string_lossy().into_owned(),
-        title: get(lofty::tag::ItemKey::TrackTitle),
-        artist: get(lofty::tag::ItemKey::TrackArtist),
-        album: get(lofty::tag::ItemKey::AlbumTitle),
-        album_artist: get(lofty::tag::ItemKey::AlbumArtist),
+        title: get(ItemKey::TrackTitle),
+        artist: get(ItemKey::TrackArtist),
+        album: get(ItemKey::AlbumTitle),
+        album_artist: get(ItemKey::AlbumArtist),
         track,
         track_total,
         year,
-        genre: get(lofty::tag::ItemKey::Genre),
+        genre: get(ItemKey::Genre),
         lyrics,
         lyrics_source,
         cover,

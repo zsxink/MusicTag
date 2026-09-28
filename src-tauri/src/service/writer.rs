@@ -6,14 +6,14 @@
 
 use crate::model::Song;
 use crate::service::fs_atomic::write_atomic_with;
-use crate::service::meta::apply_meta;
+use crate::service::meta::{apply_meta, apply_riff_info_meta};
 use lofty::ape::ApeTag;
 use lofty::config::WriteOptions;
-use lofty::file::AudioFile;
+use lofty::file::{AudioFile, FileType};
 use lofty::prelude::{TagExt, TaggedFileExt};
-use lofty::tag::TagType;
-use lofty::tag::Tag;
 use lofty::probe::Probe;
+use lofty::tag::Tag;
+use lofty::tag::TagType;
 use std::path::Path;
 
 /// 保存当前编辑表单，全量覆盖写回原路径。
@@ -32,6 +32,11 @@ pub fn save_song(song: Song, export_lrc: bool) -> Result<(), String> {
         .and_then(|probed| probed.read())
         .map_err(|e| format!("读取标签失败: {e}"))?;
 
+    // lofty 仅在 RIFF INFO 非空时暴露该辅助标签。记下其原始存在性，避免为
+    // ID3v2-only WAV 新建 RIFF INFO，同时使原有 INFO 的旧值可随表单被清除。
+    let has_riff_info =
+        tagged_file.file_type() == FileType::Wav && tagged_file.tag(TagType::RiffInfo).is_some();
+
     // D2：primary tag `clear()` 重建，保证「最终标签 == 表单内容」。
     // 无标签但格式可写时先创建 lofty 为该容器选择的 primary tag。
     if tagged_file.primary_tag().is_none() {
@@ -41,19 +46,33 @@ pub fn save_song(song: Song, export_lrc: bool) -> Result<(), String> {
         }
         tagged_file.insert_tag(Tag::new(tag_type));
     }
-    let tag = tagged_file
-        .primary_tag_mut()
-        .ok_or_else(|| "读取标签失败: 文件缺少可写的主标签".to_string())?;
-    tag.clear();
+    {
+        let tag = tagged_file
+            .primary_tag_mut()
+            .ok_or_else(|| "读取标签失败: 文件缺少可写的主标签".to_string())?;
+        tag.clear();
+        apply_meta(tag, &song)?;
+    }
 
-    apply_meta(tag, &song)?;
+    if has_riff_info {
+        let riff_info = tagged_file
+            .tag_mut(TagType::RiffInfo)
+            .expect("已确认存在的 RIFF INFO 标签应仍可访问");
+        riff_info.clear();
+        apply_riff_info_meta(riff_info, &song);
+    }
 
-    let ape_tag = (tag.tag_type() == TagType::Ape).then(|| ApeTag::from(tag.clone()));
+    let ape_tag = tagged_file
+        .primary_tag()
+        .filter(|tag| tag.tag_type() == TagType::Ape)
+        .map(|tag| ApeTag::from(tag.clone()));
 
     write_atomic_with(path, move |file| {
         if let Some(ape_tag) = ape_tag {
             use lofty::prelude::TagExt;
-            ape_tag.save_to(file, WriteOptions::default()).map_err(std::io::Error::other)?;
+            ape_tag
+                .save_to(file, WriteOptions::default())
+                .map_err(std::io::Error::other)?;
         } else {
             tagged_file
                 .save_to(file, WriteOptions::default())
