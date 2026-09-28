@@ -19,9 +19,9 @@
   - ID3v2 始终全量清空重建并承载所有应用字段、歌词和封面。
   - 只有原文件已有 RIFF INFO 时才清空并镜像七个可表示字段；空值删除对应项；ID3v2-only 不创建 RIFF INFO。
   - 沿用现有原子写回和失败语义。
-- [ ] 4. **读取场景验证** — owner: Tester；paths: `src-tauri/tests/open_song.rs`
+- [x] 4. **读取场景验证** — owner: Tester；paths: `src-tauri/tests/open_song.rs`
   - 覆盖 fixture 早检、RIFF INFO-only、ID3v2-only、双标签字段级优先级、坏 WAV。
-- [ ] 5. **保存场景与回归验证** — owner: Tester；paths: `src-tauri/tests/save_song.rs`
+- [x] 5. **保存场景与回归验证** — owner: Tester；paths: `src-tauri/tests/save_song.rs`
   - 覆盖 RIFF INFO 保留/镜像、ID3v2 完整字段、歌词/封面仍写 ID3v2、空值清理和不创建新 RIFF INFO。
   - 保留并运行既有 FLAC、MP3（含 ID3v2.4）、APE、M4A 保存回归。
 - [ ] 6. **验证门禁** — owner: 主会话；paths: `openspec/changes/fix-wav-riff-info-tags/design.md`, `openspec/changes/fix-wav-riff-info-tags/tasks.md`

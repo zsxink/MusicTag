@@ -7,8 +7,9 @@ mod common;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use common::{
-    add_ape_tags_with_picture, add_tags, tiny_png_bytes, write_tagged_ape, write_tagged_flac,
-    write_tagged_m4a, write_tagged_mp3, write_tagged_wav,
+    add_ape_tags_with_picture, add_tags, assert_bad_wav_fixture, assert_wav_fixture_tags,
+    tiny_png_bytes, write_dual_tagged_wav, write_riff_info_only_wav, write_tagged_ape,
+    write_tagged_flac, write_tagged_m4a, write_tagged_mp3, write_tagged_wav,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -111,6 +112,86 @@ fn open_song_new_formats_reads_all_fields_with_lyrics_and_cover() {
         assert_eq!(song.lyrics, "歌词");
         assert!(song.cover.is_some(), "{name} should retain cover");
     }
+}
+
+#[test]
+fn open_song_wav_riff_info_only_reads_summary_and_all_mapped_fields() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("riff-only.wav");
+    write_riff_info_only_wav(
+        tmp.path(),
+        "riff-only.wav",
+        &[
+            ("INAM", "RIFF 标题"),
+            ("IART", "RIFF 艺术家"),
+            ("IPRD", "RIFF 专辑"),
+            ("IPRT", "3"),
+            ("IFRM", "12"),
+            ("ICRD", "2021"),
+            ("IGNR", "Jazz"),
+        ],
+    );
+
+    assert_wav_fixture_tags(&path, false, true);
+    let summary = app_lib::service::reader::read_summary(&path);
+    assert_eq!(summary.title, "RIFF 标题");
+    assert_eq!(summary.artist, "RIFF 艺术家");
+
+    let song = app_lib::service::reader::read_song_meta(&path).expect("RIFF INFO-only WAV 应可读");
+    assert_eq!(song.title, "RIFF 标题");
+    assert_eq!(song.artist, "RIFF 艺术家");
+    assert_eq!(song.album, "RIFF 专辑");
+    assert_eq!(song.track, "3");
+    assert_eq!(song.track_total, "12");
+    assert_eq!(song.year, "2021");
+    assert_eq!(song.genre, "Jazz");
+    assert_eq!(song.lyrics, "");
+    assert_eq!(song.cover, None);
+}
+
+#[test]
+fn open_song_wav_dual_tags_use_id3_per_field_and_riff_fallback() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("dual.wav");
+    write_dual_tagged_wav(
+        tmp.path(),
+        "dual.wav",
+        "ID3 标题",
+        "ID3 艺术家",
+        &[
+            ("INAM", "RIFF 标题"),
+            ("IART", "RIFF 艺术家"),
+            ("IPRD", "RIFF 专辑"),
+            ("IPRT", "4"),
+            ("IFRM", "10"),
+            ("ICRD", "2020"),
+            ("IGNR", "Classical"),
+        ],
+    );
+
+    assert_wav_fixture_tags(&path, true, true);
+    let song = app_lib::service::reader::read_song_meta(&path).expect("双标签 WAV 应可读");
+    assert_eq!(song.title, "ID3 标题");
+    assert_eq!(song.artist, "ID3 艺术家");
+    assert_eq!(song.album, "RIFF 专辑");
+    assert_eq!(song.track, "4");
+    assert_eq!(song.track_total, "10");
+    assert_eq!(song.year, "2020");
+    assert_eq!(song.genre, "Classical");
+}
+
+#[test]
+fn open_song_wav_bad_fixture_fails_early_and_returns_error() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("broken.wav");
+    fs::write(&path, b"RIFF\x00\x00\x00\x00WAVE").unwrap();
+    assert_bad_wav_fixture(&path);
+    let err = app_lib::service::reader::read_song_meta(&path)
+        .expect_err("坏 WAV 不应进入可编辑表单");
+    assert!(!err.is_empty());
+    let summary = app_lib::service::reader::read_summary(&path);
+    assert_eq!(summary.title, "");
+    assert_eq!(summary.artist, "");
 }
 
 #[test]
