@@ -56,6 +56,20 @@ pub fn apply_meta(tag: &mut Tag, song: &Song) -> Result<(), String> {
     apply_cover(tag, &song.cover)
 }
 
+/// 将表单中 RIFF INFO 能表示的字段镜像到已有的 RIFF INFO 标签。
+///
+/// 调用方必须先确认原 WAV 含有 RIFF INFO，并在调用前清空该标签。这里刻意不处理
+/// 专辑作者、歌词和封面：它们由 WAV 的 ID3v2 承载。
+pub fn apply_riff_info_meta(tag: &mut Tag, song: &Song) {
+    set_text(tag, ItemKey::TrackTitle, &song.title);
+    set_text(tag, ItemKey::TrackArtist, &song.artist);
+    set_text(tag, ItemKey::AlbumTitle, &song.album);
+    set_text(tag, ItemKey::TrackNumber, &song.track);
+    set_text(tag, ItemKey::TrackTotal, &song.track_total);
+    set_text(tag, ItemKey::RecordingDate, &song.year);
+    set_text(tag, ItemKey::Genre, &song.genre);
+}
+
 /// 非空字段 `insert_text`（空则跳过——clear 后未写即删除，表单全量覆盖语义）。
 pub fn set_text(tag: &mut Tag, key: ItemKey, value: &str) {
     if !value.is_empty() {

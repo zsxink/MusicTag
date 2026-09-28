@@ -11,9 +11,11 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lofty::config::WriteOptions;
+use lofty::file::FileType;
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::{TagExt, TaggedFileExt};
-use lofty::tag::{items::ENGLISH, ItemValue, TagItem};
+use lofty::probe::Probe;
+use lofty::tag::{items::ENGLISH, ItemValue, TagItem, TagType};
 use std::fs;
 use std::io::Cursor;
 use std::path::Path;
@@ -60,7 +62,11 @@ pub fn mock_http_capture(response: Vec<u8>) -> (String, Arc<Mutex<String>>) {
             let mut buf = [0u8; 8192];
             let _ = s.read(&mut buf);
             let text = String::from_utf8_lossy(&buf);
-            let target = text.split_whitespace().nth(1).unwrap_or_default().to_string();
+            let target = text
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or_default()
+                .to_string();
             *captured_for_thread.lock().unwrap() = target;
             let _ = s.write_all(&response);
             let _ = s.flush();
@@ -227,7 +233,9 @@ pub fn write_tagged_mp3(dir: &Path, name: &str, title: &str, artist: &str) {
 /// ffmpeg 生成真实的音频容器和最小音频轨道；metadata 参数确保 lofty 创建
 /// 对应的 primary tag，后续 `add_tags` 再通过 ItemKey 写全字段。
 pub fn write_tagged_wav(dir: &Path, name: &str, title: &str, artist: &str) {
-    write_ffmpeg_fixture(dir, name, "wav", "pcm_s16le", Some(title), Some(artist));
+    // ffmpeg 的 WAV metadata 会生成 RIFF INFO；这里从无标签容器开始，确保该
+    // fixture 真正只含 ID3v2，双标签场景由 `write_dual_tagged_wav` 显式构造。
+    write_ffmpeg_fixture(dir, name, "wav", "pcm_s16le", None, None);
     let path = dir.join(name);
     let mut bytes = fs::read(&path).expect("读取 WAV fixture 失败");
     let id3 = id3v24_text_tag(title, artist);
@@ -240,6 +248,84 @@ pub fn write_tagged_wav(dir: &Path, name: &str, title: &str, artist: &str) {
     let riff_size = (bytes.len() - 8) as u32;
     bytes[4..8].copy_from_slice(&riff_size.to_le_bytes());
     fs::write(path, bytes).expect("写入 WAV ID3 fixture 失败");
+    assert_wav_fixture_tags(&dir.join(name), true, false);
+}
+
+/// 构造只带 RIFF INFO 的 WAV。`fields` 使用 RIFF 四字符键，例如 `INAM`、`IART`。
+/// 写入后立即用 lofty 早检，避免后续业务断言建立在无效 fixture 上。
+pub fn write_riff_info_only_wav(dir: &Path, name: &str, fields: &[(&str, &str)]) {
+    write_tagless_wav(dir, name);
+    let path = dir.join(name);
+    append_riff_info(&path, fields);
+    assert_wav_fixture_tags(&path, false, true);
+}
+
+/// 构造同时带 ID3v2 和 RIFF INFO 的 WAV，供字段级优先级场景使用。
+pub fn write_dual_tagged_wav(
+    dir: &Path,
+    name: &str,
+    id3_title: &str,
+    id3_artist: &str,
+    riff_fields: &[(&str, &str)],
+) {
+    write_tagged_wav(dir, name, id3_title, id3_artist);
+    let path = dir.join(name);
+    append_riff_info(&path, riff_fields);
+    assert_wav_fixture_tags(&path, true, true);
+}
+
+/// 早检 WAV fixture 的容器类型和两种标签的存在形态。
+pub fn assert_wav_fixture_tags(path: &Path, has_id3v2: bool, has_riff_info: bool) {
+    let tagged = Probe::open(path)
+        .and_then(|probed| probed.read())
+        .unwrap_or_else(|err| panic!("WAV fixture 应可被 lofty 读取 {path:?}: {err}"));
+    assert_eq!(
+        tagged.file_type(),
+        FileType::Wav,
+        "fixture 应为 WAV: {path:?}"
+    );
+    assert_eq!(
+        tagged.tag(TagType::Id3v2).is_some(),
+        has_id3v2,
+        "WAV ID3v2 形态不符: {path:?}"
+    );
+    assert_eq!(
+        tagged.tag(TagType::RiffInfo).is_some(),
+        has_riff_info,
+        "WAV RIFF INFO 形态不符: {path:?}"
+    );
+}
+
+/// 坏 WAV fixture 的早检接口：必须被 lofty 拒绝，不能误进入业务断言。
+pub fn assert_bad_wav_fixture(path: &Path) {
+    assert!(
+        Probe::open(path).and_then(|probed| probed.read()).is_err(),
+        "坏 WAV fixture 不应被 lofty 读取: {path:?}"
+    );
+}
+
+fn append_riff_info(path: &Path, fields: &[(&str, &str)]) {
+    assert!(!fields.is_empty(), "RIFF INFO fixture 至少应含一个字段");
+    let mut info = Vec::from(&b"INFO"[..]);
+    for (key, value) in fields {
+        assert_eq!(key.len(), 4, "RIFF INFO key 必须是四字符: {key}");
+        info.extend_from_slice(key.as_bytes());
+        let value_len = value.len() + 1; // RIFF INFO 文本含 NUL 终止符。
+        info.extend_from_slice(&(value_len as u32).to_le_bytes());
+        info.extend_from_slice(value.as_bytes());
+        info.push(0);
+        if value_len % 2 != 0 {
+            info.push(0);
+        }
+    }
+
+    let mut bytes = fs::read(path).expect("读取 WAV fixture 失败");
+    bytes.extend_from_slice(b"LIST");
+    bytes.extend_from_slice(&(info.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&info);
+    let riff_size = (bytes.len() - 8) as u32;
+    bytes[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    fs::write(path, bytes).expect("写入 WAV RIFF INFO fixture 失败");
 }
 
 pub fn write_tagged_m4a(dir: &Path, name: &str, title: &str, artist: &str) {
@@ -293,6 +379,38 @@ fn write_ffmpeg_fixture(
         .status()
         .expect("测试需要 ffmpeg 生成真实 WAV/M4A fixture");
     assert!(status.success(), "ffmpeg 生成 fixture 失败: {output:?}");
+    if format == "wav" {
+        // ffmpeg 即使没有用户 metadata 也会写入 `ISFT=Lavf...` RIFF INFO。
+        // fixture 的标签形态必须可控，故先移除它，再由各构造器显式加入 ID3v2/INFO。
+        strip_riff_info(&output);
+    }
+}
+
+fn strip_riff_info(path: &Path) {
+    let bytes = fs::read(path).expect("读取 WAV fixture 失败");
+    assert!(
+        bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE"),
+        "应为 WAV"
+    );
+
+    let mut stripped = bytes[..12].to_vec();
+    let mut offset = 12;
+    while offset + 8 <= bytes.len() {
+        let size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        let end = offset + 8 + size;
+        let padded_end = end + (size % 2);
+        assert!(padded_end <= bytes.len(), "WAV fixture chunk 越界");
+        let is_riff_info = &bytes[offset..offset + 4] == b"LIST"
+            && bytes.get(offset + 8..offset + 12) == Some(b"INFO");
+        if !is_riff_info {
+            stripped.extend_from_slice(&bytes[offset..padded_end]);
+        }
+        offset = padded_end;
+    }
+    assert_eq!(offset, bytes.len(), "WAV fixture chunk 对齐失败");
+    let riff_size = (stripped.len() - 8) as u32;
+    stripped[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    fs::write(path, stripped).expect("移除 WAV RIFF INFO fixture 失败");
 }
 
 fn id3v24_text_tag(title: &str, artist: &str) -> Vec<u8> {

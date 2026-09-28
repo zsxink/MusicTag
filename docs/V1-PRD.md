@@ -209,9 +209,9 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 / APE / WAV / M4A
 
 APE 仅写 APE 标签；不创建或写入只读的 ID3v2 标签。lofty 0.24 的通用 `Tag` 写入路径不序列化 APE 图片，因此封面通过 `ApeTag` 专用转换和写入路径保存，并在原子临时文件上完成。
 
-### 5.1b WAV → ID3v2
+### 5.1b WAV → ID3v2 与 RIFF INFO
 
-WAV 的 primary tag 使用 lofty 的内嵌 ID3v2：字段映射沿用本节 MP3 的 `TIT2`、`TPE1`、`TALB`、`TPE2`、`TRCK`、`TDRC`、`TCON`、USLT 和 APIC。若 WAV 同时含 RIFF INFO 与 ID3v2，应用按 lofty `primary_tag()` 读取和重建内嵌 ID3v2，不在应用层合并两套标签。
+WAV 的完整表单、歌词与封面使用 lofty 的内嵌 ID3v2：字段映射沿用本节 MP3 的 `TIT2`、`TPE1`、`TALB`、`TPE2`、`TRCK`、`TDRC`、`TCON`、USLT 和 APIC。读取时字段级优先使用非空 ID3v2 值，缺失字段回退到 RIFF INFO。若原 WAV 含 RIFF INFO，保存时同步其可表示的文本字段；空表单字段从两种标签清除。RIFF INFO 不支持的歌词和封面由 ID3v2 承载；原 WAV 不含 RIFF INFO 时不额外创建该标签。
 
 ### 5.1c M4A → iTunes ilst
 

@@ -1,28 +1,6 @@
-# audio-format-tags Specification
+# audio-format-tags Specification Delta
 
-## Purpose
-允许用户通过现有单曲编辑流程，为 APE、WAV、M4A 音频文件读取、补全并保存元数据，兼容无标签文件和已有受支持标签的文件。
-
-## Requirements
-
-### Requirement: 支持音频格式发现
-
-文件夹深度遍历 SHALL 在现有 FLAC、MP3 格式之外识别 `.ape`、`.wav`、`.m4a` 扩展名，扩展名匹配不区分大小写。通用 `.mp4` 扩展名 SHALL NOT 被收集，因为它无法仅凭扩展名与视频区分。识别出的文件继续使用现有列表摘要和单曲打开流程。
-
-#### Scenario: 遍历收集新格式
-
-- **WHEN** 用户打开包含 APE、WAV 或 M4A 音频文件（扩展名大小写可变）的文件夹
-- **THEN** 文件出现在歌曲列表并可通过现有单曲编辑流程打开
-
-#### Scenario: 保持已有格式
-
-- **WHEN** 用户打开包含 FLAC、MP3 及新增格式的文件夹
-- **THEN** 五种格式均可被收集，原有排序和摘要行为保持一致
-
-#### Scenario: 排除通用 MP4 容器
-
-- **WHEN** 用户打开包含 `.mp4` 文件的文件夹
-- **THEN** `.mp4` 文件不作为音频歌曲收集
+## MODIFIED Requirements
 
 ### Requirement: 按容器读写标签
 
@@ -67,17 +45,3 @@
 
 - **WHEN** 用户清空某个 RIFF INFO 可表示字段并保存含 RIFF INFO 的 WAV
 - **THEN** 该字段从 ID3v2 与 RIFF INFO 中移除，不留下旧值
-
-### Requirement: 保持单曲保存边界
-
-新增格式 SHALL 遵循现有单曲保存契约：表单全量覆盖、空字段删除、直接写回原文件；MP3 SHALL 继续写 ID3v2.4。
-
-#### Scenario: 全量覆盖与清空
-
-- **WHEN** 用户保存新增格式的歌曲表单
-- **THEN** 非空表单值被写入，空字段从对应标签中删除，文件原路径被更新
-
-#### Scenario: 现有格式不回归
-
-- **WHEN** 用户保存 MP3 歌曲
-- **THEN** 写入仍为 ID3v2.4，既有 MP3 与 FLAC 标签读写行为保持一致
