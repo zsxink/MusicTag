@@ -11,6 +11,7 @@ use common::{
     tiny_png_bytes, write_dual_tagged_wav, write_riff_info_only_wav, write_tagged_ape,
     write_tagged_flac, write_tagged_m4a, write_tagged_mp3, write_tagged_wav,
 };
+use lofty::prelude::TaggedFileExt;
 use std::fs;
 use tempfile::TempDir;
 
@@ -178,6 +179,25 @@ fn open_song_wav_dual_tags_use_id3_per_field_and_riff_fallback() {
     assert_eq!(song.track_total, "10");
     assert_eq!(song.year, "2020");
     assert_eq!(song.genre, "Classical");
+
+    // 显式存在但为空的 ID3v2 TIT2 也应按字段回退到 RIFF INFO。
+    let empty_id3_path = tmp.path().join("empty-id3-field.wav");
+    write_dual_tagged_wav(
+        tmp.path(),
+        "empty-id3-field.wav",
+        "",
+        "ID3 艺术家",
+        &[("INAM", "空帧回退标题"), ("IART", "RIFF 艺术家")],
+    );
+    let tagged = lofty::read_from_path(&empty_id3_path).expect("空 ID3 帧 WAV 应可读");
+    let id3 = tagged.primary_tag().expect("应存在 ID3v2 标签");
+    assert!(id3.get(lofty::tag::ItemKey::TrackTitle).is_some());
+    assert_eq!(id3.get_string(lofty::tag::ItemKey::TrackTitle), Some(""));
+
+    let empty_id3_song = app_lib::service::reader::read_song_meta(&empty_id3_path)
+        .expect("空 ID3 字段应回退到 RIFF INFO");
+    assert_eq!(empty_id3_song.title, "空帧回退标题");
+    assert_eq!(empty_id3_song.artist, "ID3 艺术家");
 }
 
 #[test]
