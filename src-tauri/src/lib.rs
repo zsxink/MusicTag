@@ -4,6 +4,7 @@
 // - `pick_folder` / `list_songs`（v1-folder-list）
 // - `open_song` / `save_song`（v1-song-read / v1-song-save）
 // - `pick_cover_file` / `read_cover_path`（v1-cover-embed）
+// - `pick_cover_save_path` / `export_cover`（export-embedded-cover，内嵌封面原图只读导出）
 // - `rename_song`（v1-rename-sync，音频 + `.lrc` 改名）
 // - `search_song` / `fetch_lyric` / `download_cover`（v1-search-backend，五源并发搜索）
 // - `search_source`（v1-search-fixes，单源搜索：C2 换源绕过聚合去重）
@@ -32,6 +33,8 @@ pub fn run() {
             commands::song::rename_song,
             commands::cover::pick_cover_file,
             commands::cover::read_cover_path,
+            commands::cover::pick_cover_save_path,
+            commands::cover::export_cover,
             commands::search::search_song,
             commands::search::search_source,
             commands::search::fetch_lyric,

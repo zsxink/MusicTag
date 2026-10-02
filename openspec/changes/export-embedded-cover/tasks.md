@@ -22,7 +22,7 @@ GitHub Issue: #124
   - 只做提取与可见性放宽，不新增业务分支、不改错误文案。
 - [ ] 2. **service 层导出实现（取图 / 扩展名推断 / 写盘）** — owner: Dev；paths: `src-tauri/src/service/cover.rs`
   - 新增 `pub fn export_cover_bytes(song_path: &Path) -> Result<(Vec<u8>, Option<String>), String>`：用 `Probe::open` + `first_embedded_picture`，返回 `picture.data().to_vec()` 与 `picture.mime_type()`；无内嵌封面 → `Err("该歌曲没有内嵌封面")`。
-  - 新增 `pub fn cover_extension_for(mime: Option<&str>, bytes: &[u8]) -> &'static str`：mime 走 `ImageFormat::from_mime_type`，为 `None` 时回落 `image::guess_format`；**手写 `ImageFormat → &'static str` 映射表**（image 0.25.10 **没有** `extension_str()`，勿调用）；jpeg→`"jpg"`、png→`"png"`、webp→`"webp"`、gif/tiff/bmp 等按表；表未命中与 mime/字节都判不出时**兜底 `"jpg"`**。
+  - 新增 `pub fn cover_extension_for(mime: Option<&str>, bytes: &[u8]) -> &'static str`：mime 走 `ImageFormat::from_mime_type`，为 `None` 时回落 `image::guess_format`；**手写 `ImageFormat → &'static str` 映射表**（image 0.25.10 的 `extensions_str()` 返回复数切片——Jpeg 给 `["jpg","jpeg"]`、Pnm 给 5 个——不适用于单一确定扩展名，勿调用）；jpeg→`"jpg"`、png→`"png"`、webp→`"webp"`、gif/tiff/bmp 等按表；表未命中与 mime/字节都判不出时**兜底 `"jpg"`**。
   - 新增 `pub fn default_cover_file_name(audio_path: &Path, mime: Option<&str>, bytes: &[u8]) -> String`：音频文件名去扩展名（`file_stem`）+ `"."` + `cover_extension_for(mime, bytes)`；stem 为空时兜底 `"cover"`。
   - 新增 `pub fn write_cover_to(dest_path: &Path, bytes: &[u8]) -> Result<(), String>`：`std::fs::write`，失败 → `Err(format!("导出封面失败: {e}"))`。**不做原子替换、不做备份、不做撞名保护**（见 design.md §3.4 取舍）。
 - [ ] 3. **command 薄壳 ×2 + rfd 存盘对话框** — owner: Dev；paths: `src-tauri/src/commands/cover.rs`

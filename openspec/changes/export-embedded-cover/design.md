@@ -97,7 +97,7 @@ pub fn cover_extension_for(mime: Option<&str>, bytes: &[u8]) -> &'static str {
 
 - mime 取值优先级**与 `encode_cover`（`service/cover.rs:18-38`）保持一致**：先 `picture.mime_type()`，空则 `image::guess_format(bytes)`。二者都拿不到时（`encode_cover` 会退 `application/octet-stream` 且 `mime = None`），扩展名按 spec 兜底 `.jpg`。
 - 映射用 `image::ImageFormat::from_mime_type(mime)` 归一（image 0.25.10 已核实支持 `image/jpeg`→`Jpeg`、`image/png`→`Png`、`image/webp`→`WebP` 等；**该函数只接受标准小写 MIME**），再按 `ImageFormat` 分支给扩展名；未覆盖的格式与探测失败统一 `"jpg"`。
-- `image` crate 在本仓库**没有** `extension_str()` 辅助（已核实 0.25.10 源码，只有 `from_mime_type`），所以扩展名表必须**手写** `ImageFormat → &'static str`，不能假设存在该 API。
+- 扩展名表必须**手写** `ImageFormat → &'static str`，不能用 crate 辅助。**核实结论（0.25.10 源码，`io/format.rs`）**：单数 `extension_str()` **不存在**；只有复数 `extensions_str(self) -> &'static [&'static str]`（`:288`），但它对 `Jpeg` 返回 `&["jpg", "jpeg"]`、`Tiff` 返回 `&["tiff", "tif"]`、`Pnm` 返回 5 个——存盘框过滤器与 spec S3 都要**单一确定扩展名**（jpeg → `.jpg`），故不能用。
 - 纯逻辑、零 IO → 直接可单测（`src-tauri/tests/service_cover_tests.rs` 追加用例）。
 
 ### 3.4 写盘方式：为什么不用 tempfile + persist
