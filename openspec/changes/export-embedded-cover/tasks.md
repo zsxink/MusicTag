@@ -70,7 +70,7 @@ GitHub Issue: #124
   - 执行：`const dest = await pickCoverSavePath(song.path)`；`dest === null` → 直接 `return`（**不调 `export_cover`**，无任何副作用）；否则 `await exportCover(song.path, dest)`。失败写 `errorHint`（复用既有 `ref('')` 与 `.cover-error role="alert"`），成功不弹提示、封面与 dirty 不变。`exporting` 覆盖两次 IPC 全程防连点。
   - 样式：仅用 `theme.css` 既有 token（`--panel`、`--border`、`--text`、`--text-dim`、`--hover`、`--shadow`、**6px 圆角**、120ms 过渡，见 design.md §4.5 表）；置灰态**不仅靠颜色**（原生 `disabled` + `--text-dim` + `cursor: not-allowed`）。
   - `z-index` 取 **40**（design.md §4.5 已裁决：`SwitchDialog` 50 / `EulaDialog` 60 必须盖住菜单——切歌确认弹窗出现时浮层必须被遮住），并在注释里写明「祖先链不得加常态 `transform`/`filter`/`contain`，否则 fixed 坐标系失效」。
-- [ ] 9. **前端测试** — owner: Tester；paths: `src/components/cover-panel.test.ts`, `src/api/songs.test.ts`
+- [x] 9. **前端测试** — owner: Tester；paths: `src/components/cover-panel.test.ts`, `src/api/songs.test.ts`
   - 沿用文件既有 `vi.mock('@tauri-apps/api/core')` 与 `mockInvoke` 模式。
   - **`src/api/songs.test.ts`（design.md §4.6 要求，勿漏）**：追加两条透传断言 —— `pickCoverSavePath` → `('pick_cover_save_path', { songPath })`；`exportCover` → `('export_cover', { songPath, destPath })`。
   - S1：`trigger('contextmenu', { clientX, clientY })` → `.cover-menu` 存在、菜单项 `disabled === false`、内联 `left/top` 反映事件坐标。
