@@ -81,7 +81,11 @@ GitHub Issue: #124
   - 关闭交互：点外部与 Esc 各一条用例（`document` 事件 + `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`）。
   - 只读断言：导出调用前后 `songStore.current` / `original` 快照相同、`dirty === false`。
   - 定位断言只依赖**内联 style 字符串**与纯数值翻转逻辑，**不依赖任何 `getComputedStyle`**。
-- [ ] 10. **验证门禁** — owner: 主会话；paths: `openspec/changes/export-embedded-cover/tasks.md`
+- [x] 10. **验证门禁** — owner: 主会话；paths: `openspec/changes/export-embedded-cover/tasks.md`
+  - 主会话亲跑结果（2026-10-02，非采信 agent 报告）：`cargo check` exit 0；`cargo test` exit 0（233 passed / 0 failed）；`npm run test` exit 0（26 files / 451 passed，基线 428）；`npm run build` exit 0；`npx openspec validate export-embedded-cover --strict --no-interactive` exit 0（is valid）。
+  - 回归确认全绿且无需改动：`open_song`（12）、`layering.test.ts`、`design-layering.test.ts`、`protocol-content.test.ts`、`command-contract.test.ts`（9）。
+  - **人工验收项（自动化不可覆盖，CR/Verify 不得声称自动化通过）**：rfd 存盘框真机取消无副作用；默认文件名与扩展名推断在真机对话框中的呈现；浮层贴边翻转与圆角/阴影观感；`z-index: 40` 被切歌确认弹窗正确盖住。
+  - **留给 CR 裁决的开放项**：readonly（坏标签只读）态右键仍可开菜单（`current` 为 null 故项置灰），与既有「readonly 整个封面区禁用、不响应交互」语义略有出入。
   - 依序运行：`cargo check --manifest-path src-tauri/Cargo.toml` → `cargo test --manifest-path src-tauri/Cargo.toml` → `npm run test` → `npm run build` → `npx openspec validate export-embedded-cover --strict --no-interactive`。
   - 回归重点：`src-tauri/tests/open_song.rs`（FLAC/MP3/APE/WAV/M4A 取图不变）、`src/components/layering.test.ts`、`src/styles/design-layering.test.ts`、`src/styles/protocol-content.test.ts` 全绿且无需改动。
   - 人工验收（无法自动化，CR/Verify 不得声称自动化通过）：rfd 存盘框真机取消无副作用、默认文件名与扩展名推断在真机对话框中的呈现、浮层贴边翻转与圆角观感、`z-index: 40` 被切歌确认弹窗正确盖住。
