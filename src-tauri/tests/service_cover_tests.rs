@@ -1,17 +1,20 @@
-// MusicTag — `service/cover.rs` 封面 base64 data URL 编解码 + 嵌入压缩单测（rust-tests-separation 外置）。
+// MusicTag — `service/cover.rs` 封面 base64 data URL 编解码 + 嵌入压缩 + 导出命名单测（rust-tests-separation 外置）。
 //
 // 原 `#[cfg(test)] mod tests` 内嵌块整体迁出（production `src/` 零 `#[cfg(test)]`）。
 // 覆盖 design.md D2/D3/D7 语义：
 // - `encode_cover` / `decode_cover` data URL 编解码（MIME 前缀优先 + 字节探测兜底）；
 // - `compress_cover` 小图原样返回 / 大图等比缩至 ≤2048×2048 / >5MB 分支 / 重编码失败回退；
-// - `cover_from_path` 文件 → 压缩 → data URL。
+// - `cover_from_path` 文件 → 压缩 → data URL；
+// - `cover_extension_for` / `default_cover_file_name` 导出默认名与扩展名推断
+//   （export-embedded-cover spec S3）。
 // 被测函数经 `app_lib::service::cover::`，私有 helper（png_of_size 等）复制进本文件，
 // `MAX_DIM` 为生产 `pub(crate)` 常量（单源真值，防漂移）。
 
 mod common;
 
 use app_lib::service::cover::{
-    compress_cover, cover_from_path, decode_cover, encode_cover, MAX_DIM,
+    compress_cover, cover_extension_for, cover_from_path, decode_cover, default_cover_file_name,
+    encode_cover, MAX_DIM,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use image::GenericImageView;
@@ -370,4 +373,141 @@ fn cover_from_path_small_image_data_url_is_original_bytes() {
     let input = cover_from_path(&p).expect("cover_from_path 应成功");
     let (bytes, _) = decode_cover(&input.data_url).expect("data URL 应可解码");
     assert_eq!(bytes, small, "小图应原尺寸保留嵌入");
+}
+
+// ---------------------------------------------------------------------------
+// spec S3：存盘对话框的默认文件名 = 音频文件名去扩展名 + 按图片推断的扩展名
+// （export-embedded-cover）。扩展名必须是**单一确定值**（jpeg → .jpg 而非 .jpeg），
+// 因为它同时是存盘框的过滤器名与默认文件名后缀。
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cover_extension_for_known_mime_types_map_to_single_extension() {
+    // mime 命中即定扩展名；jpeg 必须落 `jpg`（`image` 的 extensions_str 给的是
+    // ["jpg","jpeg"]，手写表的目的是选出一个确定值）
+    assert_eq!(cover_extension_for(Some("image/jpeg"), &[]), "jpg");
+    assert_eq!(cover_extension_for(Some("image/png"), &[]), "png");
+    assert_eq!(cover_extension_for(Some("image/webp"), &[]), "webp");
+    // 大小写/空白不归一化：from_mime_type 只认标准小写 MIME，判不出走兜底——
+    // 锁住「未知 mime → jpg」这一 spec 行为
+    assert_eq!(cover_extension_for(Some("IMAGE/JPEG"), &[]), "jpg");
+    // 表内其它格式（jpeg/png/webp 之外）同样命中各自扩展名，而非一律 jpg
+    assert_eq!(cover_extension_for(Some("image/gif"), &[]), "gif");
+    assert_eq!(cover_extension_for(Some("image/tiff"), &[]), "tiff");
+    assert_eq!(cover_extension_for(Some("image/bmp"), &[]), "bmp");
+}
+
+#[test]
+fn cover_extension_for_unknown_mime_falls_back_to_byte_sniffing() {
+    // 无 mime（Picture 未声明）→ 按字节探测：判定顺序与 encode_cover 一致
+    assert_eq!(cover_extension_for(None, &tiny_png_bytes()), "png");
+    assert_eq!(cover_extension_for(None, &jpeg_of_size(4, 4)), "jpg");
+    assert_eq!(cover_extension_for(None, &webp_of_size(4, 4)), "webp");
+    // 无法识别的 mime 字符串 + 可识别字节 → 嗅探胜出（mime 判不出不直接兜底）
+    assert_eq!(
+        cover_extension_for(Some("application/octet-stream"), &tiny_png_bytes()),
+        "png"
+    );
+    // GIF 只有解码器、无编码器，用真实 GIF magic 造字节（不硬编造未验证的头部）
+    assert_eq!(cover_extension_for(None, &gif_magic_bytes()), "gif");
+}
+
+#[test]
+fn cover_extension_for_undetectable_format_falls_back_to_jpg() {
+    // 无 mime + 非图片字节 → 判不出 → 兜底 jpg
+    assert_eq!(cover_extension_for(None, b"not an image at all"), "jpg");
+    // 明确不可解的通用 mime + 非图片字节 → 同样兜底 jpg（spec S3 明写）
+    assert_eq!(
+        cover_extension_for(Some("application/octet-stream"), b"not an image at all"),
+        "jpg"
+    );
+    // 合法 MIME 却与字节不符时以 mime 为准（判据是标签声明，不是猜出来的格式）
+    assert_eq!(
+        cover_extension_for(Some("image/png"), &tiny_png_bytes()),
+        "png"
+    );
+}
+
+#[test]
+fn default_cover_file_name_is_audio_stem_plus_inferred_extension() {
+    // 带扩展名的音频 → 去扩展名 + 推断扩展名（含中文名，真实场景）
+    let png = tiny_png_bytes();
+    assert_eq!(
+        default_cover_file_name(
+            std::path::Path::new("/music/告白气球.mp3"),
+            Some("image/jpeg"),
+            &png
+        ),
+        "告白气球.jpg",
+        "jpeg 声明应落 .jpg"
+    );
+    assert_eq!(
+        default_cover_file_name(
+            std::path::Path::new("/music/告白气球.mp3"),
+            Some("image/png"),
+            &png
+        ),
+        "告白气球.png",
+        "png 声明应落 .png"
+    );
+    // 只去掉最后一个扩展名（`file_stem` 语义），不是把全部点号后缀都剥掉
+    assert_eq!(
+        default_cover_file_name(
+            std::path::Path::new("/music/告白气球.tar.gz"),
+            Some("image/png"),
+            &png
+        ),
+        "告白气球.tar.png"
+    );
+    // 无扩展名 → 原名直接用
+    assert_eq!(
+        default_cover_file_name(std::path::Path::new("/music/song"), Some("image/png"), &png),
+        "song.png"
+    );
+    // 未知 mime + 非图片字节 → 兜底 .jpg
+    assert_eq!(
+        default_cover_file_name(
+            std::path::Path::new("/music/song.flac"),
+            None,
+            b"not an image"
+        ),
+        "song.jpg"
+    );
+}
+
+#[test]
+fn default_cover_file_name_empty_stem_falls_back_to_cover() {
+    // stem 为空的边界：这些路径的 `file_stem()` 返回 None → 兜底 "cover"，只影响默认名，
+    // 不阻断导出流程。
+    //
+    // 注意：不能用「路径以分隔符结尾」（如 `/music/`）当这个边界——Rust 的
+    // `file_stem` 会先归一化尾部分隔符，`/music/` 得到的是 `Some("music")`（见下方
+    // trailing_separator 断言），那样根本走不到兜底分支。
+    let png = tiny_png_bytes();
+    for empty_stem in ["", "/", ".", ".."] {
+        assert_eq!(
+            default_cover_file_name(std::path::Path::new(empty_stem), Some("image/png"), &png),
+            "cover.png",
+            "路径 {empty_stem:?} 无 stem，应兜底为 cover.png"
+        );
+    }
+
+    // 尾部分隔符不产生空 stem：默认名取最后一个正常分量，不误触兜底
+    assert_eq!(
+        default_cover_file_name(std::path::Path::new("/music/"), Some("image/png"), &png),
+        "music.png"
+    );
+}
+
+/// 构造最小 GIF magic 字节（`image` 仅解码不编码 GIF，故手写头）。
+///
+/// 只用于断言 `guess_format` 的字节嗅探分支，生产路径由真实标签字节驱动。
+fn gif_magic_bytes() -> Vec<u8> {
+    let mut bytes = Vec::from(&b"GIF89a"[..]);
+    // 逻辑屏宽高（小端 u16）+ 全局颜色表标志 + 背景色 + 宽高比，之后接块终止符 0x3B
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&[0x80, 0x00, 0x00]);
+    bytes.push(0x3B);
+    bytes
 }
