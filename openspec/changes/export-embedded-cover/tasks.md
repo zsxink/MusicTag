@@ -33,7 +33,7 @@ GitHub Issue: #124
   - `export_cover` 顺序：`export_cover_bytes` → `write_cover_to(dest_path, &bytes)`。**不弹框、不重算扩展名、不校验 `dest_path` 扩展名**（用户在对话框里改名改扩展名是用户的决定）。
   - `pick_cover_save_path` 顶部注释标注「macOS 对话框须主线程」，与 `pick_cover_file` 一致；**两个都不得**套 `spawn_blocking`。
   - 业务逻辑全部委托 `service::cover`，本文件只做编排与错误文案包装。
-- [ ] 4. **Rust 测试：导出行为** — owner: Tester；paths: `src-tauri/tests/export_cover.rs`（新建）
+- [x] 4. **Rust 测试：导出行为** — owner: Tester；paths: `src-tauri/tests/export_cover.rs`（新建）
   - **第一个测试必须是 fixture 早检**：构造 FLAC（`common::add_tags`）与 APE（`common::add_ape_tags_with_picture`）fixture → 断言 `Probe::open().read()` 成功且 `first_embedded_picture` 返回 `Some`、`data()` 与构造 bytes 一致。**早检不过则先修 fixture，不许继续写业务断言、不许放宽断言。**
   - 覆盖 spec S2：`export_cover_bytes` 返回 bytes 与内嵌原图逐字节相等（FLAC + APE 双格式）。
   - 覆盖 **端到端写盘**：`export_cover(song, dest)` 两参语义在 service 层等价 —— 取 `export_cover_bytes` + `write_cover_to` 后 `fs::read(dest)` 与内嵌 bytes 逐字节相等（rfd 弹框不可自动测，但纯写盘路径可测）。
@@ -43,7 +43,7 @@ GitHub Issue: #124
   - 覆盖 S7 后端侧：无内嵌封面 fixture → `export_cover_bytes` 返回 `Err("该歌曲没有内嵌封面")`。
   - **S4（取消）不自动化**：rfd `save_file()` 在无头测试里无法点「取消」，只靠代码逻辑 + `pick_cover_file` 的 `None` 先例背书；由任务 9 的前端断言（`null` → 不调 `export_cover`）+ 主会话人工验收覆盖。
   - 不新增二进制 fixture 文件，全部运行时构造（沿用仓库惯例）。
-- [ ] 5. **Rust 测试：扩展名与默认文件名** — owner: Tester；paths: `src-tauri/tests/service_cover_tests.rs`
+- [x] 5. **Rust 测试：扩展名与默认文件名** — owner: Tester；paths: `src-tauri/tests/service_cover_tests.rs`
   - 覆盖 spec S3：`cover_extension_for` 的 jpeg→`jpg`、png→`png`、webp 等表内命中、未知 mime + 未知字节 → `"jpg"`、`Some("application/octet-stream")` → `"jpg"`。
   - `default_cover_file_name`：带扩展名音频 → `告白气球.jpg`（`mime = Some("image/png")` 时为 `告白气球.png`）；无 stem 边界 → 兜底名。
   - 复用本文件既有 `png_of_size` / `jpeg_of_size` / `webp_of_size` helper，不新增。
