@@ -47,7 +47,7 @@ GitHub Issue: #124
   - 覆盖 spec S3：`cover_extension_for` 的 jpeg→`jpg`、png→`png`、webp 等表内命中、未知 mime + 未知字节 → `"jpg"`、`Some("application/octet-stream")` → `"jpg"`。
   - `default_cover_file_name`：带扩展名音频 → `告白气球.jpg`（`mime = Some("image/png")` 时为 `告白气球.png`）；无 stem 边界 → 兜底名。
   - 复用本文件既有 `png_of_size` / `jpeg_of_size` / `webp_of_size` helper，不新增。
-- [ ] 6. **契约四处同步（文档 + 守卫）** — owner: Dev；paths: `src-tauri/src/lib.rs`, `docs/design/design.md`, `docs/V1-PRD.md`, `openspec/config.yaml`, `src/styles/command-contract.test.ts`
+- [x] 6. **契约四处同步（文档 + 守卫）** — owner: Dev；paths: `src-tauri/src/lib.rs`, `docs/design/design.md`, `docs/V1-PRD.md`, `openspec/config.yaml`, `src/styles/command-contract.test.ts`
   - `lib.rs`：`generate_handler!` 追加 `commands::cover::pick_cover_save_path,` 与 `commands::cover::export_cover,`（14 → **16**），顶部注释同步加两行。
   - `docs/design/design.md` §10.3 表追加**两行**：`pick_cover_save_path(song_path)` 与 `export_cover(song_path, dest_path)`（**签名与 `lib.rs` 逐字一致**）；§6.1 基础组件表追加「右键浮层菜单（`.cover-menu`）」一行。
   - `docs/V1-PRD.md` §7「Tauri command 全量」补两个新 command（格式须匹配守卫正则 `` ([a-z_]+)\( ``）；§5.3 封面细节补一条只读导出说明。
