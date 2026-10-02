@@ -85,7 +85,12 @@ GitHub Issue: #124
   - 主会话亲跑结果（2026-10-02，非采信 agent 报告）：`cargo check` exit 0；`cargo test` exit 0（233 passed / 0 failed）；`npm run test` exit 0（26 files / 451 passed，基线 428）；`npm run build` exit 0；`npx openspec validate export-embedded-cover --strict --no-interactive` exit 0（is valid）。
   - 回归确认全绿且无需改动：`open_song`（12）、`layering.test.ts`、`design-layering.test.ts`、`protocol-content.test.ts`、`command-contract.test.ts`（9）。
   - **人工验收项（自动化不可覆盖，CR/Verify 不得声称自动化通过）**：rfd 存盘框真机取消无副作用；默认文件名与扩展名推断在真机对话框中的呈现；浮层贴边翻转与圆角/阴影观感；`z-index: 40` 被切歌确认弹窗正确盖住。
-  - **留给 CR 裁决的开放项**：readonly（坏标签只读）态右键仍可开菜单（`current` 为 null 故项置灰），与既有「readonly 整个封面区禁用、不响应交互」语义略有出入。
+  - **CR 第 1 轮开放项裁决（2026-10-03，主会话已独立复核，非仅采信）**：
+    - 「readonly 态右键仍可开菜单」→ **不成立，关闭，无需改代码**。核实链条：`Editor.vue:28-37` readonly 时只渲染 `.readonly-note`，`FieldGrid`（内含 `CoverPanel`）在 `v-else` 内 → **readonly 态 `CoverPanel` 根本不挂载**，`@contextmenu` 无处可触发。主会话 task 10 原先写的「`current` 为 null 故项置灰」描述的是**不可达状态**，记录有误已更正。`editor.test.ts:81` 已断言 readonly 下 `.editor-body` 不存在。真实可达的 `hasCover === false` 路径只对应非 readonly 的真无封面歌曲，正是 spec S7 的设计意图。
+    - 「`config.yaml` 数字声明无断言覆盖」→ **既有守卫盲点，非本变更引入，本变更合规**。`command-contract.test.ts:77` 只提取 `：` 后的 slash 清单、逐名与 lib.rs 比对（清单不可能漂移），句尾「16 个」散文无人读。后续可单独立项加断言，不在本变更范围。
+    - 「记忆 spec 清单缺 command」→ **已修复**。原清单 13 个，除两个新 command 外还漏了早已注册的 `scan_missing`；已按 `lib.rs` 逐字补齐至 16 个并加说明段（该文件在仓库外，守卫明示不纳入 CI）。
+  - **CR 唯一实质发现（已修）**：design.md §3.7 错误文案表把兜底默认名写成 `封面.jpg`、触发条件写成「无父目录」；实现是 `cover.<ext>`、触发条件是 `file_stem()` 为空（`service/cover.rs:219`，`service_cover_tests.rs:490` 断言 `cover.png`，且 `/music/` 得 `Some("music")` 不走兜底）。已改正该行 —— 纯文档失真，不改行为。
+  - **CR 声明的取证限制（如实记录）**：CR 第 1 轮 Bash 不可用，五项门禁数字取自本文件 task 10 的主会话自述，**CR 未独立复核**；其 PASS 结论为纯静态源码审查。门禁本身由主会话亲跑，数字为真。
   - 依序运行：`cargo check --manifest-path src-tauri/Cargo.toml` → `cargo test --manifest-path src-tauri/Cargo.toml` → `npm run test` → `npm run build` → `npx openspec validate export-embedded-cover --strict --no-interactive`。
   - 回归重点：`src-tauri/tests/open_song.rs`（FLAC/MP3/APE/WAV/M4A 取图不变）、`src/components/layering.test.ts`、`src/styles/design-layering.test.ts`、`src/styles/protocol-content.test.ts` 全绿且无需改动。
   - 人工验收（无法自动化，CR/Verify 不得声称自动化通过）：rfd 存盘框真机取消无副作用、默认文件名与扩展名推断在真机对话框中的呈现、浮层贴边翻转与圆角观感、`z-index: 40` 被切歌确认弹窗正确盖住。

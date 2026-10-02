@@ -916,6 +916,31 @@ describe('CoverPanel — 封面右键导出（export-embedded-cover）', () => {
     expect(w.find('img.cover-img').attributes('src')).toBe(SAVED_PNG) // 不因失败清空/替换封面
   })
 
+  it('S6：pick_cover_save_path 读标签失败 → 同样显示中文原因，且 export_cover 不被调用', async () => {
+    openCovered()
+    // 失败发生在取路径这步（坏标签读不出图）→ export_cover 根本不该被调用。
+    mockInvoke.mockImplementation((cmd: string) => (
+      cmd === 'pick_cover_save_path'
+        ? Promise.reject('读取标签失败: no tag')
+        : Promise.reject(new Error(`意外 IPC: ${cmd}`))
+    ))
+    const w = mount(CoverPanel)
+    await flushPromises()
+    const currentBefore = { ...songStore.current! }
+
+    await contextMenu(w, 120, 80)
+    await w.find('.cover-menu-item').trigger('click', RIGHT_CLICK)
+    await flushPromises()
+
+    expect(mockInvoke).not.toHaveBeenCalledWith('export_cover', expect.anything())
+    expect(w.find('.cover-error').exists()).toBe(true)
+    expect(w.find('.cover-error').attributes('role')).toBe('alert')
+    expect(w.find('.cover-error').text()).toContain('读取标签失败')
+    expect(songStore.current).toEqual(currentBefore)
+    expect(songStore.dirty).toBe(false)
+    expect(w.find('img.cover-img').attributes('src')).toBe(SAVED_PNG)
+  })
+
   // ── S4 取消对话框无副作用 ────────────────────────────────────────────
 
   it('S4：pick_cover_save_path 返 null（用户取消）→ 不调 export_cover、无错误提示、dirty 不变', async () => {

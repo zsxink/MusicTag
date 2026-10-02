@@ -160,7 +160,7 @@ pub fn cover_extension_for(mime: Option<&str>, bytes: &[u8]) -> &'static str {
 | 读标签失败（坏标签） | `读取标签失败: {e}`（与 `reader.rs:95` 逐字一致） |
 | 无内嵌封面 | `该歌曲没有内嵌封面`（纯中文业务拒绝；前端此时应已置灰菜单项，Rust 侧仍需兜底——菜单置灰依赖前端 `current.cover`，而磁盘真值以 Rust 为准） |
 | 写盘失败 | `导出封面失败: {e}`（IO 技术原因附后；与 `lyrics.rs` 的 `写入临时文件失败: {e}` 同形） |
-| 默认名构造失败（无父目录） | 退化为纯文件名 `封面.jpg`（不阻断） |
+| `file_stem()` 为空（路径以分隔符结尾等） | 退化为 `cover.<ext>`（ASCII，不阻断） |
 
 **不假报成功**：只有 `fs::write` 返回 `Ok` 才 `Ok(())`；用户取消对话框时 `pick_cover_save_path` 返回 `Ok(None)`（取消不是错误，spec「取消对话框无副作用」），前端据此**不调用** `export_cover`。
 
