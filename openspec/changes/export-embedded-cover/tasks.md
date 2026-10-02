@@ -16,16 +16,16 @@ GitHub Issue: #124
 > - 导出是**纯只读**动作：不得改标签、不得改 store 的 `current`/`original`、不得置 `dirty`、不得触发 `save_song`。
 > - **不扩大范围**：不碰歌词、不碰搜索、不做批量、不做 Tauri 原生菜单。
 
-- [ ] 1. **提取共享取图逻辑（含 APE 回退）** — owner: Dev；paths: `src-tauri/src/service/reader.rs`
+- [x] 1. **提取共享取图逻辑（含 APE 回退）** — owner: Dev；paths: `src-tauri/src/service/reader.rs`
   - 抽出 `pub fn first_embedded_picture(path, tag) -> Option<Picture>`：先 `tag.pictures().first().cloned()`，再对 `.ape` 扩展名回退 `read_ape_cover`（后者提升为 `pub`）。
   - `read_song_meta` 改为调用该 helper，**取值语义与改前逐字节等价**（`map(encode_cover).unwrap_or((None, None))` 链不变）。
   - 只做提取与可见性放宽，不新增业务分支、不改错误文案。
-- [ ] 2. **service 层导出实现（取图 / 扩展名推断 / 写盘）** — owner: Dev；paths: `src-tauri/src/service/cover.rs`
+- [x] 2. **service 层导出实现（取图 / 扩展名推断 / 写盘）** — owner: Dev；paths: `src-tauri/src/service/cover.rs`
   - 新增 `pub fn export_cover_bytes(song_path: &Path) -> Result<(Vec<u8>, Option<String>), String>`：用 `Probe::open` + `first_embedded_picture`，返回 `picture.data().to_vec()` 与 `picture.mime_type()`；无内嵌封面 → `Err("该歌曲没有内嵌封面")`。
   - 新增 `pub fn cover_extension_for(mime: Option<&str>, bytes: &[u8]) -> &'static str`：mime 走 `ImageFormat::from_mime_type`，为 `None` 时回落 `image::guess_format`；**手写 `ImageFormat → &'static str` 映射表**（image 0.25.10 的 `extensions_str()` 返回复数切片——Jpeg 给 `["jpg","jpeg"]`、Pnm 给 5 个——不适用于单一确定扩展名，勿调用）；jpeg→`"jpg"`、png→`"png"`、webp→`"webp"`、gif/tiff/bmp 等按表；表未命中与 mime/字节都判不出时**兜底 `"jpg"`**。
   - 新增 `pub fn default_cover_file_name(audio_path: &Path, mime: Option<&str>, bytes: &[u8]) -> String`：音频文件名去扩展名（`file_stem`）+ `"."` + `cover_extension_for(mime, bytes)`；stem 为空时兜底 `"cover"`。
   - 新增 `pub fn write_cover_to(dest_path: &Path, bytes: &[u8]) -> Result<(), String>`：`std::fs::write`，失败 → `Err(format!("导出封面失败: {e}"))`。**不做原子替换、不做备份、不做撞名保护**（见 design.md §3.4 取舍）。
-- [ ] 3. **command 薄壳 ×2 + rfd 存盘对话框** — owner: Dev；paths: `src-tauri/src/commands/cover.rs`
+- [x] 3. **command 薄壳 ×2 + rfd 存盘对话框** — owner: Dev；paths: `src-tauri/src/commands/cover.rs`
   - **两个同步 command**（签名以 design.md §0 方案 Y 为准，**已由主会话与用户裁决**）：
     - `pub fn pick_cover_save_path(song_path: String) -> Result<Option<String>, String>`
     - `pub fn export_cover(song_path: String, dest_path: String) -> Result<(), String>`
