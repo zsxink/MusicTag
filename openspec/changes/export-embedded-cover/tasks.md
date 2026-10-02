@@ -55,12 +55,12 @@ GitHub Issue: #124
   - `src/styles/command-contract.test.ts`：4 处硬编码计数（96、97、105、106 行）14 → 16；`:4` 与 `:39` 注释里的 14 改 16。**无参 command 集合断言体不变**——两个新 command 都有参，无参仍是 `pick_folder` / `pick_cover_file` / `get_last_dir`。
   - **不改** `sigSource` 数组（已含 `cover.rs`）、**不改** design §10.1 组件树、**不往** design §10.4 落位表加行。
   - 判据：`npx vitest run src/styles/command-contract.test.ts` 全绿。
-- [ ] 7. **前端 api 层** — owner: Dev；paths: `src/api/songs.ts`
+- [x] 7. **前端 api 层** — owner: Dev；paths: `src/api/songs.ts`
   - 追加 `pickCoverSavePath(songPath: string): Promise<string | null>`，形如 `invokeCommand<string | null>('pick_cover_save_path', { songPath })`，附一行 JSDoc。
   - 追加 `exportCover(songPath: string, destPath: string): Promise<void>`，形如 `invokeCommand<void>('export_cover', { songPath, destPath })`，附一行 JSDoc。
   - 与既有 `pickCoverFile` / `readCoverPath` 同风格：**不写 try/catch**，错误交组件处理；`pickCoverSavePath` 的 `null` 语义在 JSDoc 里写明「取消 = null」。
   - **不改** `src/api/client.ts`（唯一 invoke 出口，不得新增站点）。
-- [ ] 8. **前端浮层菜单（CoverPanel）** — owner: Dev；paths: `src/components/CoverPanel.vue`
+- [x] 8. **前端浮层菜单（CoverPanel）** — owner: Dev；paths: `src/components/CoverPanel.vue`
   - 状态：`menuOpen` / `menuX` / `menuY` / `exporting`，均在组件内，**不入 store**。
   - DOM：浮层挂在 `.cover` 下、与 `.cover-box` **兄弟**（`.cover-box` 有 `overflow: hidden`，挂在其内必被裁剪）；`position: fixed` + 内联 `left/top` 取自 `contextmenu` 事件的 `clientX/clientY`；**不使用 Teleport**、**不使用 `getBoundingClientRect`**。
   - 贴边翻转：用 `window.innerWidth/innerHeight` 纯数值判断后回夹，不依赖 `getComputedStyle`（happy-dom 不计算 CSS）。
