@@ -140,6 +140,7 @@
 | 主题按钮 | ghost 方形 30×30，图标 ☀️/🌙 |
 | 弹窗 | 阴影 + 12px 圆角；主/危险/ghost 三按钮；`role="dialog" aria-modal` |
 | 空状态 | 图标 40px 35% 透明 + 标题 + 副说明 |
+| 右键浮层菜单（`.cover-menu`） | 封面区右键弹出；单菜单项「导出封面…」；无内嵌封面 → 项置灰；`role="menu"`，Esc / 点外部 / 点菜单项 / 切歌均关闭 |
 
 ### 6.2 搜索触发按钮（`.search-trigger`）
 
@@ -367,6 +368,8 @@ interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; 
 | `rename_song(path, new_name)` | `String, String → Result<(), String>` | 音频 + `.lrc` 改名 |
 | `pick_cover_file()` | `() → Option<CoverInput>` | 原生封面文件选择器（jpg/png/webp）；取消返回 `None`，选中 → 压缩后 data URL + mime |
 | `read_cover_path(path)` | `String → Result<CoverInput, String>` | 拖拽封面路径 → 读文件 + 压缩 + data URL；读失败/非图片 → `Err(中文原因)` |
+| `pick_cover_save_path(song_path)` | `String → Result<Option<String>, String>` | 弹 rfd 存盘框取导出目标路径，默认文件名 = 音频文件名去扩展名 + 按图片 mime 推断的扩展名；取消 → Ok(None) |
+| `export_cover(song_path, dest_path)` | `(String, String) → Result<(), String>` | 把标签内第一个 front cover 的**原始字节**写到 dest_path（`std::fs::write`，无 UI）；只读、不改标签/表单 |
 | `search_song(title, artist, album)` | `String, String, String → SearchResult` | 五源并发搜索 + **同源去重、跨源保留、来源分组排序（每源 TOP 3）**（含 `all_failed`：五源全失败才 true，冷门歌空结果 false） |
 | `search_source(source, title, artist, album)` | `MusicSourceId, String, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（C2 换源用，绕过跨源聚合）：逐源拿该源全部原始候选，不受每源 TOP 3 截断；失败/超时 → 空列表，前端跳过该源 |
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |
