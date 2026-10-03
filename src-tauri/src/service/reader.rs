@@ -2,6 +2,8 @@
 //
 // - `read_summary`：只读 title/artist（失败 → 空串，列表永不因单曲坏标签崩溃）。
 // - `read_song_meta`：读全量标签（失败 → `Err`，触发前端坏标签只读表单）。
+// - `first_embedded_picture`：封面读侧唯一出口（含 APE 原生封面回退），
+//   `read_song_meta` 与 `cover::export_cover_bytes` 共用同一条取图路径。
 // 依赖 `meta::split_track_pair` + `cover::encode_cover`，函数提升 `pub`。
 
 use crate::model::{LyricsSource, Song, SongSummary};
@@ -18,7 +20,12 @@ use lofty::tag::{ItemKey, ItemValue, Tag, TagType};
 use std::fs::File;
 use std::path::Path;
 
-fn read_ape_cover(path: &Path) -> Option<Picture> {
+/// APEv2 原生封面读法：`ApeFile` 专用 API 取 `Cover Art (Front)` binary item，
+/// 去掉「描述串 + 0x00 分隔符」头部后构造 `Picture`。
+///
+/// `pub`：可见性放宽（`first_embedded_picture` 的 APE 回退 + 跨 crate 集成测试直接覆盖它），
+/// 函数体与 `pub` 前逐字相同，非行为改动。
+pub fn read_ape_cover(path: &Path) -> Option<Picture> {
     let mut file = File::open(path).ok()?;
     let ape = ApeFile::read_from(&mut file, ParseOptions::new().read_properties(false)).ok()?;
     let item = ape.ape()?.get("Cover Art (Front)")?;
@@ -32,6 +39,21 @@ fn read_ape_cover(path: &Path) -> Option<Picture> {
             .pic_type(PictureType::CoverFront)
             .build(),
     )
+}
+
+/// 封面读侧唯一出口：primary tag 的第一个 picture，否则回退 APE 原生封面。
+///
+/// **必须复用此函数，不得在别处另写 `tag.pictures().first()`**：lofty 0.24 的通用
+/// `Tag` 转换路径不映射 APE 图片，APE 的内嵌封面只能经 `read_ape_cover` 取到。
+/// 若导出路径自取图，APE 文件会静默取不到图 → 误报「没有内嵌封面」
+/// （design.md §3.2）。共用本函数才能保证「界面上看得到的封面」与「导出的字节」
+/// 判定完全一致。
+pub fn first_embedded_picture(path: &Path, tag: Option<&Tag>) -> Option<Picture> {
+    tag.and_then(|t| t.pictures().first().cloned()).or_else(|| {
+        path.extension()
+            .filter(|ext| ext.eq_ignore_ascii_case("ape"))
+            .and_then(|_| read_ape_cover(path))
+    })
 }
 
 fn tag_value(tag: Option<&Tag>, key: ItemKey) -> String {
@@ -136,13 +158,7 @@ pub fn read_song_meta(path: &Path) -> Result<Song, String> {
     // FLAC `DATE=...` 与 MP3 `TDRC=...` 均能读到。
     let year = wav_year_value(tag, riff_info);
 
-    let (cover, cover_mime) = tag
-        .and_then(|t| t.pictures().first().cloned())
-        .or_else(|| {
-            path.extension()
-                .filter(|ext| ext.eq_ignore_ascii_case("ape"))
-                .and_then(|_| read_ape_cover(path))
-        })
+    let (cover, cover_mime) = first_embedded_picture(path, tag)
         .map(encode_cover)
         .unwrap_or((None, None));
 

@@ -254,6 +254,7 @@ APE、WAV、M4A 的字段通过 lofty 0.24 `ItemKey` 映射读写；应用层保
 - FLAC→PICTURE 块 / MP3→APIC 帧
 - 压缩阈值：>5MB → 等比缩至 ≤2048×2048
 - **统一路径 + 预览时压缩**：本地选择/网络下载统一为「获得 bytes → 封面区」，`save_song` 统一嵌入；封面区预览的就是压缩后小图，**原图丢弃，进标签的是 ≤2048 压缩图**（A）
+- **导出内嵌封面原图**：封面预览图右键可「导出封面…」，经存盘对话框写出标签内第一个 front cover 的**原始字节**（非 ≤2048 压缩预览图）；纯只读，不改标签/表单；无内嵌封面时菜单项置灰；取消对话框不做任何事
 
 ### 5.4 歌词细节
 - 纯文本整段字符串，UTF-8
@@ -347,6 +348,7 @@ enum SearchError {
 > - **Tauri command 全量**（前端一律 `invoke` 调用；TS 类型与 `design/design.md` §10.3 对齐）：
 >   - 文件：`pick_folder() -> Option<String>`（rfd 文件夹选择器）、`list_songs(dir) -> Vec<SongSummary>`、`open_song(path) -> Result<Song, String>`、`save_song(song, exportLrc) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`、`get_last_dir() -> Option<String>`（读上次打开目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 记住本次目录，失败静默）
 >   - 封面：`pick_cover_file() -> Option<CoverInput>`（rfd 文件对话框，jpg/png/webp）、`read_cover_path(path) -> Result<CoverInput, String>`（拖拽路径读 bytes）；两者返回 `CoverInput`（`data_url` 压缩小图 + `mime`），封面跨 IPC 用 base64 data URL
+>   - 封面导出（只读）：`pick_cover_save_path(song_path) -> Result<Option<String>, String>`（rfd 存盘框取导出目标路径，默认文件名 = 音频文件名去扩展名 + 按图片 mime 推断的扩展名；取消 → `Ok(None)`，不写任何文件）、`export_cover(song_path, dest_path) -> Result<(), String>`（把标签内第一个 front cover 的原始字节写到目标路径，无 UI）；前端跨 IPC 只传源路径与目标路径，不传图片字节
 >   - 搜索：`search_song(title, artist, album) -> SearchResult`、`search_source(source, title, artist, album) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过跨源聚合——逐源拿该源全部原始候选，不受每源 TOP 3 截断）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）
 >   - 查漏：`scan_missing(dir, checks) -> MissingScanResult`（按需只读扫描歌名/歌手/专辑/封面/歌词缺失；仅返回路径和缺失维度，不批量编辑、不写盘）
 >   - 前端只管展示，文件 I/O 与网络请求全走 Rust command。

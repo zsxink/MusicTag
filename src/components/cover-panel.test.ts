@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 
 // mock @tauri-apps/api/core.invoke → CoverPanel 经 api/songs.ts 的 pickCoverFile/readCoverPath
@@ -622,5 +622,491 @@ describe('CoverPanel — 候选区折叠（candidate-collapse：默认展开、�
     expect(songStore.coverSearchState).toBe('done')
     expect(mockSearchSongs).not.toHaveBeenCalled()
     expect(w.find('.cand-grid').exists()).toBe(true) // v-show 保留 DOM，仅 display:none
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 右键导出内嵌封面原图（export-embedded-cover design.md §4 / spec S1·S4·S6·S7·S8）
+// ---------------------------------------------------------------------------
+
+/** happy-dom 的 contextmenu 默认 button=0；真实右键 button=2——两者都算「右键」，
+ *  以免日后 happy-dom 修了默认值导致本组用例集体假红。 */
+const RIGHT_CLICK = { button: 2 } as const
+
+describe('CoverPanel — 封面右键导出（export-embedded-cover）', () => {
+  /** 已被点开的主机侧 IPC 名（裸 command 名；Component 禁直呼 invoke，命令名即签名）。 */
+  type IpcName = string
+  /** 只列导出流程的命令名：`mockInvoke` 若被调了别的命令即行为越界。 */
+  const EXPORT_IPCS: IpcName[] = ['pick_cover_save_path', 'export_cover']
+
+  const SAVED_PNG = 'data:image/png;base64,SAVED'
+
+  /** happy-dom 默认视口 1024×768；贴边翻转用例显式 stub innerWidth/innerHeight。 */
+  const DEFAULT_VIEWPORT = { width: 1024, height: 768 }
+
+  let restoreViewport: () => void
+
+  beforeEach(() => {
+    mockInvoke.mockReset()
+    unlisten.mockClear()
+    dragHandler.set(undefined)
+    openSong()
+    window.devicePixelRatio = 1 // 定位只做 dpr=1 的纯数值判断：浮层用 CSS 像素，**刻意不**像拖拽那样乘 dpr
+    restoreViewport = () => {}
+  })
+
+  afterEach(() => {
+    restoreViewport()
+  })
+
+  /** 固定视口尺寸：happy-dom 的 window.innerWidth/innerHeight 可写，用于驱动组件的贴边翻转判断。 */
+  function stubViewport(width: number, height: number): void {
+    const prevW = window.innerWidth
+    const prevH = window.innerHeight
+    window.innerWidth = width
+    window.innerHeight = height
+    restoreViewport = () => {
+      window.innerWidth = prevW
+      window.innerHeight = prevH
+    }
+  }
+
+  /** 打开一首歌（默认无封面）；传入 cover 字段即带封面。 */
+  function openCovered(over: Partial<Song> = {}): void {
+    openSong(makeSong({ cover: SAVED_PNG, cover_mime: 'image/png', ...over }))
+  }
+
+  /** 右键封面框：dispatch 真实 MouseEvent（要能读到 dispatch 后 Vue 已处理的 defaultPrevented，
+   *  证明 `@contextmenu.prevent` 确实拦了默认菜单——VTU 的 trigger() 返回的是 nextTick，拿不到事件对象）。 */
+  async function contextMenu(w: VueWrapper, clientX: number, clientY: number): Promise<MouseEvent> {
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX, clientY })
+    ;(w.find('.cover-box').element as HTMLElement).dispatchEvent(event)
+    await w.vm.$nextTick()
+    return event
+  }
+
+  /** `.cover-menu` 内联 style 的 left / top 像素值（happy-dom 不计算 CSS，定位只认内联串）。 */
+  function menuLeftPx(w: VueWrapper): number {
+    return Number.parseFloat((w.find('.cover-menu').element as HTMLElement).style.left)
+  }
+  function menuTopPx(w: VueWrapper): number {
+    return Number.parseFloat((w.find('.cover-menu').element as HTMLElement).style.top)
+  }
+
+  /** 菜单项原生 disabled 属性（spec S1/S7 的判据，不看样式）。 */
+  function menuItemDisabled(w: VueWrapper): boolean {
+    return (w.find('.cover-menu-item').element as HTMLButtonElement).disabled
+  }
+
+  /** 导出流程真正发出去的 IPC（按调用顺序）；空数组 = 一个 IPC 都没发（spec S4/S7 的硬判据）。 */
+  function exportInvokeCalls(): [IpcName, unknown][] {
+    return mockInvoke.mock.calls.filter(([cmd]) => EXPORT_IPCS.includes(cmd as IpcName))
+  }
+
+  /** 「不假报成功」：无 .cover-error → .cover-error.text() 为空串。 */
+  function errorText(w: VueWrapper): string {
+    return w.find('.cover-error').exists() ? w.find('.cover-error').text() : ''
+  }
+
+  /** 只让导出流程的命令返回 `value`，其他命令一律拒绝——若组件越界调了别的 IPC 会立刻炸，
+   *  比默默 resolve 更早暴露（S7 断言的正是「一个都不许调」）。 */
+  function onlyExportIpc(value: unknown): void {
+    mockInvoke.mockImplementation((cmd: string) => (
+      EXPORT_IPCS.includes(cmd) ? Promise.resolve(value) : Promise.reject(new Error(`意外 IPC: ${cmd}`))
+    ))
+  }
+
+  // ── S1 右键打开导出菜单 ───────────────────────────────────────────────
+
+  it('S1：右键封面框 → 弹出 role=menu 浮层 + 「导出封面…」项可点击，且事件默认行为已被 prevent', async () => {
+    openCovered()
+    const w = mount(CoverPanel)
+    await flushPromises()
+
+    const event = await contextMenu(w, 120, 80)
+
+    expect(w.find('.cover-menu').exists()).toBe(true)
+    expect(w.find('.cover-menu').attributes('role')).toBe('menu')
+    expect(w.find('.cover-menu-item').attributes('role')).toBe('menuitem')
+    expect(w.find('.cover-menu-item').text()).toBe('导出封面…')
+    expect(menuItemDisabled(w)).toBe(false) // 有内嵌封面 → 项可点击（spec S1）
+    expect(event.defaultPrevented).toBe(true) // @contextmenu.prevent 拦下 WebView 默认菜单
+    expect(mockInvoke).not.toHaveBeenCalled() // 开菜单不发任何 IPC
+  })
+
+  it('S1：浮层挂在 .cover 下、与 .cover-box 兄弟（.cover-box 有 overflow:hidden，挂其内必被裁剪）', async () => {
+    openCovered()
+    const w = mount(CoverPanel)
+    await flushPromises()
+    await contextMenu(w, 40, 40)
+
+    const menu = w.find('.cover-menu')
+    expect(menu.element.parentElement).toBe(w.find('.cover').element) // 兄弟于 .cover-box
+    expect(w.find('.cover-box').element.contains(menu.element)).toBe(false)
+    expect(w.find('.cover-box').classes()).toContain('has-cover')
+  })
+
+  it('S1：内联 left/top 反映事件 clientX/clientY（视口 CSS 像素，fixed 坐标系）', async () => {
+    openCovered()
+    stubViewport(1400, 1000) // 远离边缘 → 不触发翻转，坐标应原样落到内联 style
+    const w = mount(CoverPanel)
+    await flushPromises()
+
+    await contextMenu(w, 137, 242)
+
+    expect(menuLeftPx(w)).toBe(137)
+    expect(menuTopPx(w)).toBe(242)
+  })
+
+  it('S1：贴视口右下边缘 → 纯数值翻转向左/上展开，菜单不被视口裁掉', async () => {
+    openCovered()
+    stubViewport(1024, 768) // MENU_W=140 / MENU_H=32：贴近右下角时 1024+140 溢出、768+32 溢出
+    const w = mount(CoverPanel)
+    await flushPromises()
+
+    await contextMenu(w, 1024, 768)
+
+    expect(menuLeftPx(w)).toBe(1024 - 140)
+    expect(menuTopPx(w)).toBe(768 - 32)
+  })
+
+  it('S1：仅右边缘溢出 → 只向左翻、纵向仍用事件坐标（翻转按轴独立判断）', async () => {
+    openCovered()
+    stubViewport(300, 400) // 宽 300：290+140 溢出；高 400：10+32 不溢出
+    const w = mount(CoverPanel)
+    await flushPromises()
+
+    await contextMenu(w, 290, 10)
+
+    expect(menuLeftPx(w)).toBe(290 - 140) // 向左翻
+    expect(menuTopPx(w)).toBe(10) // 纵向不翻，仍是事件坐标
+  })
+
+  it('S1：再次右键移到普通位置 → 内联坐标跟随最新一次右键（不复用旧坐标）', async () => {
+    openCovered()
+    stubViewport(1400, 1000)
+    const w = mount(CoverPanel)
+    await flushPromises()
+
+    await contextMenu(w, 300, 200)
+    await contextMenu(w, 500, 400)
+
+    expect(menuLeftPx(w)).toBe(500)
+    expect(menuTopPx(w)).toBe(400)
+  })
+
+  it('S1：dpr=2 下坐标仍是 CSS 像素（不乘 devicePixelRatio——与拖拽命中的物理像素有意区分）', async () => {
+    openCovered()
+    stubViewport(1400, 1000)
+    window.devicePixelRatio = 2
+    const w = mount(CoverPanel)
+    await flushPromises()
+
+    await contextMenu(w, 300, 200)
+
+    // 判别力：实现若误乘 dpr（复用拖拽那套物理像素换算），这里会得到 600/400 → 红。
+    expect(menuLeftPx(w)).toBe(300)
+    expect(menuTopPx(w)).toBe(200)
+  })
+
+  it('S1：左键点封面框仍走「点击选择」，不被右键菜单劫持（spec S1 附带的回归面）', async () => {
+    openCovered()
+    mockInvoke.mockResolvedValue({ data_url: 'data:image/jpeg;base64,NEW', mime: 'image/jpeg' })
+    const w = mount(CoverPanel)
+    await flushPromises()
+
+    await w.find('.cover-box').trigger('click', RIGHT_CLICK)
+    await flushPromises()
+
+    expect(w.find('.cover-menu').exists()).toBe(false) // 左键不开菜单
+    expect(mockInvoke).toHaveBeenCalledWith('pick_cover_file', undefined)
+  })
+
+  // ── 导出执行（两步 command：pick_cover_save_path → export_cover） ──────
+
+  it('导出：依次发 pick_cover_save_path + export_cover，参数逐字对齐（只读、不碰 store）', async () => {
+    openCovered()
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'pick_cover_save_path') return Promise.resolve('/music/告白气球.png')
+      if (cmd === 'export_cover') return Promise.resolve(undefined)
+      return Promise.reject(new Error(`意外 IPC: ${cmd}`))
+    })
+    const w = mount(CoverPanel)
+    await flushPromises()
+
+    await contextMenu(w, 120, 80)
+    await w.find('.cover-menu-item').trigger('click', RIGHT_CLICK)
+    await flushPromises()
+
+    expect(exportInvokeCalls()).toEqual([
+      ['pick_cover_save_path', { songPath: '/a/song.flac' }],
+      ['export_cover', { songPath: '/a/song.flac', destPath: '/music/告白气球.png' }],
+    ])
+    expect(w.find('.cover-menu').exists()).toBe(false) // 先关浮层再 await，菜单不留残
+    expect(errorText(w)).toBe('') // 成功不弹提示
+  })
+
+  it('导出：导出的是「点菜单项那一刻」的歌曲，await 途中 store 被换歌也不漂移', async () => {
+    openCovered({ path: '/a/song.flac' })
+    mockInvoke.mockImplementation((cmd: string) => (
+      cmd === 'pick_cover_save_path' ? Promise.resolve('/music/x.png') : Promise.resolve(undefined)
+    ))
+    const w = mount(CoverPanel)
+    await flushPromises()
+    await contextMenu(w, 120, 80)
+
+    const click = w.find('.cover-menu-item').trigger('click', RIGHT_CLICK)
+    // 存盘框开着时切歌（current.path 变）。第二次 IPC 必须仍用发起点那首：
+    // `const song = songStore.current` 取的是**响应式引用**，song.path 在 await 之后会重新求值。
+    songStore.current = { ...makeSong({ path: '/b/song.flac' }) }
+    await click
+    await flushPromises()
+
+    // 判别力：实现若在 await 之后重读 songStore.current，这里会带出 /b/song.flac → 红。
+    expect(exportInvokeCalls()).toEqual([
+      ['pick_cover_save_path', { songPath: '/a/song.flac' }],
+      ['export_cover', { songPath: '/a/song.flac', destPath: '/music/x.png' }],
+    ])
+  })
+
+  it('S5 只读：导出成功前后 current/original 快照相同、dirty 仍为 false（spec「导出为只读动作」）', async () => {
+    openCovered()
+    mockInvoke.mockImplementation((cmd: string) => (
+      cmd === 'pick_cover_save_path' ? Promise.resolve('/music/告白气球.png') : Promise.resolve(undefined)
+    ))
+    const w = mount(CoverPanel)
+    await flushPromises()
+    const currentBefore = { ...songStore.current! }
+    const originalBefore = { ...songStore.original! }
+    expect(songStore.dirty).toBe(false)
+
+    await contextMenu(w, 120, 80)
+    await w.find('.cover-menu-item').trigger('click', RIGHT_CLICK)
+    await flushPromises()
+
+    expect(songStore.current).toEqual(currentBefore)
+    expect(songStore.original).toEqual(originalBefore)
+    expect(songStore.dirty).toBe(false)
+    expect(w.find('img.cover-img').attributes('src')).toBe(SAVED_PNG) // 预览图未被替换
+    expect(songStore.saveState).toBe('idle') // 未触发 save_song
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_song', expect.anything()) // 显式锁死写盘禁令
+  })
+
+  it('S6：export_cover 写盘失败 → 封面区显示中文原因，不假报成功，封面与 dirty 不变', async () => {
+    openCovered()
+    mockInvoke.mockImplementation((cmd: string) => (
+      cmd === 'pick_cover_save_path'
+        ? Promise.resolve('/music/x.png')
+        : Promise.reject('导出封面失败: No such file or directory (os error 2)')
+    ))
+    const w = mount(CoverPanel)
+    await flushPromises()
+    const currentBefore = { ...songStore.current! }
+
+    await contextMenu(w, 120, 80)
+    await w.find('.cover-menu-item').trigger('click', RIGHT_CLICK)
+    await flushPromises()
+
+    expect(w.find('.cover-error').exists()).toBe(true)
+    expect(w.find('.cover-error').attributes('role')).toBe('alert')
+    expect(w.find('.cover-error').text()).toContain('导出封面失败')
+    expect(w.find('.cover-error').text()).toContain('No such file or directory')
+    expect(songStore.current).toEqual(currentBefore)
+    expect(songStore.dirty).toBe(false)
+    expect(w.find('img.cover-img').attributes('src')).toBe(SAVED_PNG) // 不因失败清空/替换封面
+  })
+
+  it('S6：pick_cover_save_path 读标签失败 → 同样显示中文原因，且 export_cover 不被调用', async () => {
+    openCovered()
+    // 失败发生在取路径这步（坏标签读不出图）→ export_cover 根本不该被调用。
+    mockInvoke.mockImplementation((cmd: string) => (
+      cmd === 'pick_cover_save_path'
+        ? Promise.reject('读取标签失败: no tag')
+        : Promise.reject(new Error(`意外 IPC: ${cmd}`))
+    ))
+    const w = mount(CoverPanel)
+    await flushPromises()
+    const currentBefore = { ...songStore.current! }
+
+    await contextMenu(w, 120, 80)
+    await w.find('.cover-menu-item').trigger('click', RIGHT_CLICK)
+    await flushPromises()
+
+    expect(mockInvoke).not.toHaveBeenCalledWith('export_cover', expect.anything())
+    expect(w.find('.cover-error').exists()).toBe(true)
+    expect(w.find('.cover-error').attributes('role')).toBe('alert')
+    expect(w.find('.cover-error').text()).toContain('读取标签失败')
+    expect(songStore.current).toEqual(currentBefore)
+    expect(songStore.dirty).toBe(false)
+    expect(w.find('img.cover-img').attributes('src')).toBe(SAVED_PNG)
+  })
+
+  // ── S4 取消对话框无副作用 ────────────────────────────────────────────
+
+  it('S4：pick_cover_save_path 返 null（用户取消）→ 不调 export_cover、无错误提示、dirty 不变', async () => {
+    openCovered()
+    onlyExportIpc(null)
+    const w = mount(CoverPanel)
+    await flushPromises()
+    const currentBefore = { ...songStore.current! }
+    const originalBefore = { ...songStore.original! }
+
+    await contextMenu(w, 120, 80)
+    await w.find('.cover-menu-item').trigger('click', RIGHT_CLICK)
+    await flushPromises()
+
+    // 判别力：实现若漏写 `if (dest === null) return`，这里会多出第二条 export_cover 调用 → 红。
+    expect(exportInvokeCalls()).toEqual([['pick_cover_save_path', { songPath: '/a/song.flac' }]])
+    expect(mockInvoke).not.toHaveBeenCalledWith('export_cover', expect.anything())
+    expect(errorText(w)).toBe('') // 取消不是错误
+    expect(w.find('.cover-menu').exists()).toBe(false) // 浮层已关，不残留
+    expect(songStore.current).toEqual(currentBefore)
+    expect(songStore.original).toEqual(originalBefore)
+    expect(songStore.dirty).toBe(false)
+  })
+
+  // ── S7 无内嵌封面时菜单项置灰 ─────────────────────────────────────────
+
+  it('S7：current.cover=null → 菜单出得来但「导出封面…」置灰，click 后一个 IPC 都不发', async () => {
+    openSong() // 无封面
+    onlyExportIpc('/music/不该被写.png')
+    const w = mount(CoverPanel)
+    await flushPromises()
+
+    await contextMenu(w, 120, 80)
+
+    expect(w.find('.cover-menu').exists()).toBe(true) // 空态封面框也响应右键
+    expect(menuItemDisabled(w)).toBe(true)
+
+    await w.find('.cover-menu-item').trigger('click', RIGHT_CLICK)
+    await flushPromises()
+
+    // 判别力：原生 disabled + 组件守卫任一失效，这里都会出现 pick_cover_save_path 调用 → 红。
+    // 说明（变异实测）：happy-dom 与浏览器一致，**disabled 按钮不派发 click**，
+    // 因此「去掉组件侧 `!hasCover` 守卫」这一变异在本环境下不可观测（存活）；
+    // 可观测的那一层是上面的 `:disabled === true` 断言（去掉模板绑定即红）。
+    expect(exportInvokeCalls()).toEqual([])
+    expect(mockInvoke).not.toHaveBeenCalled() // 不弹存盘框、不发任何别的 IPC
+    expect(errorText(w)).toBe('') // 置灰不该报错
+    expect(songStore.dirty).toBe(false)
+  })
+
+  it('S7：竞态兜底——存盘框开着时切歌（current 已换成无封面新歌）→ 后续 IPC 仍用发起点歌曲', async () => {
+    openCovered({ path: '/a/song.flac' })
+    onlyExportIpc('/music/不该被写.png')
+    const w = mount(CoverPanel)
+    await flushPromises()
+    await contextMenu(w, 120, 80)
+    expect(menuItemDisabled(w)).toBe(false)
+
+    await w.find('.cover-menu-item').trigger('click', RIGHT_CLICK)
+
+    // 切歌：current 换成无封面的新歌。导出已在途（存盘框打开），此时 store 的
+    // 「导出发起时快照」必须原样传到 IPC——把新歌路径带进 exportCover 即为竞态缺陷。
+    songStore.current = { ...makeSong({ path: '/b/song.flac' }) }
+    await flushPromises()
+
+    // 判别力：实现若在 await 之后重读 songStore.current，就会传 /b/song.flac → 红。
+    expect(exportInvokeCalls()).toEqual([
+      ['pick_cover_save_path', { songPath: '/a/song.flac' }],
+      ['export_cover', { songPath: '/a/song.flac', destPath: '/music/不该被写.png' }],
+    ])
+  })
+
+  // ── S8 切歌后菜单不残留 ──────────────────────────────────────────────
+
+  it('S8：菜单开着时切歌 → 菜单关闭；再右键时置灰状态跟随新歌封面', async () => {
+    openCovered({ path: '/a/song.flac' })
+    const w = mount(CoverPanel)
+    await flushPromises()
+    await contextMenu(w, 120, 80)
+    expect(w.find('.cover-menu').exists()).toBe(true)
+    expect(menuItemDisabled(w)).toBe(false)
+
+    // 切歌：current.path 变 + 换成无封面的一首
+    songStore.current = { ...makeSong({ path: '/b/song.flac' }) }
+    await w.vm.$nextTick()
+
+    expect(w.find('.cover-menu').exists()).toBe(false) // 菜单随切歌关闭
+
+    await contextMenu(w, 60, 60)
+    expect(w.find('.cover-menu').exists()).toBe(true)
+    expect(menuItemDisabled(w)).toBe(true) // 新歌无封面 → 置灰
+
+    // 反向：新歌带封面 → 再右键应恢复可点
+    songStore.current = { ...makeSong({ path: '/c/song.flac', cover: SAVED_PNG, cover_mime: 'image/png' }) }
+    await w.vm.$nextTick()
+    await contextMenu(w, 60, 60)
+    expect(menuItemDisabled(w)).toBe(false)
+  })
+
+  // ── 其余关闭出口（design §4.3 四条中未由 S1/S4/S8 覆盖的两条） ───────
+
+  it('关闭：点击菜单外部（document 级冒泡）→ 菜单关闭，不影响 store', async () => {
+    openCovered()
+    const outside = document.createElement('button') // 菜单与封面框之外的宿主元素（歌词区/顶栏等）
+    document.body.appendChild(outside)
+    // 组件必须真的在文档里，「点外部关闭」用的 document/window 监听才收得到冒泡事件
+    const w = mount(CoverPanel, { attachTo: document.body })
+    await flushPromises()
+    await contextMenu(w, 120, 80)
+    expect(w.find('.cover-menu').exists()).toBe(true)
+
+    outside.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect(w.find('.cover-menu').exists()).toBe(false)
+    expect(songStore.current!.cover).toBe(SAVED_PNG)
+    expect(songStore.dirty).toBe(false)
+    expect(mockInvoke).not.toHaveBeenCalled() // 单纯关闭不触发任何 IPC
+
+    w.unmount()
+    outside.remove()
+  })
+
+  it('关闭：Esc（window keydown）→ 菜单关闭', async () => {
+    openCovered()
+    const w = mount(CoverPanel)
+    await flushPromises()
+    await contextMenu(w, 120, 80)
+    expect(w.find('.cover-menu').exists()).toBe(true)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+
+    expect(w.find('.cover-menu').exists()).toBe(false)
+
+    // 菜单未开时按 Esc 不应报错（出口只做存在性判断）
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(w.find('.cover-menu').exists()).toBe(false)
+  })
+
+  it('关闭：点菜单容器自身（padding 处）不触发导出，也不误关（仍在菜单内）', async () => {
+    openCovered()
+    onlyExportIpc('/music/x.png')
+    const w = mount(CoverPanel)
+    await flushPromises()
+    await contextMenu(w, 120, 80)
+
+    await w.find('.cover-menu').trigger('click', RIGHT_CLICK)
+    await flushPromises()
+
+    // 菜单容器没有自己的 @click，点击只冒泡到「点外部关闭」的 window 监听，
+    // 但 contains(target) 判定它属于菜单内 → 菜单保持打开，且不触发任何导出 IPC。
+    expect(exportInvokeCalls()).toEqual([])
+    expect(w.find('.cover-menu').exists()).toBe(true)
+  })
+
+  it('卸载后：Esc/点外部监听被摘除（不再改已卸载组件状态，无监听泄漏）', async () => {
+    openCovered()
+    const w = mount(CoverPanel)
+    await flushPromises()
+    w.unmount()
+
+    // 卸载后再开不了菜单（组件已销毁），此处只验证监听已摘：派发不再抛错且无残留处理。
+    expect(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))).not.toThrow()
+    expect(() => document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))).not.toThrow()
   })
 })

@@ -1,7 +1,8 @@
 // Tauri command 类型化封装（design.md §10 前端 api 层：组件零 invoke 直呼，IPC 全走此层）。
 //
 // 命令名、参数名、返回类型逐字对齐 Rust 契约（commands/folder.rs、commands/song.rs、
-// model.rs）：pick_folder / list_songs / open_song / save_song。实现 = `invokeCommand` 透传，
+// commands/cover.rs、model.rs）：pick_folder / list_songs / open_song / save_song /
+// pick_cover_save_path / export_cover。实现 = `invokeCommand` 透传，
 // 组件与 store 一律经此层发 IPC（store 动作的 loader 注入 api/songs.ts 封装）。
 import { invokeCommand } from './client'
 import type { CoverInput, MissingField, MissingScanResult, Song, SongSummary } from './types'
@@ -57,4 +58,16 @@ export function pickCoverFile(): Promise<CoverInput | null> {
 /** 读取拖拽路径的封面文件：读文件 → 压缩 → data URL。读失败/非图片 → reject（中文原因）。 */
 export function readCoverPath(path: string): Promise<CoverInput> {
   return invokeCommand<CoverInput>('read_cover_path', { path })
+}
+
+/** 弹原生存盘框取封面导出目标路径（export-embedded-cover）。**取消 = null**（不是错误），
+ *  无内嵌封面/标签损坏 → reject（中文原因）。只取路径，不写盘。 */
+export function pickCoverSavePath(songPath: string): Promise<string | null> {
+  return invokeCommand<string | null>('pick_cover_save_path', { songPath })
+}
+
+/** 把标签内嵌封面原图写到 `destPath`（纯写盘、无 UI：取图与弹框都在上一步）。
+ *  失败 → reject「导出封面失败: …」；只读源文件，不碰标签。 */
+export function exportCover(songPath: string, destPath: string): Promise<void> {
+  return invokeCommand<void>('export_cover', { songPath, destPath })
 }

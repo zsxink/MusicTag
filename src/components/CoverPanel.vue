@@ -8,14 +8,17 @@
 //   仅 enter/over 命中封面框才点亮 dragging 高亮；拖到歌词区/字段区/顶栏不替换封面、不误导高亮；
 // - 预览：`current.cover` 即压缩后小图 data URL（`<img :src>` 直接用）；
 // - 清空封面：✕ → `clearCover()`（置 null → 保存走既有删除语义）；
-// - 错误：pick/read reject → 一行 dim 提示，不污染现有封面（工具线克制，不弹窗）；
+// - 右键导出（export-embedded-cover）：封面框 `@contextmenu.prevent` 弹浮层菜单，单项「导出封面…」
+//   → `pickCoverSavePath()` 弹存盘框（**取消 = null，不调 export_cover、无任何副作用**）→
+//   `exportCover()` 纯写盘。**纯只读**：不碰 store（dirty/表单天然不变），只复用 errorHint 报失败；
+// - 错误：pick/read/export reject → 一行 dim 提示，不污染现有封面（工具线克制，不弹窗）；
 // - readonly（坏标签只读）：整个封面区禁用，不响应点击/drop。
 // 分层：组件不直呼 invoke（IPC 一律经 api/songs.ts）；`@tauri-apps/api/window` 事件订阅
 // 属窗口事件、非 IPC，符合 §10.0 分层（guard 只禁 IPC invoke 入口模块 import）。
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
-import { pickCoverFile, readCoverPath } from '../api/songs'
+import { exportCover, pickCoverFile, pickCoverSavePath, readCoverPath } from '../api/songs'
 import { manualSearch, clearCover, setCover, songStore } from '../store/song'
 import CoverCandidate from './CoverCandidate.vue'
 
@@ -33,12 +36,15 @@ const candidatesCollapsed = ref(false)
 function toggleCandidates(): void {
   candidatesCollapsed.value = !candidatesCollapsed.value
 }
-// 切歌重置：current 换歌（path 变化）→ 折叠态回默认展开。切歌只改 store 候选（resetSearchState），
-// 折叠 ref 在组件——watch current.path 显式重置（换目录/坏标签只读因面板卸载天然重置，本 watch 幂等覆盖）。
+// 切歌重置：current 换歌（path 变化）→ 折叠态回默认展开 + 右键导出菜单关闭
+// （spec「切歌后菜单不残留」：浮层挂在封面区且坐标来自旧歌的右键事件，切歌必关）。
+// 切歌只改 store 候选（resetSearchState），折叠/菜单 ref 在组件——watch current.path 显式重置
+// （换目录/坏标签只读因面板卸载天然重置，本 watch 幂等覆盖）。
 watch(
   () => songStore.current?.path,
   () => {
     candidatesCollapsed.value = false
+    menuOpen.value = false
   },
 )
 /** 候选区有内容才显示折叠按钮——与模板 v-if 分支（searching / done+候选(含空态) / 离线）逐条对齐。 */
@@ -57,6 +63,89 @@ const errorHint = ref('')
 
 /** 封面框元素引用（拖拽命中判定基准；has-cover/empty 两分支 v-if/v-else 互斥，共用同一 ref）。 */
 const coverEl = ref<HTMLElement | null>(null)
+
+// ---------------------------------------------------------------------------
+// 右键导出浮层菜单（export-embedded-cover design.md §4）
+// ---------------------------------------------------------------------------
+// 状态全在组件内、**不入 store**：导出不改任何 store 字段（current/original/dirty 天然不变），
+// 故无需 store 动作，也不存在跨组件同步需求。
+
+/** 菜单开关；`menuLeft/menuTop` 是**视口 CSS 像素**（与 `position: fixed` 同一坐标系）。
+ *  取自右键事件的 clientX/clientY，不做 dpr 缩放——与拖拽的 PhysicalPosition 有意区分。 */
+const menuOpen = ref(false)
+const menuLeft = ref(0)
+const menuTop = ref(0)
+
+/** 「导出封面…」可用性：无内嵌封面 → 置灰（spec S7）。
+ *  与模板 `v-if="cover"` 同一数据源。坏标签只读时 current 为 null → 天然 false，无需额外分支。 */
+const hasCover = computed(() => cover.value !== null)
+
+/** 导出进行中：覆盖「弹框 + 写盘」两次 IPC 全程，期间禁用菜单项防连点开多个对话框。
+ *  菜单关闭**不**复位它——导出已发起就该等它结束（finally 统一复位）。 */
+const exporting = ref(false)
+
+/** 浮层元素引用：关闭出口用 contains 判「点在菜单外」（不引 getBoundingClientRect）。 */
+const menuEl = ref<HTMLElement | null>(null)
+
+/** 菜单项元素引用：打开后 nextTick 聚焦（键盘可达，对齐 SwitchDialog 初始聚焦惯例）。 */
+const menuItemEl = ref<HTMLButtonElement | null>(null)
+
+/** 菜单宽/高（CSS px）：仅用于**贴边翻转**的纯数值判断（design.md §4.1）。
+ *  不量真实布局、不依赖 getComputedStyle——happy-dom 不计算 CSS，这样写才可测。
+ *  常量近似值 + 内联 `max-width` 兜底；菜单高度随项数变（当前恒 1 项 → 32px）。 */
+const MENU_W = 140
+const MENU_H = 32
+
+/** 右键封面框：`.prevent` 阻止 WebView/系统默认右键菜单（否则与浮层并存）。
+ *  仅记录坐标不拦截点击——左键 @click 照旧选图（spec S1）。 */
+function onContextMenu(e: MouseEvent): void {
+  e.preventDefault()
+  // 贴边翻转：菜单宽高按常量估算，超出视口右/下边则改向左/上展开，保证不被裁掉。
+  // 左侧翻转不额外收窄：翻转后 x = clientX - MENU_W ≥ 0（触发条件已保证 clientX > MENU_W）。
+  const x = e.clientX + MENU_W > window.innerWidth ? e.clientX - MENU_W : e.clientX
+  const y = e.clientY + MENU_H > window.innerHeight ? e.clientY - MENU_H : e.clientY
+  menuLeft.value = x
+  menuTop.value = y
+  menuOpen.value = true
+  // 焦点移入菜单：键盘用户能直接 Enter/空格激活（Esc 关闭后焦点自然回到触发元素）。
+  void nextTick(() => menuItemEl.value?.focus())
+}
+
+/** 点菜单项：先关浮层再 await（避免原生存盘框开着时浮层还挂在上面）。 */
+async function onExport(): Promise<void> {
+  menuOpen.value = false
+  const song = songStore.current
+  // 组件侧守卫：置灰项不该点到（原生 disabled 已拦一层），这里防「导出一瞬间清空封面」等竞态。
+  if (song === null || !hasCover.value || exporting.value) return
+  errorHint.value = ''
+  exporting.value = true
+  try {
+    // 两步 command（design.md §0 方案 Y）：先弹框取路径，再写盘。
+    const dest = await pickCoverSavePath(song.path)
+    // 取消 = 正常选择而非错误（spec S4）：静默终止，不调 export_cover、不写任何文件、无副作用。
+    if (dest === null) return
+    await exportCover(song.path, dest)
+  } catch (e) {
+    errorHint.value = String(e) // 复用封面区一行 dim 提示（.cover-error role=alert），不新增弹窗
+  } finally {
+    exporting.value = false
+  }
+}
+
+/** Esc 关闭（与 SwitchDialog 同款：onMounted 挂、onUnmounted 摘）。 */
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && menuOpen.value) menuOpen.value = false
+}
+
+/** 点菜单外部关闭（挂 window 冒泡阶段，design.md §4.3）：
+ *  contains 判定保证菜单项自身的 click 不被这里抢先关掉（项的 @click 照常触发 onExport），
+ *  故用 click 而非 mousedown 也无竞态。defaultPrevented 早退：尊重拖拽选区等既有 preventDefault。 */
+function onWindowClick(e: MouseEvent): void {
+  if (!menuOpen.value || e.defaultPrevented) return
+  const target = e.target
+  if (target instanceof Node && menuEl.value?.contains(target)) return
+  menuOpen.value = false
+}
 
 /**
  * 拖拽命中判定（CR：拖拽范围限定封面区，spec「拖拽文件到封面区」）。
@@ -129,23 +218,30 @@ onMounted(async () => {
     // 非 Tauri 环境（浏览器 dev / 单测 mock 缺失）无 drag-drop 能力，静默降级
     unlisten = undefined
   }
+  // 右键浮层的另两个关闭出口（另两个：点菜单项、切换歌曲）。窗口级监听挂在 mount 期，
+  // 组件常驻封面区，菜单开了才做事，无常驻开销。
+  window.addEventListener('keydown', onKeydown)
+  window.addEventListener('click', onWindowClick)
 })
 
 onBeforeUnmount(() => {
   unlisten?.()
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('click', onWindowClick)
 })
 </script>
 
 <template>
   <div class="cover">
-    <!-- 有封面：1:1 预览（压缩后小图）+ 右上角清空 ✕（readonly 禁用） -->
+    <!-- 有封面：1:1 预览（压缩后小图）+ 右上角清空 ✕（readonly 禁用）；右键 → 导出浮层菜单 -->
     <div
       v-if="cover"
       ref="coverEl"
       class="cover-box has-cover"
       :class="{ dragging }"
-      :title="readonly ? '' : '点击选择 / 拖拽嵌入封面'"
+      :title="readonly ? '' : '点击选择 / 拖拽嵌入封面 / 右键导出'"
       @click="onClickPick"
+      @contextmenu.prevent="onContextMenu"
     >
       <img :src="cover" alt="封面" class="cover-img" />
       <button
@@ -158,16 +254,42 @@ onBeforeUnmount(() => {
       >✕</button>
     </div>
 
-    <!-- 无封面：虚线框空态占位（点击选择 / 拖拽嵌入提示） -->
+    <!-- 无封面：虚线框空态占位（点击选择 / 拖拽嵌入提示）；右键仍可开菜单（「导出封面…」置灰，
+         spec S7：菜单出得来，只是项不可用，不弹存盘框） -->
     <div
       v-else
       ref="coverEl"
       class="cover-box cover-empty"
       :class="{ dragging }"
       @click="onClickPick"
+      @contextmenu.prevent="onContextMenu"
     >
       <span class="cover-mark" aria-hidden="true">🖼</span>
       <span class="cover-hint">点击选择 / 拖拽嵌入</span>
+    </div>
+
+    <!-- 右键浮层菜单（export-embedded-cover）：
+         必须挂在 .cover 下、与 .cover-box **兄弟**——.cover-box 有 overflow: hidden，
+         作为它的子节点会被裁掉；.cover 无 overflow。
+         position: fixed + 内联 left/top（视口坐标，取自右键事件）→ 不被任何祖先 overflow 裁剪，
+         也不需要 Teleport / getBoundingClientRect 反算容器偏移。 -->
+    <div
+      v-if="menuOpen"
+      ref="menuEl"
+      class="cover-menu"
+      role="menu"
+      aria-label="封面操作"
+      :style="{ left: `${menuLeft}px`, top: `${menuTop}px` }"
+      @contextmenu.prevent
+    >
+      <button
+        ref="menuItemEl"
+        class="cover-menu-item"
+        type="button"
+        role="menuitem"
+        :disabled="!hasCover || exporting"
+        @click="onExport"
+      >导出封面…</button>
     </div>
 
     <div class="cover-meta">{{ coverMime ? coverMime : '未设置' }}</div>
@@ -294,6 +416,47 @@ onBeforeUnmount(() => {
 .cover-mark {
   font-size: 30px;
   opacity: 0.4;
+}
+
+/* 右键导出浮层菜单（export-embedded-cover design.md §4.5）：
+   - fixed + 内联 left/top（视口坐标）；**祖先链不得加常态 transform/filter/contain**，
+     否则 fixed 的包含块不再是视口、定位坐标系失效（风险已登记于 design.md §8）。
+   - z-index 40：低于 SwitchDialog(50) / EulaDialog(60)，切歌确认弹窗出现时本菜单必须被盖住。
+   - 宽 140px 与 JS 的 MENU_W 常量对应（贴边翻转判断用；max-width 防常量大改时溢出视口）。 */
+.cover-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 140px;
+  max-width: calc(100vw - 16px);
+  padding: 2px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px; /* design.md §4：控件族 6px（.btn / .cand-cell 同款，非弹窗 12px） */
+  box-shadow: var(--shadow); /* 准弹层：脱离文档流的浮层菜单，design.md §4.5 已裁决沿用 */
+}
+
+.cover-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--text);
+  border-radius: 6px;
+  text-align: left;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+
+.cover-menu-item:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+/* 置灰不只靠颜色（design.md §8）：原生 disabled 语义（读屏可读「不可用」、键鼠不可触发）
+   + --text-dim 文字降权 + not-allowed 光标 + 透明度，三重非颜色线索。 */
+.cover-menu-item:disabled {
+  color: var(--text-dim);
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .cover-hint {

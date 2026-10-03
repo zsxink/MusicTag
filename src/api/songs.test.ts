@@ -10,10 +10,12 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import type { CoverInput, MissingScanResult, Song } from './types'
 import {
+  exportCover,
   getLastDir,
   listSongs,
   openSong,
   pickCoverFile,
+  pickCoverSavePath,
   pickFolder,
   readCoverPath,
   renameSong,
@@ -143,5 +145,32 @@ describe('api/songs.ts — 类型化 command 封装（命令名/参数逐字对�
       dir: '/music',
       checks: ['cover', 'title'],
     })
+  })
+
+  it('pickCoverSavePath：透传 pick_cover_save_path + { songPath }；取消返回 null（不是错误）', async () => {
+    mockInvoke.mockResolvedValue('/music/告白气球.jpg')
+    await expect(pickCoverSavePath('/a/song.flac')).resolves.toBe('/music/告白气球.jpg')
+    expect(mockInvoke).toHaveBeenCalledWith('pick_cover_save_path', { songPath: '/a/song.flac' })
+
+    // 取消 = 用户正常选择 → 返 null（调用方据此不调 export_cover），不得 reject
+    mockInvoke.mockResolvedValue(null)
+    await expect(pickCoverSavePath('/a/song.flac')).resolves.toBeNull()
+  })
+
+  it('exportCover：透传 export_cover + { songPath, destPath }（Tauri camelCase→snake_case 映射 dest_path）', async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    await expect(exportCover('/a/song.flac', '/music/告白气球.png')).resolves.toBeUndefined()
+    expect(mockInvoke).toHaveBeenCalledWith('export_cover', {
+      songPath: '/a/song.flac',
+      destPath: '/music/告白气球.png',
+    })
+  })
+
+  it('导出两步链路：失败如实 reject 中文原因，不吞错（spec「导出失败如实报错」）', async () => {
+    mockInvoke.mockRejectedValue('导出封面失败: No such file or directory (os error 2)')
+    await expect(pickCoverSavePath('/a/song.flac')).rejects.toBe('导出封面失败: No such file or directory (os error 2)')
+
+    mockInvoke.mockRejectedValue('该歌曲没有内嵌封面')
+    await expect(exportCover('/a/song.flac', '/music/x.png')).rejects.toBe('该歌曲没有内嵌封面')
   })
 })

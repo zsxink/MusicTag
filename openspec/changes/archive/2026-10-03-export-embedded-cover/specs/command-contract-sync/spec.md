@@ -1,9 +1,6 @@
-# command-contract-sync Specification
+# command-contract-sync Specification Delta
 
-## Purpose
-TBD - created by archiving change command-contract-sync. Update Purpose after archive.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 三处 command 契约表同步为 lib.rs 实际注册
 
@@ -23,17 +20,3 @@ TBD - created by archiving change command-contract-sync. Update Purpose after ar
 
 - **WHEN** 读取 `openspec/config.yaml` context command 清单
 - **THEN** 列出全部已注册 command，含 `get_last_dir`、`save_last_dir`、`pick_cover_save_path`、`export_cover`，且不再自述与 lib.rs「一致」而实际不一致
-
-### Requirement: command 契约一致性守卫
-
-仓库 SHALL 有一个可运行的守卫测试，断言 PRD/design/openspec/config.yaml 各 command 契约清单与 `lib.rs` `generate_handler!` 注册集一致，防三源缺口复发。
-
-#### Scenario: 守卫通过
-
-- **WHEN** 运行守卫测试（npm run test 内）
-- **THEN** 四处 command 契约清单与 lib.rs 注册集一致，测试绿
-
-#### Scenario: 守卫捕获缺口
-
-- **WHEN** 任一契约清单缺 command（或 lib.rs 新增 command 未同步）
-- **THEN** 守卫测试红，指出缺的 command 名
