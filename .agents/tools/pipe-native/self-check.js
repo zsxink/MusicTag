@@ -138,7 +138,7 @@ function run(rootInput = process.cwd()) {
     }
   }
 
-  for (const relative of ['.agents/workflows/pipe-preflight.sh', '.agents/workflows/pipe-epic-preflight.sh', '.agents/workflows/assert-linked-worktree.sh']) {
+  for (const relative of ['.agents/workflows/pipe-preflight.sh', '.agents/workflows/pipe-epic-preflight.sh', '.agents/workflows/assert-pipe-workspace.sh', '.agents/workflows/pipe-branch-check.sh']) {
     const source = read(root, relative, issues);
     shellSyntax(relative, source, issues);
     if (source !== null && /pipe-core\/run\.js|pipe-core\/.*self-check/.test(source)) {

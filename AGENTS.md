@@ -30,7 +30,7 @@ MusicTag 是一个跨平台桌面应用：一次一首地给本地裸 FLAC/MP3 �
 任何新功能、行为修改或 Bug 修复先走 pipe。用户在 Codex 会话说“跑 pipe `<change>`”时，**当前主会话 Agent 就是 Leader**：读取 `.agents/skills/pipe/SKILL.md` 与 `.agents/skills/pipe/WORKFLOW.md`，执行 `bootstrap → architect → spec-gate → dev → tester → cr → verify → integrate`。
 
 - 主会话用宿主的原生子 Agent 能力派发 Architect、开发、Tester、CR 和 Verify；不得通过 `node`、`codex exec`、`claude -p` 或 OpenCode CLI 启动 Agent。
-- 启动或恢复时先读取 `openspec/changes/<change>/tasks.md` 与 `.agents/runs/<change>/progress.md`，再核对分支、worktree、Git HEAD/diff、提交、PR 与 CI 事实。
+- 启动或恢复时先读取 `openspec/changes/<change>/tasks.md` 与 `.agents/runs/<change>/progress.md`，再核对分支、工作区、Git HEAD/diff、提交、PR 与 CI 事实。
 - 主会话是 `progress.md` 与开发阶段任务勾选的唯一写入者。子 Agent 只在授权路径写入，不能写 Git index/HEAD，也不能提交、推送、建 PR 或合并。
 - 子 Agent 回报 `DONE`、`NEEDS_PARENT_DECISION` 或 `FAILED`，并附证据。主会话能依据已批准规格回答实现问题、重派和有界修复；产品范围、规格冲突、不可逆外部动作或无法判断的问题才升级给用户。宿主权限提示仍由宿主处理。
 - CR 必须只读；CR 三轮仍有 blocker/major 或验证反复失败时，记录原因并挂起。不得绕过 CR、Verify 或扩大已批准规格。
@@ -38,7 +38,7 @@ MusicTag 是一个跨平台桌面应用：一次一首地给本地裸 FLAC/MP3 �
 
 ### Epic
 
-`/pipe:epic <epic>` 由当前主会话读取 `openspec/epics/<epic>/epic.json` 的 `dependsOn` 图。每个子变更使用独立分支、worktree 和 Markdown 进度，最多并行三个无依赖项；只有前置项已在远端合并才解锁后继项。
+`/pipe:epic <epic>` 由当前主会话读取 `openspec/epics/<epic>/epic.json` 的 `dependsOn` 图。主会话原地停在 main；每个就绪子变更使用独立分支、worktree 和 Markdown 进度，最多并行三个无依赖项；只有前置项已在远端合并才解锁后继项。
 
 ## Git / Issue 约定
 

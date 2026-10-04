@@ -7,7 +7,8 @@ change_dir="openspec/changes/${change_name}"
 
 run_bootstrap() {
   test "$(git branch --show-current)" = "$change_name"
-  bash .agents/workflows/assert-linked-worktree.sh
+  workspace_mode=$(bash .agents/workflows/assert-pipe-workspace.sh)
+  echo "✓ [bootstrap] 工作区模式：$workspace_mode"
   test -z "$(git status --porcelain)"
   test -f "$change_dir/proposal.md"
   test -n "$(rg --files "$change_dir/specs" -g '*.md' | head -1)"
