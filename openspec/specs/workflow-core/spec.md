@@ -2,9 +2,7 @@
 
 ## Purpose
 定义 MusicTag pipe 由当前主会话调度宿主原生子 Agent，并通过共享 Markdown 进度、证据门禁和集成 checkpoint 完成可恢复开发闭环。
-
 ## Requirements
-
 ### Requirement: 模型无关编排核心
 pipe SHALL 由当前与用户对话的主会话 Agent 担任 Leader，按共享阶段依赖推进变更。主 Agent SHALL 使用宿主原生子 Agent 能力派发 Architect、Dev、Tester、CR 等角色任务；正式入口 SHALL NOT 通过 Node、`codex exec`、`claude -p` 或 OpenCode CLI 启动 Agent 或完整子流水线。普通 git/cargo/npm/openspec/gh 命令由主 Agent 的命令工具直接执行。
 
@@ -25,7 +23,7 @@ pipe SHALL 由当前与用户对话的主会话 Agent 担任 Leader，按共享�
 - **THEN** 主 Agent 按共享流程中明示的依赖、角色和门禁推进，并记录每次派发。
 
 ### Requirement: 节点状态机与断点续跑（P1）
-主 Agent SHALL 维护 `pending → running → succeeded | failed | suspended` 的阶段状态。`openspec/changes/<change>/tasks.md` SHALL 记录经核对的任务完成情况；主仓 `.agents/runs/<change>/progress.md` SHALL 记录版本、change、Issue、branch、worktree、阶段、任务所有权、attempt/CR 轮次、验证 HEAD、子 Agent 标识、决策、集成 checkpoint 和下一步，且由主 Agent 独占写入。linked worktree 中的 CLI SHALL 将运行状态写到共享主仓，不能将其放入会随 cleanup 删除的 worktree。恢复 SHALL 以 Markdown 与仓库和远端事实共同判定，只复用证据有效的已完成阶段。
+主 Agent SHALL 维护 `pending → running → succeeded | failed | suspended` 的阶段状态。`openspec/changes/<change>/tasks.md` SHALL 记录经核对的任务完成情况；主仓 `.agents/runs/<change>/progress.md` SHALL 记录版本、change、Issue、branch、worktree（实际代码工作区，原地模式为主仓根）、阶段、任务所有权、attempt/CR 轮次、验证 HEAD、子 Agent 标识、决策、集成 checkpoint 和下一步，且由主 Agent 独占写入。进度 SHALL 始终保存在共享主仓 `.agents/runs/<change>/`，即使该 change 使用了 linked worktree，也不得写入会随 cleanup 删除的工作树。恢复 SHALL 以 Markdown 与仓库和远端事实共同判定，只复用证据有效的已完成阶段。
 
 #### Scenario: 上下文压缩或新会话恢复
 - **WHEN** 主会话上下文中断后重新触发同一 change
@@ -67,13 +65,13 @@ pipe SHALL 由当前与用户对话的主会话 Agent 担任 Leader，按共享�
 - **WHEN** 调用 takeover 或 takeover-recover 时缺少非空 evidence
 - **THEN** 命令 fail-closed，不更改 lock、progress 或 takeover journal。
 
-#### Scenario: worktree 清理后继续记录
-- **WHEN** 集成流程删除实现用的 linked worktree
-- **THEN** 主 Agent 仍能在共享主仓读取运行进度，并写入 `cleanup-local` checkpoint 和最终阶段状态。
+#### Scenario: 工作区清理后继续记录
+- **WHEN** 集成流程完成本地清理——删除实现用的 linked worktree，或将主工作树切回 main 并删除已合并的 change 分支
+- **THEN** 主 Agent 仍能在共享主仓读取运行进度，并写入 `cleanup-local` checkpoint 和最终阶段状态；`worktreeRemoved` 表示「不再存在该 change 的 linked worktree」，两种模式收尾后均为真
 
 #### Scenario: merge 后完成态恢复
 - **WHEN** PR 已合并、verify-remote 和 cleanup-local 事实均已核实，但会话在 integrate 最终标记前中断，或后续再次恢复
-- **THEN** 主 Agent 以 main 分支、merge 后 HEAD 和 worktree 已删除作为生命周期事实，确认验证 HEAD 仍可从 main 到达后保留原验证/集成证据，只补完 integrate 或报告完成，不要求伪造已删除 worktree 的旧事实。
+- **THEN** 主 Agent 以 main 分支、merge 后 HEAD 和不再存在该 change 的 linked worktree 作为生命周期事实，确认验证 HEAD 仍可从 main 到达后保留原验证/集成证据，只补完 integrate 或报告完成，不要求伪造已删除 worktree 的旧事实。
 
 ### Requirement: 决断链（P2）
 子 Agent SHALL 用 `DONE`、`NEEDS_PARENT_DECISION` 或 `FAILED` 返回状态。主 Agent SHALL 对失败做有界的 retry/reroute/escalate/abort 决断，记录原因和次数；可以回答已批准范围内的技术疑问，但不得跳过 CR、Verify 或扩大规格。
@@ -122,7 +120,7 @@ pipe SHALL 由当前与用户对话的主会话 Agent 担任 Leader，按共享�
 - **THEN** 主 Agent 阻止超出已批准规格的实现，并向用户请求范围决定。
 
 ### Requirement: 自适应编排（P4）
-Architect SHALL 判定 `backend/frontend/both/docs/spec/infra` 域，由主 Agent 按域选择原生子 Agent 和验证计划。`both` 的同一 worktree 写入 SHALL 按 Rust→Vue 顺序；docs/spec/infra 跳过无关业务编译，但保留适用的规格、脚本和审查门禁。
+Architect SHALL 判定 `backend/frontend/both/docs/spec/infra` 域，由主 Agent 按域选择原生子 Agent 和验证计划。`both` 的同一工作区写入 SHALL 按 Rust→Vue 顺序；docs/spec/infra 跳过无关业务编译，但保留适用的规格、脚本和审查门禁。
 
 #### Scenario: 代码域
 - **WHEN** Architect 判定 `both`
@@ -325,3 +323,35 @@ CR 审查 SHALL 在一致性/遗漏/缺陷之外，保留复盘专项三检（�
 #### Scenario: 已结束会话的显式接管
 - **WHEN** 新主会话确认旧主会话及其所有写入子 Agent 均已结束，并提供当前 lock 中记录的旧 owner
 - **THEN** 状态工具核对 lock 与 progress 的旧 owner 完全匹配，要求明确确认后原子转移 owner 并记录接管证据；未确认或标识不匹配时拒绝写入
+
+### Requirement: 变更工作区与分支选择
+pipe SHALL 默认在当前工作目录开发：从 main 切出与 change 同名的分支，不新建 linked worktree。主 Agent SHALL 在 bootstrap 前判定当前分支状态：已在目标分支则直接继续；在 main 上则直接切出目标分支；在其它分支或 detached HEAD 上则向用户提供「切分支 / 改用 worktree / 中止」三选一。工作区不干净且需要切换分支时 SHALL 停止并交由用户处理，不得自动 stash 或提交。从非 main 分支切出前 SHALL 校验 main 是该分支 HEAD 的祖先，不成立时不得从该分支切出。Epic 主会话 SHALL 保持原地并停在 main，其就绪子变更是结构性使用独立分支与 worktree 的场景；单变更默认不新建 linked worktree，仅在用户选择「改用 worktree」时例外。集成收尾 SHALL 切回 main 并删除已合并的 change 分支。工作区模式（in-place 或 worktree）SHALL 由确定性脚本判定并记入 bootstrap 证据，不新增 progress 机器字段。
+
+#### Scenario: 在 main 上启动
+- **WHEN** 主 Agent 在干净的 main 分支上启动 `pipe <change>`
+- **THEN** 主 Agent 从 main 切出同名 change 分支，不创建 linked worktree，bootstrap 在当前位置执行
+
+#### Scenario: 在其它开发分支上启动
+- **WHEN** 当前分支既不是 main 也不是目标 change 分支
+- **THEN** 主 Agent 停止自动推进，向用户提供切分支、改用 worktree、中止三个选项，并按用户答复执行
+
+#### Scenario: 工作区不干净
+- **WHEN** 需要切换分支但工作区存在未提交改动
+- **THEN** 主 Agent 停止并提示用户先提交或暂存，不自动 stash、不自动提交
+
+#### Scenario: 从非 main 分支切出的前置校验
+- **WHEN** 用户选择从当前非 main 分支切出 change 分支
+- **THEN** 主 Agent 先确认 main 是当前 HEAD 的祖先；不成立时只提供改用 worktree 或中止
+
+#### Scenario: 原地开发不绕过分支门禁
+- **WHEN** 主 Agent 在原地模式下运行 bootstrap
+- **THEN** 当前分支必须等于 change 名，在 main 上直接开发仍然 fail-closed
+
+#### Scenario: Epic 子项隔离
+- **WHEN** Epic 调度就绪子变更
+- **THEN** 主会话保持原地并停在 main，每个子变更在各自的独立分支与 worktree 中执行，并行上限仍为 3
+
+#### Scenario: 原地收尾
+- **WHEN** 变更 PR 已合并且集成进入 cleanup-local
+- **THEN** 主 Agent 切回 main 并删除已合并的 change 分支，progress 记录的 cleanup-local 证据仍满足既有契约
+
