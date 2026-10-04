@@ -94,7 +94,9 @@ test('native preflight: it invokes the native self-check instead of the retired 
   const preflight = read('.agents', 'workflows', 'pipe-preflight.sh');
   assert.match(preflight, /\.agents\/tools\/pipe-native\/self-check\.js/);
   assert.doesNotMatch(preflight, /pipe-core\/run\.js/);
-  assert.match(preflight, /assert-linked-worktree\.sh/);
+  assert.match(preflight, /assert-pipe-workspace\.sh/);
+  // In-place mode must not loosen the branch gate: developing on main stays fail-closed.
+  assert.match(preflight, /test "\$\(git branch --show-current\)" = "\$change_name"/);
   const epicPreflightScript = read('.agents', 'workflows', 'pipe-epic-preflight.sh');
   assert.match(epicPreflightScript, /all_rows=\$\(node \.agents\/tools\/pipe-native\/epic-preflight\.js items/);
   assert.match(epicPreflightScript, /closingIssuesReferences/);
@@ -248,11 +250,11 @@ test('source fingerprint is stable across cwd and OpenSpec archive moves, and ch
   }
 });
 
-test('native preflight: only linked worktrees pass the worktree guard', () => {
+test('native workspace guard: the main worktree and linked worktrees both pass with a mode marker', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-worktree-guard-'));
   const main = path.join(root, 'repo');
   const linked = path.join(root, 'linked');
-  const guard = path.join(REPO, '.agents', 'workflows', 'assert-linked-worktree.sh');
+  const guard = path.join(REPO, '.agents', 'workflows', 'assert-pipe-workspace.sh');
   try {
     fs.mkdirSync(main);
     const git = (args, cwd = main) => execFileSync('git', args, { cwd, stdio: 'ignore' });
@@ -265,9 +267,10 @@ test('native preflight: only linked worktrees pass the worktree guard', () => {
     git(['worktree', 'add', '-b', 'change', linked, 'main']);
     const inMain = spawnSync('bash', [guard], { cwd: main, encoding: 'utf8' });
     const inLinked = spawnSync('bash', [guard], { cwd: linked, encoding: 'utf8' });
-    assert.notEqual(inMain.status, 0);
-    assert.match(inMain.stderr, /主工作树/);
+    assert.equal(inMain.status, 0, inMain.stderr);
+    assert.equal(inMain.stdout.trim(), 'in-place');
     assert.equal(inLinked.status, 0, inLinked.stderr);
+    assert.equal(inLinked.stdout.trim(), 'worktree');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

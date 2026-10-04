@@ -19,11 +19,11 @@ MusicTag 是 Tauri 2 + Rust + Vue 3 的本地单曲标签编辑器。产品行�
 
 - 当前主会话是 Leader，负责阶段推进、问题裁决、进度记录、提交和集成；不要创建 `leader` 子 Agent。
 - 用 Claude 原生 Agent 工具派发 Architect、Dev、Tester、CR、Verify。不要使用任何 CLI driver、Agent CLI 或完整子流水线进程。
-- 主会话是 `openspec/changes/<change>/tasks.md` 开发勾选和 `.agents/runs/<change>/progress.md` 的唯一写入者。恢复时核对 Git、worktree、PR 与 CI 事实，不信任旧标记。
+- 主会话是 `openspec/changes/<change>/tasks.md` 开发勾选和 `.agents/runs/<change>/progress.md` 的唯一写入者。恢复时核对 Git、工作区、PR 与 CI 事实，不信任旧标记。
 - 子 Agent 只能改主会话授予的路径；CR 必须只读。子 Agent 以 `DONE`、`NEEDS_PARENT_DECISION` 或 `FAILED` 加证据回报。
 - 已批准规格内的技术问题由主会话回答并写进 progress；规格冲突、范围变化、不可逆外部动作或无法判断的问题升级给用户。宿主权限确认仍由宿主处理。
 - CR 至多三轮；验证或 CR 不能有证据通过时挂起。不得跳过任何质量门。
-- Epic 依据 `epic.json` 的 `dependsOn`，用独立 worktree 最多并行三个就绪子变更，且以前置项远端已合并为解锁条件。
+- Epic 依据 `epic.json` 的 `dependsOn`，主会话原地停在 main，仅就绪子变更各自新建独立分支与 worktree，最多并行三个，且以前置项远端已合并为解锁条件。
 
 运行确定性 preflight、OpenSpec、Git、构建、测试和 GitHub 命令时直接使用主会话的命令工具。无法提供角色所需的原生最小权限时，在写入前停止，不回退到旧 CLI 调度。
 

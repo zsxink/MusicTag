@@ -4,7 +4,7 @@ kind: change
 change: <change>
 issue: <issue-number-or-null>
 branch: <branch>
-worktree: <absolute-worktree-path>
+worktree: <absolute-code-workspace-path; main-repo-root in in-place mode>
 owner: <host:main-session-id>
 updatedAt: <ISO-8601>
 ---
@@ -47,9 +47,12 @@ user answers.
 
 ## Resume checks
 
-On recovery, compare this file with branch, worktree, commits, source files,
-OpenSpec tasks and remote PR/CI facts. A historical success is only a candidate
-until its recorded evidence is verified again.
+On recovery, compare this file with the branch, the code workspace (in-place or
+worktree), commits, source files, OpenSpec tasks and remote PR/CI facts. In
+`cleanup-local` and terminal-state recovery, `worktreeRemoved` and
+`worktreeDeleted` mean the change no longer has a linked worktree; both are true
+after cleanup in either mode. A historical success is only a candidate until its
+recorded evidence is verified again.
 
 <!-- pipe-native-progress
 <machine-readable JSON written by progress.js>
