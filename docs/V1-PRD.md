@@ -339,16 +339,16 @@ enum SearchError {
 | JSON 解析 | `serde_json` | 解析各家接口返回 |
 | 加密 | `aes` + `cbc` + `rsa` + `rand` | 网易云 weapi / linuxapi 手写加密 |
 | 网易云 | linuxapi 转发搜索 + 取歌词 | 见下方多源搜索架构（2026 起 weapi 搜索被风控） |
-| QQ 音乐 | `client_search_cp` GET | 纯 HTTP，无加密 |
-| 酷狗 | `complexsearch.kugou.com` MD5 签名搜索 + `lyrics.kugou.com` LRC | 纯 MD5，无 JS 引擎 |
+| QQ 音乐 | `search_for_qq_cp` GET | 纯 HTTP，无加密 |
+| 酷狗 | `complexsearch.kugou.com` MD5 签名搜索 + `lyrics.kugou.com` LRC | 纯 MD5，无 JS 引擎；搜索响应带 `Image`，派生封面（`{size}`→480、升 https、丢弃 `singerimg` 歌手头像） |
 | LRCLIB | `lrclib.net/api/search` / `/api/get` | 零鉴权，歌词兜底 |
-| iTunes | `itunes.apple.com/search`（country=CN） | 零鉴权，封面兜底 |
+| iTunes | `itunes.apple.com/search`（country=HK + country=US **双店面并发**） | 零鉴权，封面兜底；HK 取中文原曲（繁体），US 取西方规范艺名，两者合并后由打分定序 |
 
 > **多源搜索架构（对标 music-tag-web 的 `MusicResource` 工厂 + `smart_tag`）**：
 > - **模块**：`commands/` 目录薄壳（`folder.rs`/`song.rs`/`cover.rs`/`search.rs`）+ `service/searcher/` 子模块（`mod.rs`/`netease.rs`/`qqmusic.rs`/`kugou.rs`/`lrclib.rs`/`itunes.rs`/`crypto.rs`）。统一 Trait `MusicSource`：`search(title, artist, album) -> Result<Vec<SongCandidate>, String>` + `fetch_lyric(song_id) -> Option<String>`。
 > - **流程**：选中歌曲 → `search_song(title, artist, album)`（综合 title/artist/album 拼查询词）→ 五源并发（每家 6s 超时，失败降级为空列表并记入 `source_stats`）→ 同源去重（跨源不折叠）→ 来源分组 + 每源 TOP 3（最多 15 条）返回。`SearchResult.all_failed` 区分「五源全网络失败」（标记会话离线）与「正常空结果」（冷门歌不标离线）。
 > - **惰性拉取**：候选列表秒出——封面 URL 随搜索结果带出，点选封面才 `download_cover`（单独 5s 超时 + 响应限流）；歌词文本点选候选行才 `fetch_lyric`。
-> - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3`；归一化 = trim + 全角半角 + 小写折叠（V1 不做简繁转换）；按归一化 `(source, title, artist)` 去重——**同源内**同曲保留该源最高分一条、**跨源不折叠**（各源候选各自保留）；排序按来源分组（Netease→QqMusic→Kugou→Lrclib→Itunes）、组内分降序，每源 TOP 3（最多 15 条）。
+> - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3`；归一化 = trim + **繁→简折叠** + 全角半角 + 小写折叠（繁简折叠用内嵌 OpenCC `TSCharacters` 字表 + `TSPhrases` 词表，Apache-2.0，**零新增运行时依赖**；iTunes HK 店面返回繁体而本地标签多为简体，不折叠则最强艺人信号丢失）。折叠**只作用于比较侧**（打分 / 去重 key / 排序 tie-break），**不改写候选展示文本、不改写点选后填入与写盘的文本**；按归一化 `(source, title, artist)` 去重——**同源内**同曲（含繁简同曲）保留该源最高分一条、**跨源不折叠**（各源候选各自保留）；聚合输入按**固定来源序**展开（iTunes 内部再按店面序 HK→US），保证同分取舍与 TOP 3 截断可复现；排序按来源分组（Netease→QqMusic→Kugou→Lrclib→Itunes）、组内分降序，每源 TOP 3（最多 15 条）。
 > - **Tauri command 全量**（前端一律 `invoke` 调用；TS 类型与 `design/design.md` §10.3 对齐）：
 >   - 文件：`pick_folder() -> Option<String>`（rfd 文件夹选择器）、`list_songs(dir) -> Vec<SongSummary>`、`watch_folder(dir, watch_id) -> Result<(), String>`（替换/停止当前递归监听并通过 `folder-changed` 事件通知列表失效）、`open_song(path) -> Result<Song, String>`、`save_song(song, exportLrc) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`、`get_last_dir() -> Option<String>`（读上次打开目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 记住本次目录，失败静默）
 >   - 封面：`pick_cover_file() -> Option<CoverInput>`（rfd 文件对话框，jpg/png/webp）、`read_cover_path(path) -> Result<CoverInput, String>`（拖拽路径读 bytes）；两者返回 `CoverInput`（`data_url` 压缩小图 + `mime`），封面跨 IPC 用 base64 data URL

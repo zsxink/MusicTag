@@ -12,8 +12,8 @@ Domain: `both`，顺序固定 **Rust → Vue**（前端 C2 归一化镜像依赖
 
 ## 1. 规格与文档（Leader，Dev 前置）
 
-- [ ] **1.1** 核对 `openspec/changes/fix-search-sources-locale/{proposal,design}.md` 与两份 spec delta 一致，确认 `specs/search-sources/spec.md` 的「多候选字取首」Scenario 已改为 `乾 → 干 乾`（用户裁决；`著` 在两表均无条目，原示例不可实现），并把 GitHub Issue #152 描述更新为「可用性修复 + 语种适配 + 繁简归一化」范围（PR 以 `Closes #152` 收口）。Owner: Leader；无代码改动。
-- [ ] **1.2** 同步权威文档。`docs/V1-PRD.md`：`:342` QQ 端点 → `search_for_qq_cp`；`:345` iTunes → `country=HK+US 双店面`；`:351` 归一化定义补「繁→简（内嵌 OpenCC Apache-2.0 表）」并**删「V1 不做简繁转换」**。`docs/design/design.md`：`:204` 聚合语义（归一化含繁简、来源固定序、iTunes 双店面合并后仍 TOP 3）；`:374` `search_song` 契约行；`:341-345` 搜索源清单补酷狗封面与 QQ 端点事实。另注（design §6 末）：存量 `openspec/specs/search-ui/spec.md:42` 的 `migu` 与 `:53/:56/:60` 的「三源」为陈旧表述，由本 change 的 MODIFIED delta 归档时覆盖——**是否单独提 spec 修正由 Leader 决定，不在本 change 的授权路径内**。Owner: Leader；依赖 1.1。
+- [x] **1.1** 核对 `openspec/changes/fix-search-sources-locale/{proposal,design}.md` 与两份 spec delta 一致，确认 `specs/search-sources/spec.md` 的「多候选字取首」Scenario 已改为 `乾 → 干 乾`（用户裁决；`著` 在两表均无条目，原示例不可实现），并把 GitHub Issue #152 描述更新为「可用性修复 + 语种适配 + 繁简归一化」范围（PR 以 `Closes #152` 收口）。Owner: Leader；无代码改动。
+- [x] **1.2** 同步权威文档。`docs/V1-PRD.md`：`:342` QQ 端点 → `search_for_qq_cp`；`:345` iTunes → `country=HK+US 双店面`；`:351` 归一化定义补「繁→简（内嵌 OpenCC Apache-2.0 表）」并**删「V1 不做简繁转换」**。`docs/design/design.md`：`:204` 聚合语义（归一化含繁简、来源固定序、iTunes 双店面合并后仍 TOP 3）；`:374` `search_song` 契约行；`:341-345` 搜索源清单补酷狗封面与 QQ 端点事实。存量 `openspec/specs/search-ui/spec.md:42` 的 `migu` 与 `:53/:56/:60` 的「三源」**无需额外改动**：OpenSpec 的 MODIFIED 为整块替换（`core/specs-apply.js` 归档时 `nameToBlock.set(key, mod)`），本 change 的两个 `search-ui` MODIFIED requirement 已把四处全部覆盖（裁决与逐条核对见 design §6 末注）。Owner: Leader；依赖 1.1。
 - [ ] **1.3** 执行 spec-gate preflight 与 `npx openspec validate fix-search-sources-locale --strict --no-interactive`，确认 delta 格式（MODIFIED 全文替换、ADDED 全 requirement）与 scenario 覆盖；审计后提交 checkpoint。Owner: Leader；Dev 依赖 1.2/1.3。
 
 ## 2. Rust 搜索源修复（rust-backend）

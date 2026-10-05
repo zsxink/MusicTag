@@ -268,11 +268,16 @@ pub fn mock_http_router(
 - `docs/design/design.md`：`:204` 聚合语义段落（归一化含繁简、来源固定序、iTunes 双店面合并后仍 TOP 3）；`:374` `search_song` 契约行；搜索源清单处（`:341-345`）补酷狗封面与 QQ 端点事实。
 - `openspec/specs/search-sources/spec.md`、`openspec/specs/search-ui/spec.md`：由本变更 delta 承载（归档时生效）。
 
-> **额外同步点（Architect 新发现，Leader 一并纳入 1.2）**：`openspec/specs/search-ui/spec.md` 存量正文有两处陈旧表述，与本 change 无关但**会被 delta 的 MODIFIED 全文替换连带修正**，需确认 delta 已覆盖：
+> **额外同步点（Architect 新发现）**：`openspec/specs/search-ui/spec.md` 存量正文有两处陈旧表述：
 > - `:42` C2 场景写 `netease→qqmusic→**migu**`（咪咕已在 `search-sources-renewal` 下线，代码事实为 `netease→qqmusic→kugou→lrclib`）；
 > - `:53/:56/:60` 离线降级写「**三源**全部网络失败 / 三源全失败 / 三源均成功」（现为五源，代码 `search_song_with_sources` 的 `all_failed` 口径即五源）。
 >
-> 本 change 的 `search-ui` delta 已按新口径写「五源」，归档时会覆盖掉 `:53` 一段；`:42` 与 `:56/:60` 的 scenario 文本是否需要 Leader 决定一并修正。
+> **Leader 裁决（2026-10-05）：无需任何额外改动。** OpenSpec 的 `MODIFIED` 是**整块替换**（`@fission-ai/openspec` 的 `core/specs-apply.js` 归档时执行 `nameToBlock.set(key, mod)`，用 delta 的 raw 覆盖同名 requirement 的全部正文与 scenario）。本 change 的 `search-ui` delta 恰有两个 MODIFIED requirement，把上述四处**全部**覆盖：
+> - `:42` → 「取词失败自动换源（C2）」的「换源重试」scenario 已写 `netease→qqmusic→kugou→lrclib`；
+> - `:53` → 「离线降级」Requirement 正文已写「五源全部网络失败」；
+> - `:56`/`:60` → 「标记离线」「无结果不标离线」两 scenario 已写「五源全失败 / 五源均成功」，且额外补了 iTunes 仅两店面全失败才计失败的边界。
+>
+> 故归档后 canonical 文本即新文本，**不另开 change、不在本 change 的 `search-ui` delta 中追加 requirement**。
 
 ## 7. 风险、非目标与已知边界
 
