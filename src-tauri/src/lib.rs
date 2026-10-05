@@ -2,6 +2,7 @@
 //
 // 壳内注册业务 command：
 // - `pick_folder` / `list_songs`（v1-folder-list）
+// - `watch_folder`（issue-123-auto-refresh，当前目录及后代变动通知）
 // - `open_song` / `save_song`（v1-song-read / v1-song-save）
 // - `pick_cover_file` / `read_cover_path`（v1-cover-embed）
 // - `pick_cover_save_path` / `export_cover`（export-embedded-cover，内嵌封面原图只读导出）
@@ -19,12 +20,16 @@ pub mod commands;
 pub mod model;
 pub mod service;
 
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(service::folder_watch::FolderWatch::default())
         .invoke_handler(tauri::generate_handler![
             commands::folder::pick_folder,
             commands::folder::list_songs,
+            commands::folder::watch_folder,
             commands::folder::get_last_dir,
             commands::folder::save_last_dir,
             commands::missing::scan_missing,
@@ -40,6 +45,11 @@ pub fn run() {
             commands::search::fetch_lyric,
             commands::search::download_cover,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<service::folder_watch::FolderWatch>().shutdown();
+            }
+        });
 }

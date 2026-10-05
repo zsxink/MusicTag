@@ -174,3 +174,25 @@ describe('api/songs.ts — 类型化 command 封装（命令名/参数逐字对�
     await expect(exportCover('/a/song.flac', '/music/x.png')).rejects.toBe('该歌曲没有内嵌封面')
   })
 })
+
+const mockListen = vi.fn()
+vi.mock('@tauri-apps/api/event', () => ({ listen: (...args: unknown[]) => mockListen(...args) }))
+import { watchFolder, listenFolderChanged } from './songs'
+
+it('watch_folder 使用 camelCase watchId，null 同接口停止', async () => {
+  mockInvoke.mockResolvedValue(undefined)
+  await watchFolder('/music', 42)
+  expect(mockInvoke).toHaveBeenLastCalledWith('watch_folder', { dir: '/music', watchId: 42 })
+  await watchFolder(null, 43)
+  expect(mockInvoke).toHaveBeenLastCalledWith('watch_folder', { dir: null, watchId: 43 })
+})
+
+it('folder-changed 只传 payload，并透传 unlisten', async () => {
+  const unlisten = vi.fn()
+  mockListen.mockResolvedValue(unlisten)
+  const handler = vi.fn()
+  expect(await listenFolderChanged(handler)).toBe(unlisten)
+  const payload = { dir: '/music', watchId: 42, error: null }
+  mockListen.mock.calls[0]![1]({ payload, id: 1, event: 'folder-changed' })
+  expect(handler).toHaveBeenCalledWith(payload)
+})

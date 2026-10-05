@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod cover;
+pub mod folder_watch;
 pub mod fs_atomic;
 pub mod lyrics;
 pub mod meta;

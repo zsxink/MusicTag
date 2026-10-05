@@ -74,3 +74,10 @@ export interface SearchResult {
   /** 五源全部失败（网络错误/超时）→ true；至少一源成功（含正常空结果）→ false。前端仅在 true 时判定会话离线（FR-8.4a）。 */
   all_failed: boolean
 }
+
+/** 当前目录失效通知；与 Rust FolderChanged 的 camelCase 字段一致。 */
+export interface FolderChanged {
+  dir: string
+  watchId: number
+  error: string | null
+}

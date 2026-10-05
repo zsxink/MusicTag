@@ -67,15 +67,26 @@ describe('store/selectors — 纯展示派生（spec: 搜索过滤 + 文件名�
       expect(filteredSongs.value.map((x) => x.path)).toEqual(['/c/mid.mp3'])
     })
 
-    it('扫描中或命令失败时保留完整列表，避免误显为无命中', () => {
+    it.each(['idle', 'scanning', 'error'] as const)(
+      '缺失扫描状态为 %s 时保留完整列表，避免刷新期间或失败后误显为无命中',
+      (state) => {
+        songStore.missingFilterEnabled = true
+        songStore.missingByPath = {}
+        songStore.missingScanState = state
+        expect(filteredSongs.value.map((song) => song.path)).toEqual([
+          '/b/alpha.flac',
+          '/c/mid.mp3',
+          '/d/queen.flac',
+          '/a/zz.mp3',
+        ])
+      },
+    )
+
+    it('缺失扫描完成且无命中时才显示空列表', () => {
       songStore.missingFilterEnabled = true
       songStore.missingByPath = {}
-
-      songStore.missingScanState = 'scanning'
-      expect(filteredSongs.value).toHaveLength(4)
-
-      songStore.missingScanState = 'error'
-      expect(filteredSongs.value).toHaveLength(4)
+      songStore.missingScanState = 'done'
+      expect(filteredSongs.value).toEqual([])
     })
   })
 

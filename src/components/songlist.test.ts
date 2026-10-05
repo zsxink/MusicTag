@@ -4,8 +4,8 @@
 // `filteredSongs.value` 的 `.value` 取到 undefined → `.length` 抛 TypeError，
 // 整个 SongList 渲染崩溃，表现为「打开文件夹后列表不显示」。
 // 回归：v-else-if 分支求值 + v-for 渲染都必须用解包后的数组（去掉 `.value`）。
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 // mock invoke：openFolder 经 api/songs.ts 的 pickFolder/listSongs 走 mock IPC（接线测试才发）。
 // 默认 async no-op：onMounted 启动自动加载调 getLastDir()（invokeCommand 需要返回 Promise）。
@@ -14,8 +14,12 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }))
 
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => vi.fn()) }))
+enableAutoUnmount(afterEach)
+beforeEach(() => stopFolderWatching())
+
 import type { Song } from '../api/types'
-import { songStore } from '../store/song'
+import { songStore, stopFolderWatching } from '../store/song'
 import SongList from './SongList.vue'
 
 const makeSong = (path: string): Song => ({
@@ -84,9 +88,11 @@ describe('SongList — openFolder 走 dirty 拦截门（v1-ux-settings 2.3 补�
 
   it('干净态点「打开文件夹」→ 直接换目录并替换列表，不弹窗（spec 无修改直接换）', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null // 启动自动加载：无记忆 → 不自动加载
       if (cmd === 'pick_folder') return '/new/dir'
       if (cmd === 'list_songs') return [{ path: '/new/dir/a.flac', title: 'A', artist: 'AA' }]
+
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
@@ -101,8 +107,10 @@ describe('SongList — openFolder 走 dirty 拦截门（v1-ux-settings 2.3 补�
 
   it('dirty 态点「打开文件夹」→ 进入 pending folder（复用同一弹窗），不立即换目录、编辑保留', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null // 启动自动加载：无记忆 → 不自动加载
       if (cmd === 'pick_folder') return '/new/dir'
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
     songStore.folderPath = '/a'
@@ -124,8 +132,10 @@ describe('SongList — openFolder 走 dirty 拦截门（v1-ux-settings 2.3 补�
 
   it('dirty 态但用户取消原生选择器（pick_folder 返回 null）→ 无视，不弹窗不改状态', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null // 启动自动加载：无记忆 → 不自动加载
       if (cmd === 'pick_folder') return null
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
     songStore.folderPath = '/a'
@@ -155,7 +165,9 @@ describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounte
 
   it('getLastDir 返回 null（无记忆/目录已删）→ 保持「未打开文件夹」空态、不加载列表', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
@@ -171,8 +183,10 @@ describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounte
 
   it('getLastDir 返回有效目录 → 启动自动加载并列出歌曲（等价自动点了打开文件夹）', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return '/music'
       if (cmd === 'list_songs') return [{ path: '/music/a.flac', title: 'A', artist: 'AA' }]
+
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
@@ -187,7 +201,9 @@ describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounte
 
   it('getLastDir IPC 异常 → 静默降级为无记忆空态（onMounted catch：不报错、不加载列表、不阻塞渲染）', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') throw new Error('IPC failed')
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
@@ -207,8 +223,10 @@ describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounte
     // getLastDir 的 .catch 只兜 getLastDir 自身，initLastDir 的 rejection 在组件边界无 catch。
     // 期望：与「无记忆空态」同语义静默降级——folderPath 不残留半打开态、不产生 unhandled rejection。
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return '/music'
       if (cmd === 'list_songs') throw new Error('list_songs IPC failed')
+
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
@@ -232,6 +250,7 @@ describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounte
     let resolveManual!: (v: unknown) => void
     let listCalls = 0
     mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return Promise.resolve('/music')
       if (cmd === 'pick_folder') return Promise.resolve('/manual')
       if (cmd === 'list_songs') {
@@ -248,6 +267,7 @@ describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounte
         })
       }
       if (cmd === 'save_last_dir') return Promise.resolve(undefined)
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
@@ -299,6 +319,7 @@ describe('SongList — 缺失筛选面板', () => {
 
   it('打开面板默认全选，扫描完成后展示命中列表、badge 和错误数量', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null
       if (cmd === 'scan_missing') {
         return {
@@ -306,10 +327,12 @@ describe('SongList — 缺失筛选面板', () => {
           errors: [{ path: '/music/a.flac', reason: '读取失败' }],
         }
       }
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
     const w = mount(SongList)
+    await flushPromises()
     await w.get('button.missing-filter-btn').trigger('click')
     await flushPromises()
 
@@ -323,12 +346,15 @@ describe('SongList — 缺失筛选面板', () => {
 
   it('扫描完成无命中显示专用空态，关闭后恢复完整列表', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null
       if (cmd === 'scan_missing') return { songs: [], errors: [] }
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
     const w = mount(SongList)
+    await flushPromises()
     await w.get('button.missing-filter-btn').trigger('click')
     await flushPromises()
     expect(w.text()).toContain('没有缺失所选字段的歌曲')
@@ -347,14 +373,17 @@ describe('SongList — 缺失筛选面板', () => {
 
   it('扫描有错误且无命中时不误报为没有缺失歌曲', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null
       if (cmd === 'scan_missing') {
         return { songs: [], errors: [{ path: '/music/a.flac', reason: '读取失败' }] }
       }
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
     const w = mount(SongList)
+    await flushPromises()
     await w.get('button.missing-filter-btn').trigger('click')
     await flushPromises()
 
@@ -366,12 +395,15 @@ describe('SongList — 缺失筛选面板', () => {
   it('扫描进行中展示状态，完成后再展示结果列表', async () => {
     let resolveScan!: (value: unknown) => void
     mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return Promise.resolve(null)
       if (cmd === 'scan_missing') return new Promise((resolve) => { resolveScan = resolve })
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
     const w = mount(SongList)
+    await flushPromises()
     await w.get('button.missing-filter-btn').trigger('click')
     await flushPromises()
     expect(w.text()).toContain('正在扫描缺失字段')
@@ -386,16 +418,19 @@ describe('SongList — 缺失筛选面板', () => {
   it('命令级失败显示重试入口，重试成功后恢复缺失结果', async () => {
     let attempts = 0
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null
       if (cmd === 'scan_missing') {
         attempts++
         if (attempts === 1) throw new Error('扫描服务暂不可用')
         return { songs: [{ path: '/music/a.flac', missing: ['lyrics'] }], errors: [] }
       }
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
     const w = mount(SongList)
+    await flushPromises()
     await w.get('button.missing-filter-btn').trigger('click')
     await flushPromises()
     expect(w.text()).toContain('扫描失败：扫描服务暂不可用')
@@ -409,12 +444,15 @@ describe('SongList — 缺失筛选面板', () => {
 
   it('逐项取消五个维度后恢复完整列表并停止筛选', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null
       if (cmd === 'scan_missing') return { songs: [], errors: [] }
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
     const w = mount(SongList)
+    await flushPromises()
     await w.get('button.missing-filter-btn').trigger('click')
     await flushPromises()
     const checks = w.findAll('input[type="checkbox"]')
@@ -430,14 +468,17 @@ describe('SongList — 缺失筛选面板', () => {
 
   it('筛选结果点选仍走 open_song，不批量改写当前编辑态', async () => {
     mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null
       if (cmd === 'scan_missing') return { songs: [{ path: '/music/b.flac', missing: ['lyrics'] }], errors: [] }
       if (cmd === 'open_song') return makeSong((args as { path: string }).path)
       if (cmd === 'search_song') return { songs: [], source_stats: [], all_failed: false }
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
     const w = mount(SongList)
+    await flushPromises()
     await w.get('button.missing-filter-btn').trigger('click')
     await flushPromises()
     await w.get('.song-row').trigger('click')
@@ -450,8 +491,10 @@ describe('SongList — 缺失筛选面板', () => {
 
   it('筛选结果点选遇到未保存编辑时仍弹切歌确认，不直接 open_song', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'watch_folder') return Promise.resolve(undefined)
       if (cmd === 'get_last_dir') return null
       if (cmd === 'scan_missing') return { songs: [{ path: '/music/b.flac', missing: ['lyrics'] }], errors: [] }
+      if (cmd === 'list_songs') return songStore.songs
       throw new Error(`unexpected cmd: ${cmd}`)
     })
 
@@ -461,6 +504,7 @@ describe('SongList — 缺失筛选面板', () => {
     songStore.current.title = '正在编辑'
 
     const w = mount(SongList)
+    await flushPromises()
     await w.get('button.missing-filter-btn').trigger('click')
     await flushPromises()
     await w.get('.song-row').trigger('click')
@@ -476,6 +520,7 @@ describe('SongList — 缺失筛选面板', () => {
     it('扫描完成后点「刷新」重新扫描并按新结果更新命中列表', async () => {
       let attempts = 0
       mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'watch_folder') return Promise.resolve(undefined)
         if (cmd === 'get_last_dir') return null
         if (cmd === 'scan_missing') {
           attempts++
@@ -484,10 +529,12 @@ describe('SongList — 缺失筛选面板', () => {
           }
           return { songs: [{ path: '/music/a.flac', missing: ['cover'] }], errors: [] }
         }
+        if (cmd === 'list_songs') return songStore.songs
         throw new Error(`unexpected cmd: ${cmd}`)
       })
 
       const w = mount(SongList)
+      await flushPromises()
       await w.get('button.missing-filter-btn').trigger('click')
       await flushPromises()
       expect(w.text()).toContain('缺歌词') // 首次扫描命中 b
@@ -506,6 +553,7 @@ describe('SongList — 缺失筛选面板', () => {
       const resolvers: Array<(v: unknown) => void> = []
       let scanCalls = 0
       mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === 'watch_folder') return Promise.resolve(undefined)
         if (cmd === 'get_last_dir') return Promise.resolve(null)
         if (cmd === 'scan_missing') {
           scanCalls++
@@ -513,10 +561,12 @@ describe('SongList — 缺失筛选面板', () => {
             resolvers[scanCalls - 1] = resolve
           })
         }
-        throw new Error(`unexpected cmd: ${cmd}`)
+        if (cmd === 'list_songs') return songStore.songs
+      throw new Error(`unexpected cmd: ${cmd}`)
       })
 
       const w = mount(SongList)
+      await flushPromises()
       await w.get('button.missing-filter-btn').trigger('click')
       await flushPromises()
       expect(w.text()).toContain('正在扫描缺失字段')
@@ -544,6 +594,7 @@ describe('SongList — 缺失筛选面板', () => {
       const resolvers: Array<(v: unknown) => void> = []
       let scanCalls = 0
       mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === 'watch_folder') return Promise.resolve(undefined)
         if (cmd === 'get_last_dir') return Promise.resolve(null)
         if (cmd === 'scan_missing') {
           scanCalls++
@@ -551,10 +602,12 @@ describe('SongList — 缺失筛选面板', () => {
             resolvers[scanCalls - 1] = resolve
           })
         }
-        throw new Error(`unexpected cmd: ${cmd}`)
+        if (cmd === 'list_songs') return songStore.songs
+      throw new Error(`unexpected cmd: ${cmd}`)
       })
 
       const w = mount(SongList)
+      await flushPromises()
       await w.get('button.missing-filter-btn').trigger('click')
       await flushPromises()
       expect(scanCalls).toBe(1)
@@ -595,16 +648,19 @@ describe('SongList — 缺失筛选面板', () => {
     it('第一次扫描失败后点「刷新」重扫成功，命中列表恢复', async () => {
       let attempts = 0
       mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'watch_folder') return Promise.resolve(undefined)
         if (cmd === 'get_last_dir') return null
         if (cmd === 'scan_missing') {
           attempts++
           if (attempts === 1) throw new Error('扫描服务暂不可用')
           return { songs: [{ path: '/music/a.flac', missing: ['lyrics'] }], errors: [] }
         }
+        if (cmd === 'list_songs') return songStore.songs
         throw new Error(`unexpected cmd: ${cmd}`)
       })
 
       const w = mount(SongList)
+      await flushPromises()
       await w.get('button.missing-filter-btn').trigger('click')
       await flushPromises()
       expect(w.text()).toContain('扫描失败：扫描服务暂不可用')
@@ -621,16 +677,19 @@ describe('SongList — 缺失筛选面板', () => {
     it('刷新后再次扫描失败 → 进入错误态，陈旧命中结果与 badge 均不残留', async () => {
       let attempts = 0
       mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'watch_folder') return Promise.resolve(undefined)
         if (cmd === 'get_last_dir') return null
         if (cmd === 'scan_missing') {
           attempts++
           if (attempts === 1) return { songs: [{ path: '/music/b.flac', missing: ['lyrics'] }], errors: [] }
           throw new Error('刷新时扫描服务不可用')
         }
+        if (cmd === 'list_songs') return songStore.songs
         throw new Error(`unexpected cmd: ${cmd}`)
       })
 
       const w = mount(SongList)
+      await flushPromises()
       await w.get('button.missing-filter-btn').trigger('click')
       await flushPromises()
       expect(w.text()).toContain('缺歌词') // 首次扫描命中 b
@@ -648,8 +707,10 @@ describe('SongList — 缺失筛选面板', () => {
     it('未开面板/未打开文件夹时不渲染刷新按钮；开启时渲染在面板头部', async () => {
       // mock 先设好（不同于其他用例的挂载后设 mock：本用例连续多次 mount，前置避免 getLastDir 返 undefined）
       mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'watch_folder') return Promise.resolve(undefined)
         if (cmd === 'get_last_dir') return null
         if (cmd === 'scan_missing') return { songs: [], errors: [] }
+        if (cmd === 'list_songs') return songStore.songs
         throw new Error(`unexpected cmd: ${cmd}`)
       })
 
@@ -670,5 +731,93 @@ describe('SongList — 缺失筛选面板', () => {
       await flushPromises()
       expect(w3.find('.missing-panel [data-testid="missing-refresh-btn"]').exists()).toBe(true)
     })
+  })
+})
+
+
+describe('SongList — 列表右键刷新与监听生命周期（#123）', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset()
+    songStore.folderPath = null
+    songStore.current = null
+    songStore.original = null
+    songStore.pendingAction = null
+    songStore.missingFilterEnabled = false
+    songStore.searchQuery = ''
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_last_dir') return null
+      if (cmd === 'pick_folder') return '/music'
+      if (cmd === 'list_songs') return [{ path: '/music/a.flac', title: 'A', artist: '' }]
+      return undefined
+    })
+  })
+
+  it('右键「刷新」实际重读列表；Esc/外部点击/Tab 关闭，键盘菜单聚焦刷新', async () => {
+    const w = mount(SongList, { attachTo: document.body })
+    await flushPromises()
+    await w.get('.open-btn').trigger('click')
+    await flushPromises()
+    const list = w.get('.list-area')
+    await list.trigger('contextmenu', { clientX: 20, clientY: 20 })
+    expect(w.get('[role="menuitem"]').text()).toBe('刷新')
+    await w.get('[role="menuitem"]').trigger('click')
+    await flushPromises()
+    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === 'list_songs')).toHaveLength(2)
+    expect(w.find('[role="menu"]').exists()).toBe(false)
+    ;(list.element as HTMLElement).focus()
+    await list.trigger('keydown', { key: 'F10', shiftKey: true })
+    expect(document.activeElement).toBe(w.get('[role="menuitem"]').element)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(w.find('[role="menu"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(list.element)
+    await list.trigger('keydown', { key: 'ContextMenu' })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+    await flushPromises()
+    expect(w.find('[role="menu"]').exists()).toBe(false)
+    await list.trigger('contextmenu')
+    window.dispatchEvent(new Event('pointerdown'))
+    await flushPromises()
+    expect(w.find('[role="menu"]').exists()).toBe(false)
+    w.unmount()
+    await flushPromises()
+    expect(mockInvoke).toHaveBeenLastCalledWith('watch_folder', { dir: null, watchId: expect.any(Number) })
+  })
+
+  it('未打开目录时菜单刷新禁用，读取失败提供中文非阻断重试', async () => {
+    const w = mount(SongList)
+    await flushPromises()
+    await w.get('.list-area').trigger('contextmenu')
+    expect(w.get('[role="menuitem"]').attributes('disabled')).toBeDefined()
+    await w.get('.open-btn').trigger('click')
+    await flushPromises()
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'list_songs') throw new Error('磁盘暂不可读')
+      return undefined
+    })
+    await w.get('.list-area').trigger('contextmenu')
+    await w.get('[role="menuitem"]').trigger('click')
+    await flushPromises()
+    expect(w.get('[role="status"]').text()).toContain('目录刷新失败：磁盘暂不可读')
+    expect(w.get('[role="status"]').text()).toContain('重试刷新')
+    expect(w.findAll('.song-row')).toHaveLength(1)
+  })
+
+  it('getLastDir 迟到时不覆盖用户已经激活的目录', async () => {
+    let restore!: (dir: string) => void
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_last_dir') return new Promise((resolve) => { restore = resolve })
+      if (cmd === 'pick_folder') return Promise.resolve('/manual')
+      if (cmd === 'list_songs') return Promise.resolve([{ path: '/manual/a.flac', title: 'M', artist: '' }])
+      return Promise.resolve(undefined)
+    })
+    const w = mount(SongList)
+    await flushPromises()
+    await w.get('.open-btn').trigger('click')
+    await flushPromises()
+    restore('/remembered')
+    await flushPromises()
+    expect(songStore.folderPath).toBe('/manual')
+    expect(mockInvoke).not.toHaveBeenCalledWith('list_songs', { dir: '/remembered' })
   })
 })

@@ -38,8 +38,7 @@ export const filteredSongs = computed<SongSummary[]>(() => {
   const q = songStore.searchQuery.trim().toLowerCase()
   const source =
     songStore.missingFilterEnabled &&
-    songStore.missingScanState !== 'scanning' &&
-    songStore.missingScanState !== 'error'
+    songStore.missingScanState === 'done'
       ? songStore.songs.filter((song) => songStore.missingByPath[song.path] !== undefined)
       : songStore.songs
   const sorted = [...source].sort((a, b) =>

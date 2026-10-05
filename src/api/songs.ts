@@ -4,8 +4,8 @@
 // commands/cover.rs、model.rs）：pick_folder / list_songs / open_song / save_song /
 // pick_cover_save_path / export_cover。实现 = `invokeCommand` 透传，
 // 组件与 store 一律经此层发 IPC（store 动作的 loader 注入 api/songs.ts 封装）。
-import { invokeCommand } from './client'
-import type { CoverInput, MissingField, MissingScanResult, Song, SongSummary } from './types'
+import { invokeCommand, listenEvent } from './client'
+import type { CoverInput, FolderChanged, MissingField, MissingScanResult, Song, SongSummary } from './types'
 
 /** 打开原生文件夹选择器。取消返回 null，否则返回目录绝对路径。 */
 export function pickFolder(): Promise<string | null> {
@@ -70,4 +70,14 @@ export function pickCoverSavePath(songPath: string): Promise<string | null> {
  *  失败 → reject「导出封面失败: …」；只读源文件，不碰标签。 */
 export function exportCover(songPath: string, destPath: string): Promise<void> {
   return invokeCommand<void>('export_cover', { songPath, destPath })
+}
+
+/** 替换递归监听目标；null 停止，较旧 watchId 由后端忽略。 */
+export function watchFolder(dir: string | null, watchId: number): Promise<void> {
+  return invokeCommand<void>('watch_folder', { dir, watchId })
+}
+
+/** 仅通知目录失效，不根据增量修改列表。 */
+export function listenFolderChanged(handler: (event: FolderChanged) => void) {
+  return listenEvent<FolderChanged>('folder-changed', (event) => handler(event.payload))
 }

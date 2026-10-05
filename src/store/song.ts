@@ -5,6 +5,8 @@
 // 纯工具（fileName/fileNameStem）在 lib/path.ts，纯展示派生（titleText/artistText/filteredSongs）
 // 在 store/selectors.ts，IPC 类型化封装在 api/songs.ts。
 import { reactive } from 'vue'
+import type { UnlistenFn } from '../api/client'
+import { listSongs as defaultListSongs, listenFolderChanged as defaultListenFolderChanged, watchFolder as defaultWatchFolder } from '../api/songs'
 
 import { downloadCover as defaultDownloadCover } from '../api/search'
 import { fetchLyric as defaultFetchLyric } from '../api/search'
@@ -16,6 +18,7 @@ import { saveSong as defaultSave } from '../api/songs'
 import { scanMissing as defaultScanMissing } from '../api/songs'
 import type {
   CoverInput,
+  FolderChanged,
   LyricsSource,
   MissingField,
   MissingScanError,
@@ -79,6 +82,10 @@ interface SongEditor {
   folderPath: string | null
   /** 当前文件夹全部歌曲列表（invoke('list_songs') 结果）。 */
   songs: SongSummary[]
+  folderEpoch: number
+  folderRefreshError: string
+  folderWatchError: string
+  folderRefreshing: boolean
   /** 搜索框关键词（空 = 不过滤）。 */
   searchQuery: string
   /** 是否启用查漏筛选；扫描中/命令失败时 selector 暂时保留完整列表。 */
@@ -181,7 +188,14 @@ export async function activateFolder(
   loadSongs: (dir: string) => Promise<SongSummary[]>,
 ): Promise<void> {
   if (dir === null || dir === '') return // 取消/空，无视
+  cancelFolderTimers()
+  const epoch = ++raw.folderEpoch
+  const context: FolderRead = { dir, epoch, loadSongs, seq: 0, pending: false, persist: true, running: null, error: null }
+  folderRead = context
   raw.folderPath = dir
+  raw.folderRefreshError = ''
+  raw.folderWatchError = ''
+  raw.folderRefreshing = false
   resetMissingFilterState()
   raw.selectedPath = null
   raw.current = null
@@ -194,16 +208,12 @@ export async function activateFolder(
   raw.pendingRename = null // design.md D8：换目录弃置改名草稿
   raw.renameRejected = false
   resetSearchState() // D5：换目录候选生命周期 = 当前歌曲，作废在途搜索（isOffline 会话级不清）
-  const songs = await loadSongs(dir)
-  // 竞态守卫（tester 审计）：await 期间用户可能已切到新目录（folderPath 已变）——
-  // 慢的旧目录响应后到不得覆盖新目录的 songs / last_dir（换目录即持久化以最新成功切换为准）。
-  // 守卫在写 songs 之前：本次结果若已 stale（folderPath ≠ dir），整段作废，不覆盖列表、不持久化。
-  if (raw.folderPath !== dir) return
-  raw.songs = songs
-  // dir-memory：持久化点唯一收敛于此——手动路径（requestFolder → dirty 拦截 → resolvePending 后）
-  // 与启动路径（initLastDir → activateFolder）都汇到这里，保证「成功切换才持久化」且不重复。
-  // fire-and-forget：不阻塞列表加载（rememberLastDir 内部吞失败，不 panic）。
-  void rememberLastDir(dir)
+  const watchId = ++folderWatchId
+  if (folderLifecycleActive) await establishFolderWatch(context, watchId)
+  if (!isCurrentFolder(context)) return
+  await requestFolderRead(context)
+  if (isCurrentFolder(context) && context.error !== null) throw context.error
+
 }
 
 /**
@@ -321,9 +331,221 @@ export function cancelPending(): void {
   raw.pendingAction = null
 }
 
+interface FolderRead {
+  dir: string
+  epoch: number
+  loadSongs: (dir: string) => Promise<SongSummary[]>
+  seq: number
+  pending: boolean
+  persist: boolean
+  running: Promise<void> | null
+  error: unknown
+}
+
+interface FolderWatchDependencies {
+  listen: (handler: (event: FolderChanged) => void) => Promise<UnlistenFn>
+  watch: (dir: string | null, watchId: number) => Promise<void>
+}
+
+let folderRead: FolderRead | null = null
+let folderWatchId = 0
+let folderWatchErrorVersion = 0
+let folderLifecycleActive = false
+let folderLifecycleSeq = 0
+let folderUnlisten: UnlistenFn | null = null
+let folderSubscription: Promise<void> | null = null
+let folderWatchDependencies: FolderWatchDependencies = { listen: defaultListenFolderChanged, watch: defaultWatchFolder }
+let folderDebounce: ReturnType<typeof setTimeout> | null = null
+let folderMaxWait: ReturnType<typeof setTimeout> | null = null
+
+function isCurrentFolder(context: FolderRead): boolean {
+  return folderRead === context && raw.folderEpoch === context.epoch && raw.folderPath === context.dir
+}
+
+function cancelFolderTimers(): void {
+  if (folderDebounce !== null) clearTimeout(folderDebounce)
+  if (folderMaxWait !== null) clearTimeout(folderMaxWait)
+  folderDebounce = null
+  folderMaxWait = null
+}
+
+function releaseFolderListener(unlisten: UnlistenFn): void {
+  // 同步抛错与返回 rejected Promise 的宿主/mock 都在此边界吞掉。
+  void Promise.resolve().then(() => unlisten()).catch(() => {})
+}
+
+async function ensureFolderSubscription(): Promise<void> {
+  if (!folderLifecycleActive || folderUnlisten !== null) return
+  if (folderSubscription !== null) return folderSubscription
+  const lifecycle = folderLifecycleSeq
+  const subscription = (async () => {
+    try {
+      const unlisten = await folderWatchDependencies.listen((event) => {
+        const context = folderRead
+        if (!folderLifecycleActive || lifecycle !== folderLifecycleSeq || !context || !isCurrentFolder(context)) return
+        if (event.dir !== context.dir || event.watchId !== folderWatchId) return
+        if (event.error) {
+          folderWatchErrorVersion++
+          raw.folderWatchError = `目录监听失败：${event.error}；可点击刷新重试`
+        }
+        scheduleFolderRefresh(context)
+      })
+      if (!folderLifecycleActive || lifecycle !== folderLifecycleSeq) releaseFolderListener(unlisten)
+      else folderUnlisten = unlisten
+    } catch (error) {
+      if (folderLifecycleActive && lifecycle === folderLifecycleSeq) {
+        raw.folderWatchError = `目录监听失败：${missingScanErrorMessage(error)}；可点击刷新重试`
+      }
+    }
+  })()
+  folderSubscription = subscription
+  await subscription
+  if (folderSubscription === subscription) folderSubscription = null
+}
+
+async function establishFolderWatch(context: FolderRead, watchId: number): Promise<void> {
+  await ensureFolderSubscription()
+  if (!folderLifecycleActive || !isCurrentFolder(context) || folderWatchId !== watchId) return
+  const errorVersion = folderWatchErrorVersion
+  try {
+    await folderWatchDependencies.watch(context.dir, watchId)
+    if (isCurrentFolder(context) && folderWatchId === watchId && folderUnlisten !== null && folderWatchErrorVersion === errorVersion) raw.folderWatchError = ''
+  } catch (error) {
+    if (isCurrentFolder(context) && folderWatchId === watchId) {
+      raw.folderWatchError = `目录监听失败：${missingScanErrorMessage(error)}；可点击刷新重试`
+    }
+  }
+}
+
+/** SongList 挂载时先建立事件订阅，再恢复目录或读已有目录。 */
+export async function startFolderWatching(dependencies?: FolderWatchDependencies): Promise<void> {
+  if (folderLifecycleActive) return ensureFolderSubscription()
+  folderLifecycleActive = true
+  folderLifecycleSeq++
+  folderWatchDependencies = dependencies ?? { listen: defaultListenFolderChanged, watch: defaultWatchFolder }
+  const lifecycle = folderLifecycleSeq
+  await ensureFolderSubscription()
+  if (!folderLifecycleActive || lifecycle !== folderLifecycleSeq) return
+  if (raw.folderPath !== null) {
+    const context = currentFolderRead()
+    if (!context) return
+    await establishFolderWatch(context, ++folderWatchId)
+    if (folderLifecycleActive && lifecycle === folderLifecycleSeq && isCurrentFolder(context)) await requestFolderRead(context)
+  }
+}
+
+/** 卸载立即作废所有在途读取、事件与订阅，并用更大 generation 停止后端。 */
+export function stopFolderWatching(): void {
+  folderLifecycleActive = false
+  folderLifecycleSeq++
+  folderSubscription = null
+  cancelFolderTimers()
+  raw.folderEpoch++
+  raw.missingScanSeq++
+  raw.folderRefreshing = false
+  folderRead = null
+  if (folderUnlisten !== null) releaseFolderListener(folderUnlisten)
+  folderUnlisten = null
+  const watchId = ++folderWatchId
+  const watch = folderWatchDependencies.watch
+  void Promise.resolve().then(() => watch(null, watchId)).catch(() => {})
+}
+
+function currentFolderRead(): FolderRead | null {
+  const dir = raw.folderPath
+  if (dir === null) return null
+  if (!folderRead || !isCurrentFolder(folderRead)) {
+    cancelFolderTimers()
+    folderRead = { dir, epoch: raw.folderEpoch, loadSongs: defaultListSongs, seq: 0, pending: false, persist: false, running: null, error: null }
+  }
+  return folderRead
+}
+
+function invalidateFolderRead(context: FolderRead): void {
+  context.seq++
+  raw.missingScanSeq++
+  if (raw.missingFilterEnabled) clearMissingResults()
+}
+
+function scheduleFolderRefresh(context: FolderRead): void {
+  invalidateFolderRead(context)
+  if (context.running !== null) {
+    context.pending = true
+    return
+  }
+  if (folderDebounce !== null) clearTimeout(folderDebounce)
+  const refresh = () => {
+    cancelFolderTimers()
+    if (isCurrentFolder(context)) void requestFolderRead(context)
+  }
+  folderDebounce = setTimeout(refresh, 250)
+  if (folderMaxWait === null) folderMaxWait = setTimeout(refresh, 1000)
+}
+
+/** 每个目录 epoch 只有一个扫描在途；更新期间旧结果作废，结束后至多补读一次。 */
+function requestFolderRead(context: FolderRead): Promise<void> {
+  if (!isCurrentFolder(context)) return Promise.resolve()
+  cancelFolderTimers()
+  invalidateFolderRead(context)
+  context.pending = true
+  if (context.running !== null) return context.running
+  const drain = async () => {
+    raw.folderRefreshing = true
+    while (isCurrentFolder(context) && context.pending) {
+      context.pending = false
+      const seq = context.seq
+      try {
+        const songs = await context.loadSongs(context.dir)
+        if (!isCurrentFolder(context) || context.seq !== seq) continue
+        raw.songs = songs
+        context.error = null
+        raw.folderRefreshError = ''
+        if (context.persist) {
+          context.persist = false
+          void rememberLastDir(context.dir)
+        }
+        if (raw.missingFilterEnabled) void scanMissing()
+      } catch (error) {
+        if (!isCurrentFolder(context) || context.seq !== seq) continue
+        context.error = error
+        raw.folderRefreshError = `目录刷新失败：${missingScanErrorMessage(error)}`
+      }
+    }
+    if (isCurrentFolder(context)) raw.folderRefreshing = false
+  }
+  context.running = drain().finally(() => { context.running = null })
+  return context.running
+}
+
+/** 手动刷新即时重读，并重试事件订阅/目录监听；读取失败保留列表及编辑态。 */
+export async function refreshFolder(): Promise<void> {
+  const context = currentFolderRead()
+  if (!context) return
+  // 先建立/重试监听，消除扫描完成至 watcher 就绪的漏报窗口；手动不经过 debounce。
+  if (folderLifecycleActive) await establishFolderWatch(context, ++folderWatchId)
+  if (isCurrentFolder(context)) await requestFolderRead(context)
+}
+
+/** 启动加载失败只可清理仍处于该 epoch 的目录。 */
+export function resetFailedStartupFolder(epoch: number): void {
+  if (raw.folderEpoch !== epoch) return
+  cancelFolderTimers()
+  folderRead = null
+  raw.folderPath = null
+  raw.songs = []
+  raw.folderEpoch++
+  raw.folderRefreshing = false
+  const watchId = ++folderWatchId
+  if (folderLifecycleActive) void Promise.resolve().then(() => folderWatchDependencies.watch(null, watchId)).catch(() => {})
+}
+
 const raw = reactive<SongEditor>({
   folderPath: null,
   songs: [],
+  folderEpoch: 0,
+  folderRefreshError: '',
+  folderWatchError: '',
+  folderRefreshing: false,
   searchQuery: '',
   missingFilterEnabled: false,
   missingChecks: [...MISSING_FIELDS],

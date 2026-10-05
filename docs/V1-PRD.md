@@ -55,7 +55,7 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 / APE / WAV / M4A
                     └──▶ 弹窗：保存 / 不保存 / 取消
 ```
 
-- 一次只编辑一首；保存后不跳转、不刷新列表焦点。
+- 一次只编辑一首；保存后不跳转、不刷新列表焦点。文件系统列表刷新只更新目录列表，不清空当前选择或编辑状态。
 - 切歌时若有未保存修改，弹窗三选一；无修改则直接切换。
 - 选中歌曲**那一刻**，**仅对缺失的歌词 / 封面**自动联网搜索候选；已有内容、或删除内容后，均不再自动触发。**无搜索结果 / 离线**时直接手动填写；歌词区/封面区另有**手动搜索按钮**可随时主动搜（候选与手动两条路径始终共存）。
 
@@ -73,6 +73,7 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 / APE / WAV / M4A
 | 5 | 重新打开文件夹时整体替换列表 |
 | 5a | **换目录有未保存修改**：若 `dirty`，弹窗三选一（保存/丢弃/取消，同切歌弹窗）；**取消则不换目录**；保存写当前编辑歌的原路径 |
 | 5b | **记住上次目录**：打开过的目录持久化到本地 config（`config.json`）；启动时自动加载上次目录并打开（无记忆则保持空态）；文件夹选择器默认定位上次目录 |
+| 5c | **目录变动自动刷新**：持续监听当前目录及其所有子目录；音频文件新增、删除或改名后自动重读列表。切换目录后跟随新目录，旧目录事件不得影响当前列表 |
 
 ### FR-2 歌曲列表（左栏）
 | # | 需求 |
@@ -84,6 +85,8 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 / APE / WAV / M4A
 | 4 | 排序：默认按文件名升序（V1 不做排序切换） |
 | 5 | 空文件夹 / 无匹配时显示空状态提示 |
 | 6 | 点击行选中；选中行高亮 |
+| 7 | 列表区域右键提供「刷新」；手动刷新立即重读当前目录，不触发文件写入或联网搜索，并保留当前选择、编辑表单、dirty 状态、候选与筛选条件 |
+| 8 | 自动刷新合并短时间内的重复文件系统事件；刷新只更新列表，启用查漏筛选时按当前维度重新扫描。缺失扫描未完成或失败时暂时显示完整列表；列表读取失败保留上次列表和编辑状态，并显示可重试提示 |
 
 ### FR-3 编辑表单（右栏，一次一首）
 | # | 需求 |
@@ -327,6 +330,7 @@ enum SearchError {
 | 标签读写 | **`lofty`** | 统一处理 FLAC/MP3/APE/WAV/M4A，内建格式校验，写回风险低；MP3/WAV 写 **ID3v2.4**（lofty 默认，不转 v2.3）；APE 写 APE 标签，M4A 写 iTunes ilst；`ItemKey::UnsyncLyrics`+`TagItem::set_lang(lofty::tag::items::ENGLISH)` 写 ID3v2 USLT，其余格式按各自映射写歌词；`.lrc` 侧载与文件改名由应用层处理 |
 | 图片处理 | `image` | 封面读取 / 压缩至 2048 |
 | 文件遍历 | `walkdir` | 深度遍历收集音频文件 |
+| 文件变动监听 | `notify` | 递归监听当前目录；平台原生监听注册失败时回退轮询 |
 | 对话框 | `rfd` | 原生文件夹选择器 |
 | 文件改名 | `std::fs` | 音频 + 关联 `.lrc` 一并 rename |
 | 主题记忆 | localStorage 或 `tauri-plugin-store` | 持久化手动主题选择 |
@@ -346,7 +350,7 @@ enum SearchError {
 > - **惰性拉取**：候选列表秒出——封面 URL 随搜索结果带出，点选封面才 `download_cover`（单独 5s 超时 + 响应限流）；歌词文本点选候选行才 `fetch_lyric`。
 > - **打分**：`title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3`；归一化 = trim + 全角半角 + 小写折叠（V1 不做简繁转换）；按归一化 `(source, title, artist)` 去重——**同源内**同曲保留该源最高分一条、**跨源不折叠**（各源候选各自保留）；排序按来源分组（Netease→QqMusic→Kugou→Lrclib→Itunes）、组内分降序，每源 TOP 3（最多 15 条）。
 > - **Tauri command 全量**（前端一律 `invoke` 调用；TS 类型与 `design/design.md` §10.3 对齐）：
->   - 文件：`pick_folder() -> Option<String>`（rfd 文件夹选择器）、`list_songs(dir) -> Vec<SongSummary>`、`open_song(path) -> Result<Song, String>`、`save_song(song, exportLrc) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`、`get_last_dir() -> Option<String>`（读上次打开目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 记住本次目录，失败静默）
+>   - 文件：`pick_folder() -> Option<String>`（rfd 文件夹选择器）、`list_songs(dir) -> Vec<SongSummary>`、`watch_folder(dir, watch_id) -> Result<(), String>`（替换/停止当前递归监听并通过 `folder-changed` 事件通知列表失效）、`open_song(path) -> Result<Song, String>`、`save_song(song, exportLrc) -> Result<(), String>`、`rename_song(path, new_name) -> Result<(), String>`、`get_last_dir() -> Option<String>`（读上次打开目录，启动自动加载）、`save_last_dir(dir) -> ()`（fire-and-forget 记住本次目录，失败静默）
 >   - 封面：`pick_cover_file() -> Option<CoverInput>`（rfd 文件对话框，jpg/png/webp）、`read_cover_path(path) -> Result<CoverInput, String>`（拖拽路径读 bytes）；两者返回 `CoverInput`（`data_url` 压缩小图 + `mime`），封面跨 IPC 用 base64 data URL
 >   - 封面导出（只读）：`pick_cover_save_path(song_path) -> Result<Option<String>, String>`（rfd 存盘框取导出目标路径，默认文件名 = 音频文件名去扩展名 + 按图片 mime 推断的扩展名；取消 → `Ok(None)`，不写任何文件）、`export_cover(song_path, dest_path) -> Result<(), String>`（把标签内第一个 front cover 的原始字节写到目标路径，无 UI）；前端跨 IPC 只传源路径与目标路径，不传图片字节
 >   - 搜索：`search_song(title, artist, album) -> SearchResult`、`search_source(source, title, artist, album) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过跨源聚合——逐源拿该源全部原始候选，不受每源 TOP 3 截断）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）
@@ -373,6 +377,7 @@ enum SearchError {
 11. 无结果 / 断网 → 明确空态 + 仍可手动填写
 12. 搜索结果点选的歌词/封面随「保存」写回正确；**封面下载失败 / 图片损坏 / 压缩失败 → 静默忽略该张候选**（不报错、不标红，网格中其他候选不受影响）
 13. **按需读取**：打开约 300–500 首的文件夹，**列表（歌名/作者）秒级显示**；选中一首后详情 + 封面**即时**加载进编辑区（`open_song`）
+14. **目录自动刷新**：当前目录及后代新增、删除或改名音频后，列表自动反映变化；切换目录后只跟随新目录。右键「刷新」立即重读当前目录。自动/手动刷新保留选择、dirty 表单、候选和筛选条件，不触发联网搜索或写文件；查漏筛选启用时按当前维度复扫。
 
 ---
 
