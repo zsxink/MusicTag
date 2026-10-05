@@ -18,5 +18,9 @@ The application MUST automatically refresh the visible audio file list when audi
 - **THEN** automatic refresh follows the newly opened folder and no longer refreshes from the previous folder
 
 #### Scenario: Manual refresh
-- **WHEN** the user invokes the existing manual refresh action
+- **WHEN** the user invokes the list area's right-click “刷新” action
 - **THEN** the application rereads the current folder and updates the visible list
+
+#### Scenario: Refresh preserves the current edit
+- **WHEN** the list is refreshed while a song is selected or has unsaved edits
+- **THEN** the application updates the list without clearing the selection or editor state

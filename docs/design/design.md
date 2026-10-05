@@ -226,14 +226,14 @@ lofty 0.24 的 primary tag 选择决定主要写入位置：APE 使用 `TagType:
 ### 10.0 目录分层规范（Rust + 前端）
 
 **核心不变量**：生产代码按「薄 command 壳 → 纯业务 service → 数据模型」与「api → store → lib → components」两类分层；
-IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/client.ts`；新增子变更一律落位到下表目录。
+IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/client.ts`（包括 `invoke` 与 Tauri event listen/unlisten）；新增子变更一律落位到下表目录。
 
 **Rust 侧（`src-tauri/src/`）**：
 
 | 目录/文件 | 职责 | 允许触碰的依赖 |
 |---|---|---|
 | `commands/` | Tauri command 薄壳：`#[tauri::command]`、参数接收、对 service 委托；lofty/IO/编解码逻辑**一律不出现** | `model`、`service` |
-| `service/` | 纯业务层：`reader.rs`（标签读）、`writer.rs`（保存编排）、`meta.rs`（字段映射/格式分支）、`cover.rs`（封面 data URL 编解码）、`fs_atomic.rs`（原子写回） | `model`、lofty、`image` |
+| `service/` | 纯业务层：`reader.rs`（标签读）、`writer.rs`（保存编排）、`meta.rs`（字段映射/格式分支）、`cover.rs`（封面 data URL 编解码）、`fs_atomic.rs`（原子写回）、`folder_watch.rs`（文件夹递归监听） | `model`、lofty、`image`、`notify` |
 | `model.rs` | 数据类型：`Song` / `SongSummary` / `LyricsSource` / `MusicSourceId`（与前端 TS 类型对齐） | 无业务依赖 |
 | `lib.rs` | `pub mod model/commands/service` + `generate_handler![...]` 注册 command；模块声明必须 `pub`，供 `src-tauri/tests/` 集成测试经 `app_lib::` 访问 | — |
 
@@ -241,13 +241,13 @@ IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/c
 
 | 目录 | 职责 | 允许触碰的依赖 | 禁止 |
 |---|---|---|---|
-| `api/` | Tauri IPC 类型化封装：`client.ts`（`invokeCommand` 泛型透传，**唯一 `import { invoke } from '@tauri-apps/api/core'` 处**）、`types.ts`（TS 类型）、`songs.ts`（逐 command 封装） | `@tauri-apps/api/core` | 组件直接调 invoke |
+| `api/` | Tauri IPC 类型化封装：`client.ts`（`invokeCommand` 泛型透传及 event listen/unlisten，唯一 Tauri API import 入口）、`types.ts`（TS 类型）、`songs.ts`（逐 command/event 封装） | `@tauri-apps/api/core`、`@tauri-apps/api/event` | 组件直接调 invoke/listen |
 | `store/` | 单 store（非 Pinia）：`song.ts`（reactive 状态 + 动作 + dirty getter）、`selectors.ts`（纯展示派生） | `api/`、`lib/` | 组件直接改 store 对象 |
 | `lib/` | 纯工具：`path.ts`（文件名/去扩展名）；无 Vue / IPC 依赖 | 无 | Vue / Tauri 依赖 |
 | `components/` | `.vue` 组件树（见 §10.1）；**零 invoke 直呼**，IPC 一律经 `api/songs.ts` 注入 | `store/`、`api/` | `@tauri-apps/api/core` |
 
 > 前端依赖方向单向：`components → store → api → client`、`store → lib`，不得反向或成环。
-> `api/client.ts` 的 `import { invoke } from '@tauri-apps/api/core'` 是硬依赖——`vi.mock('@tauri-apps/api/core')`
+> `api/client.ts` 对 `@tauri-apps/api/core` 与 `@tauri-apps/api/event` 的 imports 是硬依赖——对应的 `vi.mock(...)`
 > 依赖该 import 源，改源（直接裸 invoke / 改名）会静默失效 mock、测试跑真实 invoke 即崩溃。
 
 ### 10.1 组件树
@@ -255,7 +255,7 @@ IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/c
 ```
 App.vue
 ├── AppBar.vue          # 品牌 + 路径 + 主题按钮（最右）
-├── SongList.vue        # 左栏：打开文件夹 + 搜索框 + 歌曲列表
+├── SongList.vue        # 左栏：打开文件夹 + 搜索框 + 右键刷新 + 歌曲列表
 │   └── SongRow.vue     # 单行（作者 + 歌名），选中高亮
 ├── Editor.vue          # 右栏编辑表单
 │   ├── EditorBar.vue   # 正在编辑 + 保存状态 + 撤销/保存
@@ -289,7 +289,8 @@ V1 规模用 Vue 组合式 API 的 `reactive` + `computed` 即可，不需要引
 
 **store 职责拆分（§10.0 前端分层）**：
 
-- `store/song.ts` **只留** reactive 状态 + 动作（`selectSong` / `activateFolder` / `open` / `save` / `undo`）+ `dirty` getter；
+- `store/song.ts` **只留** reactive 状态 + 动作（`selectSong` / `activateFolder` / `refreshFolder` / `open` / `save` / `undo`）+ `dirty` getter；目录监听随当前激活目录切换，异步刷新以目录 epoch/请求序号作废过期结果。
+  `refreshFolder` 只更新列表和刷新错误态；必须保留 selection、current/original/dirty、候选、搜索和筛选条件，查漏筛选启用时按原维度复扫。
   动作的 IPC 依赖（`loadSong` / `loadSongs` / `saveFn`）一律注入（默认 loader 为 `api/songs.ts` 封装），测试可注入桩不依赖 Tauri。
 - `dirty` getter 是 **reactive 字面量内的 getter（Vue 3.5 转 live computed）**，**必须原位保留在 `reactive({...})` 内**——
   挪出即失去响应式追踪，dirty 不再随编辑更新。
@@ -375,6 +376,9 @@ interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; 
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |
 | `download_cover(url)` | `String → Result<Vec<u8>, String>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`；失败 → `Err` 前端静默忽略该张） |
 | `scan_missing(dir, checks)` | `String, MissingField[] → Result<MissingScanResult, String>` | 按需只读扫描所选缺失维度；返回命中歌曲及单文件错误，不读取封面 base64/歌词全文，不写盘 |
+| `watch_folder(dir, watch_id)` | `Option<String>, u64 → Result<(), String>` | 替换当前递归监听目标；`dir=None` 停止监听；较旧 `watch_id` 不生效 |
+
+文件系统失效事件 `folder-changed` 的 payload 为 `{ dir: string, watchId: number, error: string | null }`，只通知前端重读列表；目录读取仍通过 `list_songs`。前端监听通过统一 `api/client.ts` 的 Tauri event `listen`/`unlisten` 封装。Tauri event API 使用其默认 event 权限，不新增 capability。
 
 **封面传递**：`Song.cover` 用 **base64 data URL**（`data:image/jpeg;base64,...`），`<img :src="song.cover">` 直接用；一次只编辑一首、图不大，不必配置 asset 协议。写盘时 `save_song` 收到 base64，Rust 侧解码回 `Vec<u8>` 再写原文件（磁盘落盘形式仍是原始字节，见 PRD §5.3）。
 
@@ -387,6 +391,7 @@ interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; 
 - **Rust 集成测试（文件 I/O）**：外置到 `src-tauri/tests/`（当前 `list_songs.rs` / `open_song.rs` / `save_song.rs`），经 `app_lib::` 访问生产代码，**不落 src/ 内**；共享 fixture（构造最小合法 FLAC/MP3、全字段标签、封面 data URL、`mock_http_once`）收 `tests/common/mod.rs`，各测试 crate 按需引用子集。
 - **Rust 单测（纯逻辑）**：**一律外置** `src-tauri/tests/`（与集成测试同目录，`*_tests.rs`），`src/` 生产代码**零 `#[cfg(test)]`**；共用测试工具收 `tests/common/`；被测试直接引用的私有项提 `pub`（集成测试是独立 crate，仅 `pub` 可见），测试专用 helper（fake 源、`png_of_size` 等）复制进测试文件。
 - **前端测试**：co-located `*.test.ts` 与被测文件同目录（`src/api/*.test.ts`、`src/store/*.test.ts`、`src/lib/*.test.ts`、`src/components/*.test.ts`）；`@tauri-apps/api/core` 的 mock 只依赖 `api/client.ts` 的 import 源。
+- **目录监听**：`service/folder_watch.rs` 独立于 Tauri command；监听回调只发 `folder-changed` 失效通知，前端合并事件后通过 `list_songs` 重读。`SongList` 生命周期负责订阅与释放，store 的列表刷新不得清空编辑态。
 - **结构守卫测试**：`src/styles/design-layering.test.ts`（扫描本文件 §10 断言分层/测试放置/落位说明齐全）+ `src/styles/command-contract.test.ts`（扫描 `lib.rs` `generate_handler!` 实际注册集 vs 本文件 §10.3 / `V1-PRD.md §7` / `openspec/config.yaml` 契约清单，断言四源一致——新增 command 时须同步四处契约表，否则守卫失败）+ `src/components/layering.test.ts`（扫描 components/ 断言零 invoke 直呼）——分层规范改代码时须同步本文件，否则守卫失败。
 
 **子变更落位记录（service/api 落位，v1-cover-embed → v1-search-ui 均已实现并归档；本表为历史落位记录，供后续 Architect 参照分层惯例）**：
