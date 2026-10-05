@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 
 // mock ../api/search → store/song.ts 的默认注入（autoSearchOnSelect 等默认 searchSongs/
@@ -2012,5 +2012,210 @@ describe('songStore — dir-memory 记住上次目录（design.md dir-memory：i
     expect(songStore.folderPath).toBe('/b') // 当前仍是新目录
     expect(songStore.songs).toEqual([{ path: '/b/x.flac', title: 'B', artist: 'BB' }]) // 不被旧目录列表污染
     expect(mockInvoke).toHaveBeenLastCalledWith('save_last_dir', { dir: '/b' }) // 旧目录不得覆盖 last_dir
+  })
+})
+
+
+import { refreshFolder, startFolderWatching, stopFolderWatching } from './song'
+import type { FolderChanged } from '../api/types'
+
+describe('目录监听与独立列表刷新（#123）', () => {
+  let emit: (event: FolderChanged) => void
+  let watch: ReturnType<typeof vi.fn>
+  let unlisten: ReturnType<typeof vi.fn>
+  const deferredList = () => {
+    let resolve!: (value: SongSummary[]) => void
+    const promise = new Promise<SongSummary[]>((res) => { resolve = res })
+    return { promise, resolve }
+  }
+  const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }
+  const event = (error: string | null = null) => emit({ dir: songStore.folderPath!, watchId: watch.mock.calls.slice(-1)[0]![1], error })
+
+  beforeEach(async () => {
+    stopFolderWatching()
+    await settle()
+    vi.useFakeTimers()
+    songStore.folderPath = null
+    songStore.current = null
+    songStore.original = null
+    songStore.pendingAction = null
+    songStore.missingFilterEnabled = false
+    watch = vi.fn(async () => {})
+    unlisten = vi.fn()
+    await startFolderWatching({ listen: async (handler) => { emit = handler; return unlisten }, watch })
+  })
+  afterEach(async () => {
+    stopFolderWatching()
+    await settle()
+    vi.useRealTimers()
+  })
+
+  it('250 ms 尾沿合并，并保留被删除歌曲的 dirty 草稿/候选/搜索/改名/保存状态', async () => {
+    const loader = vi.fn().mockResolvedValueOnce([s('/a/old.flac')]).mockResolvedValue([s('/a/new.flac')])
+    await activateFolder('/a', loader)
+    songStore.selectedPath = '/a/old.flac'
+    await open('/a/old.flac', async () => makeSong({ path: '/a/old.flac' }))
+    songStore.current!.title = '草稿'
+    songStore.searchQuery = '过滤词'
+    songStore.pendingRename = 'new.flac'
+    songStore.saveState = 'save_failed'
+    songStore.saveError = '原保存错误'
+    songStore.lyricCandidates = [{ source: 'netease', id: '1', title: '候选', artist: '', album: '', cover_url: null }]
+    const original = songStore.original
+    const current = songStore.current
+    event()
+    await vi.advanceTimersByTimeAsync(200)
+    event()
+    await vi.advanceTimersByTimeAsync(249)
+    expect(loader).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(songStore.songs).toEqual([s('/a/new.flac')])
+    expect(songStore.current).toBe(current)
+    expect(songStore.original).toBe(original)
+    expect(songStore.dirty).toBe(true)
+    expect(songStore.selectedPath).toBe('/a/old.flac')
+    expect(songStore.searchQuery).toBe('过滤词')
+    expect(songStore.pendingRename).toBe('new.flac')
+    expect(songStore.saveState).toBe('save_failed')
+    expect(songStore.saveError).toBe('原保存错误')
+    expect(songStore.lyricCandidates).toHaveLength(1)
+  })
+
+  it('持续事件最长 1 秒开始读取', async () => {
+    const loader = vi.fn(async () => [])
+    await activateFolder('/a', loader)
+    event()
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(200)
+      event()
+    }
+    expect(loader).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(loader).toHaveBeenCalledTimes(2)
+  })
+
+  it('初读在途收到多次事件，旧结果不落地，最多一个串行补读', async () => {
+    const first = deferredList()
+    const second = deferredList()
+    const loader = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    songStore.songs = [s('/previous')]
+    const opening = activateFolder('/a', loader)
+    await settle()
+    event(); event(); event()
+    expect(loader).toHaveBeenCalledTimes(1)
+    first.resolve([s('/a/stale')])
+    await settle()
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(songStore.songs).toEqual([s('/previous')])
+    second.resolve([s('/a/latest')])
+    await opening
+    expect(songStore.songs).toEqual([s('/a/latest')])
+  })
+
+  it('A → B → A 的旧列表/事件不覆盖新 A；dirty 取消不切监听', async () => {
+    const old = deferredList()
+    const first = activateFolder('/a', async () => old.promise)
+    await settle()
+    const oldWatchId = watch.mock.calls.slice(-1)[0]![1]
+    await activateFolder('/b', async () => [s('/b/song')])
+    await activateFolder('/a', async () => [s('/a/new')])
+    old.resolve([s('/a/old')])
+    await first
+    emit({ dir: '/a', watchId: oldWatchId, error: null })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(songStore.songs).toEqual([s('/a/new')])
+    songStore.selectedPath = '/a/new'
+    await open('/a/new', async () => makeSong({ path: '/a/new' }))
+    songStore.current!.title = '改过'
+    const calls = watch.mock.calls.length
+    await requestFolder('/c', async () => [])
+    cancelPending()
+    expect(songStore.folderPath).toBe('/a')
+    expect(watch).toHaveBeenCalledTimes(calls)
+  })
+
+  it('手动刷新先等待 watcher 建立，再只扫描一次，不经过合并等待', async () => {
+    const loader = vi.fn(async () => [s('/a/song')])
+    await activateFolder('/a', loader)
+    let ready!: () => void
+    watch.mockImplementationOnce(() => new Promise<void>((resolve) => { ready = resolve }))
+    const refresh = refreshFolder()
+    await settle()
+    expect(loader).toHaveBeenCalledTimes(1)
+    ready()
+    await refresh
+    expect(loader).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(loader).toHaveBeenCalledTimes(2)
+  })
+
+  it('监听失败仍读列表；手动刷新绕过 timer 并重试监听，失败保留上次列表', async () => {
+    watch.mockRejectedValueOnce(new Error('监听不可用'))
+    const loader = vi.fn().mockResolvedValueOnce([s('/a/old')]).mockRejectedValueOnce(new Error('读取不可用')).mockResolvedValue([s('/a/new')])
+    await activateFolder('/a', loader)
+    expect(songStore.folderWatchError).toContain('监听不可用')
+    event()
+    await refreshFolder()
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(songStore.songs).toEqual([s('/a/old')])
+    expect(songStore.folderRefreshError).toContain('读取不可用')
+    expect(songStore.folderWatchError).toBe('')
+    await refreshFolder()
+    expect(songStore.songs).toEqual([s('/a/new')])
+    expect(songStore.folderRefreshError).toBe('')
+  })
+
+  it('运行时监听错误仍触发补读并保留非阻断提示，手动成功重试清除提示', async () => {
+    const loader = vi.fn(async () => [s('/a/song')])
+    await activateFolder('/a', loader)
+    event('监听断开')
+    await vi.advanceTimersByTimeAsync(250)
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(songStore.folderWatchError).toContain('监听断开')
+    await refreshFolder()
+    expect(songStore.folderWatchError).toBe('')
+    expect(loader).toHaveBeenCalledTimes(3)
+  })
+
+  it('刷新复扫当前查漏维度，旧查漏响应作废；关闭后不复扫', async () => {
+    await activateFolder('/a', async () => [s('/a/song')])
+    let resolveOld!: (result: MissingScanResult) => void
+    const old = openMissingFilter(async () => new Promise((resolve) => { resolveOld = resolve }))
+    songStore.missingChecks = ['lyrics']
+    mockInvoke.mockImplementation(async (cmd) => cmd === 'scan_missing' ? { songs: [{ path: '/a/song', missing: ['lyrics'] }], errors: [] } : undefined)
+    await refreshFolder()
+    await settle()
+    expect(mockInvoke).toHaveBeenCalledWith('scan_missing', { dir: '/a', checks: ['lyrics'] })
+    resolveOld({ songs: [{ path: '/a/stale', missing: ['cover'] }], errors: [] })
+    await old
+    expect(songStore.missingByPath).toEqual({ '/a/song': ['lyrics'] })
+    closeMissingFilter()
+    mockInvoke.mockClear()
+    await refreshFolder()
+    expect(mockInvoke).not.toHaveBeenCalledWith('scan_missing', expect.anything())
+  })
+
+  it('卸载作废 timer/在途读取；迟到订阅被立即释放且异步 unlisten 拒绝被处理', async () => {
+    const pending = deferredList()
+    const opening = activateFolder('/a', async () => pending.promise)
+    await settle()
+    event()
+    stopFolderWatching()
+    pending.resolve([s('/a/stale')])
+    await opening
+    await settle()
+    expect(songStore.songs).not.toEqual([s('/a/stale')])
+    expect(unlisten).toHaveBeenCalledOnce()
+    expect(watch).toHaveBeenLastCalledWith(null, expect.any(Number))
+    let resolveListen!: (release: () => void) => void
+    songStore.folderPath = null
+    const starting = startFolderWatching({ listen: () => new Promise((resolve) => { resolveListen = resolve }), watch })
+    stopFolderWatching()
+    const lateUnlisten = vi.fn(() => Promise.reject(new Error('late unlisten')))
+    resolveListen(lateUnlisten)
+    await starting
+    await settle()
+    expect(lateUnlisten).toHaveBeenCalledOnce()
   })
 })

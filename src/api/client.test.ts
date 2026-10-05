@@ -8,7 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
 
-import { invokeCommand } from './client'
+import { invokeCommand, listenEvent } from './client'
 
 describe('invokeCommand — invoke 类型安全封装', () => {
   beforeEach(() => {
@@ -31,4 +31,18 @@ describe('invokeCommand — invoke 类型安全封装', () => {
     expect(mockInvoke).toHaveBeenCalledWith('search_song', { title: 'x', artist: 'y' })
     expect(result).toEqual(payload)
   })
+})
+
+const mockListen = vi.fn()
+vi.mock('@tauri-apps/api/event', () => ({ listen: (...args: unknown[]) => mockListen(...args) }))
+
+it('事件订阅透传 handler 并返回相同 unlisten', async () => {
+  const unlisten = vi.fn()
+  const handler = vi.fn()
+  mockListen.mockResolvedValue(unlisten)
+  const result = await listenEvent('folder-changed', handler)
+  expect(mockListen).toHaveBeenCalledWith('folder-changed', handler)
+  expect(result).toBe(unlisten)
+  result()
+  expect(unlisten).toHaveBeenCalledOnce()
 })

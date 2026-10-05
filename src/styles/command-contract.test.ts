@@ -101,9 +101,9 @@ describe('Tauri command 契约一致性守卫（真值 = lib.rs generate_handler
     expect(cmds, diffMessage(_name, cmds)).toEqual(libCommands)
   })
 
-  it.each(sources)('%s 契约清单去重后恰为 16 个（防正则漏匹配）', (_name, cmds) => {
-    expect(cmds, `${_name} 提取到 ${cmds.length} 个: [${cmds.join(', ')}]`).toHaveLength(16)
-    expect(new Set(cmds).size).toBe(16)
+  it.each(sources)('%s 契约清单去重后恰为 17 个（防正则漏匹配）', (_name, cmds) => {
+    expect(cmds, `${_name} 提取到 ${cmds.length} 个: [${cmds.join(', ')}]`).toHaveLength(17)
+    expect(new Set(cmds).size).toBe(17)
   })
 
   // 签名层 spot-check：lib.rs 无参 command 在三源契约表中必须写成 `name()`（无参）。

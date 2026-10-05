@@ -2,7 +2,7 @@
 // 左栏（v1-folder-list）：顶部「打开文件夹」按钮 + 搜索框 + 展平列表。
 // 数据流：invoke('pick_folder') → Rust 原生选择器 → None 无视 / Some(dir)
 //   → store.folderPath = dir → invoke('list_songs', { dir }) → songs 整体替换、selectedPath 重置。
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 
 import { getLastDir, listSongs, pickFolder } from '../api/songs'
 import type { MissingField } from '../api/types'
@@ -13,6 +13,10 @@ import {
   MISSING_FIELDS,
   openMissingFilter,
   requestFolder,
+  refreshFolder,
+  resetFailedStartupFolder,
+  startFolderWatching,
+  stopFolderWatching,
   scanMissing,
   setMissingChecks,
   songStore,
@@ -22,13 +26,22 @@ import SongRow from './SongRow.vue'
 /** 打开文件夹：选择 + 遍历 + 整体替换列表。
  *  v1-ux-settings：走 requestFolder（dirty 拦截门——有未保存修改时复用同一三选一弹窗）。 */
 async function openFolder() {
-  const picked = await pickFolder()
-  if (picked === null) return // 取消，无视
-  await requestFolder(picked, (dir) => listSongs(dir))
+  try {
+    const picked = await pickFolder()
+    if (picked === null || !mounted) return
+    await requestFolder(picked, (dir) => listSongs(dir))
+  } catch (error) {
+    songStore.folderRefreshError = `打开文件夹失败：${error instanceof Error ? error.message : String(error)}`
+  }
 }
 
 /** ⌘O / Ctrl+O 快捷键打开文件夹。 */
 function onKeydown(e: KeyboardEvent) {
+  if (menuOpen.value && e.key === 'Escape') {
+    e.preventDefault()
+    closeMenu(true)
+  }
+  if (menuOpen.value && e.key === 'Tab') closeMenu(false)
   if ((e.metaKey || e.ctrlKey) && (e.key === 'o' || e.key === 'O')) {
     e.preventDefault()
     openFolder()
@@ -79,33 +92,73 @@ const missingEmptyState = computed(() => {
   }
 })
 
+let mounted = false
+const listArea = ref<HTMLElement | null>(null)
+const menu = ref<HTMLElement | null>(null)
+const refreshButton = ref<HTMLButtonElement | null>(null)
+const menuOpen = ref(false)
+const menuPosition = ref({ left: '0px', top: '0px' })
+let menuOrigin: HTMLElement | null = null
+
+function closeMenu(restoreFocus = false): void {
+  menuOpen.value = false
+  if (restoreFocus) menuOrigin?.focus()
+}
+
+function showMenu(event: MouseEvent | KeyboardEvent): void {
+  event.preventDefault()
+  menuOrigin = document.activeElement instanceof HTMLElement ? document.activeElement : listArea.value
+  const rect = listArea.value?.getBoundingClientRect()
+  const x = event instanceof MouseEvent ? event.clientX : (rect?.left ?? 0) + 12
+  const y = event instanceof MouseEvent ? event.clientY : (rect?.top ?? 0) + 12
+  menuPosition.value = {
+    left: `${Math.max(0, Math.min(x, window.innerWidth - 140))}px`,
+    top: `${Math.max(0, Math.min(y, window.innerHeight - 50))}px`,
+  }
+  menuOpen.value = true
+  void nextTick(() => refreshButton.value?.focus())
+}
+
+function onListKeydown(event: KeyboardEvent): void {
+  if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) showMenu(event)
+}
+
+function onOutsidePointer(event: PointerEvent): void {
+  if (menuOpen.value && !menu.value?.contains(event.target as Node)) closeMenu()
+}
+
+function manualRefresh(): void {
+  closeMenu(true)
+  void refreshFolder()
+}
+
 onMounted(() => {
+  mounted = true
   window.addEventListener('keydown', onKeydown)
-  // dir-memory：启动自动加载上次目录——getLastDir() 无记忆/目录已删 → null → no-op 保持空态；
-  // 非空 → initLastDir 复用 activateFolder 激活链路（列表加载、搜索重置语义）。不阻塞渲染，
-  // 启动期用户手点打开与 getLastDir 竞态窗口极小（onMounted 立即触发、响应先于用户交互），不额外处理。
-  void getLastDir()
-    .then((dir) => {
-      // falsy 统一守卫（null/undefined/'' 均 no-op）：目录已删/无记忆 → 保持「未打开文件夹」空态
-      if (!dir) return
-      // 启动自动加载 best-effort：initLastDir 复用 activateFolder 激活链路（含列表加载）。
-      // rejection 兜底复位空态——list_songs IPC 失败时 activateFolder 已先设 folderPath
-      // （半打开态 + 空列表，UI 会误显「文件夹中没有音乐」），此处复位为「未打开文件夹」
-      // 空态，与无记忆空态同语义，且不产生 unhandled rejection（tester 审计）。
-      // 竞态守卫（tester 审计）：仅当仍处于启动目录时才复位——用户已手动切到新目录
-      // （启动 loadSongs 慢、晚于手动切换才失败）时，不得清掉手动切换的目录。
-      return initLastDir(dir, (d) => listSongs(d)).catch(() => {
-        if (songStore.folderPath === dir) {
-          songStore.folderPath = null
-          songStore.songs = []
-        }
-      })
-    })
-    .catch(() => {
-      // 启动自动加载 best-effort：getLastDir IPC 异常 → 静默降级为无记忆空态（不阻塞渲染、不报错）
-    })
+  window.addEventListener('pointerdown', onOutsidePointer)
+  const startupEpoch = songStore.folderEpoch
+  void (async () => {
+    // 事件订阅先就绪；目录恢复与手动打开共用 store 的 epoch/监听链路。
+    await startFolderWatching()
+    if (!mounted || songStore.folderEpoch !== startupEpoch || songStore.folderPath !== null) return
+    const dir = await getLastDir()
+    if (!mounted || songStore.folderEpoch !== startupEpoch || songStore.folderPath !== null || !dir) return
+    const loading = initLastDir(dir, listSongs)
+    const loadingEpoch = songStore.folderEpoch
+    try {
+      await loading
+    } catch {
+      if (mounted) resetFailedStartupFolder(loadingEpoch)
+    }
+  })().catch(() => {})
 })
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+onUnmounted(() => {
+  mounted = false
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('pointerdown', onOutsidePointer)
+  stopFolderWatching()
+})
+
 </script>
 
 <template>
@@ -165,6 +218,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       </p>
     </div>
 
+    <p v-if="songStore.folderWatchError || songStore.folderRefreshError" class="folder-error" role="status">
+      <span v-if="songStore.folderWatchError">{{ songStore.folderWatchError }}</span>
+      <span v-if="songStore.folderRefreshError">{{ songStore.folderRefreshError }}</span>
+      <button type="button" :disabled="songStore.folderPath === null" @click="manualRefresh">重试刷新</button>
+    </p>
+
+    <div ref="listArea" class="list-area" tabindex="0" aria-label="歌曲列表" aria-haspopup="menu"
+      @contextmenu="showMenu" @keydown="onListKeydown">
     <!-- 空态：未打开文件夹 -->
     <div v-if="songStore.folderPath === null" class="empty">
       <span class="empty-icon" aria-hidden="true">🗂️</span>
@@ -208,6 +269,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         :missing="songStore.missingByPath[song.path]"
       />
     </ul>
+    </div>
+    <div v-if="menuOpen" ref="menu" class="list-menu" role="menu" aria-label="歌曲列表操作" :style="menuPosition">
+      <button ref="refreshButton" role="menuitem" type="button" :disabled="songStore.folderPath === null"
+        @click="manualRefresh" @keydown.down.prevent="refreshButton?.focus()" @keydown.up.prevent="refreshButton?.focus()">刷新</button>
+    </div>
   </aside>
 </template>
 
@@ -221,6 +287,42 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   border-right: 1px solid var(--border);
   flex: 0 0 auto;
 }
+
+.list-area {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.list-area:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.list-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 130px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.list-menu button {
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+}
+.list-menu button:hover:not(:disabled), .list-menu button:focus-visible { background: var(--hover); }
+.list-menu button:disabled { opacity: 0.5; }
+.folder-error {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  color: var(--danger, #e57373);
+  font-size: 12px;
+}
+.folder-error button { justify-self: start; color: inherit; }
 
 .list-head {
   display: flex;
