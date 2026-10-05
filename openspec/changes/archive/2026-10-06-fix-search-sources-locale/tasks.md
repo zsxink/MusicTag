@@ -48,4 +48,4 @@ Domain: `both`，顺序固定 **Rust → Vue**（前端 C2 归一化镜像依赖
 
 - [x] **6.1** CR 只读核对全部 diff 与两份 delta：归一化前后端同规则同表、展示/写盘文本未被改写（折叠只作用于比较侧）、双店面失败与 `source_stats`/`all_failed` 语义（iTunes 仅两店面全失败才算失败；`source_stats` 记合并后条数）、固定来源序确定性、酷狗 host 过滤、`opencc/README.md` 许可与 SHA-256 齐全、契约零变化（command 数仍 17、`MusicSourceId` 仍 5 变体、每源 TOP 3 × 5 = 15）。无 blocker/major 才进入 Verify。Owner: 独立 reviewer；写 none；依赖 3.2/5.1。
 - [x] **6.2** Verify：`cargo check --manifest-path src-tauri/Cargo.toml --all-targets` → `cargo test --manifest-path src-tauri/Cargo.toml` → `npm run test` → `npm run build` → `npx openspec validate fix-search-sources-locale --strict --no-interactive`，记录相同 HEAD 与逐条退出码。Owner: Verify 只读或 Leader；依赖 6.1。
-- [ ] **6.3** 归档 → 提交 → 推送 → 创建 `Closes #152` PR → 核对 required CI → 合并 → 核对远端 Issue/PR/merge SHA → 清理；写 progress 与完整 typed checkpoint 证据。Owner: Leader；依赖 6.2。
+- [x] **6.3** 归档 → 提交 → 推送 → 创建 `Closes #152` PR → 核对 required CI → 合并 → 核对远端 Issue/PR/merge SHA → 清理；写 progress 与完整 typed checkpoint 证据。Owner: Leader；依赖 6.2。
