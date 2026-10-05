@@ -38,7 +38,7 @@ CodeGraph 调用路径：
 | `watch_folder(dir, watch_id)` | `Option<String>, u64 → Result<(), String>` | `Some(dir)` 替换递归监听，`None` 停止；generation 单调递增，较旧请求不生效 |
 | `folder-changed` event | `{ dir: string, watchId: number, error: string \| null }` | 普通变更 error 为 null；监听错误包含中文原因；只用于失效通知 |
 
-Rust event struct 在 `model.rs` 使用 camelCase serde，与 `api/types.ts` 一致。`api/client.ts` 是唯一 Tauri IPC 入口：保留原 `invoke` import，新增类型化 `listen` 透传和 `UnlistenFn` 类型；`api/songs.ts` 封装 watch command 和事件订阅。store/组件不直接 import Tauri。按 Tauri 当前官方 event API 文档，`core:event:default` 已包含 listen/unlisten 权限，无需新增 capability。
+Rust event struct 在 `model.rs` 使用 camelCase serde，与 `api/types.ts` 一致。`api/client.ts` 是唯一 Tauri IPC 入口：保留原 `invoke` import，新增类型化 `listen` 透传和 `UnlistenFn` 类型；`api/songs.ts` 封装 watch command 和事件订阅。store/组件不直接 import Tauri。新增 `src-tauri/capabilities/default.json`，只给 `main` 窗口授予 `core:event:allow-listen` 与 `core:event:allow-unlisten`，使 Tauri ACL 允许订阅和清理事件监听；不授予 emit 权限。
 
 新增 command 后注册数为 17。同步 PRD §7、design §10.3、`openspec/config.yaml` 的完整 command 清单，以及 `src/styles/command-contract.test.ts` 的明确数量断言；command 放在已有 `folder.rs`，不必增加守卫读取的命令文件清单。
 
@@ -62,7 +62,7 @@ Rust event struct 在 `model.rs` 使用 camelCase serde，与 `api/types.ts` 一
 
 刷新只更新 `songs` 和列表/监听错误态，保留搜索词、当前选择、`current` / `original` / dirty、save 状态、改名草稿、歌词/封面候选与会话离线标记。即使外部删除或改名了选中音频，也不静默丢弃其编辑草稿；列表反映磁盘结果，编辑区保留原路径，后续保存按现有 I/O 错误机制反馈。文件系统通知不会触发选歌、自动搜索或保存。
 
-查漏筛选启用时，列表成功刷新后用当前维度重新执行 `scanMissing`；先作废旧 scan sequence，防旧查漏结果覆盖刷新后的目录快照。查漏筛选开关/维度与搜索词保留，扫描中沿用现有完整列表退化行为。保存或内部改名产生的事件同样经过合并；不改已有保存/改名业务流程。
+查漏筛选启用时，列表成功刷新后用当前维度重新执行 `scanMissing`；先作废旧 scan sequence，防旧查漏结果覆盖刷新后的目录快照。查漏筛选开关/维度与搜索词保留。仅当当前目录快照的缺失扫描状态为 `done` 时应用查漏命中筛选；处于 `idle`、`scanning` 或 `error` 时显示完整歌曲列表，避免刷新等待或读取失败时列表暂时/持续变空。保存或内部改名产生的事件同样经过合并；不改已有保存/改名业务流程。
 
 ## D5：手动入口
 
@@ -89,7 +89,7 @@ Rust event struct 在 `model.rs` 使用 camelCase serde，与 `api/types.ts` 一
 | debounce / scan race | fake timers 验证重复事件合并、最长等待、在途更新最多排一个补读、旧 epoch 不回写 |
 | editor compatibility | dirty/current/original/pendingRename/候选/搜索词/保存失败状态保留；选中项被移走仍保留草稿；刷新不触发联网或写盘 |
 | watcher failure / lifecycle | 注册失败、通知错误、订阅迟到卸载、切换失败、卸载停止、旧 generation 过滤、手动重试 |
-| missing filter | 刷新后复扫、维度保留、旧 scan 不覆盖、关闭筛选后不启动复扫 |
+| missing filter | 刷新后复扫、维度保留、旧 scan 不覆盖、关闭筛选后不启动复扫；`idle`/`scanning`/`error` 时展示完整列表，`done` 时按命中筛选 |
 
 Rust 测试外置 `tests/folder_watch.rs`；纯事件分类测试可外置 `tests/folder_watch_tests.rs`。测试使用 `tempfile`、已有 `tests/common` fixture，不新增外部生成程序依赖。业务断言前确认 fixture 存在并可被既有 reader 读取；异步观察使用通道/有界 deadline，禁止无限 sleep。本地平台验证真实 watcher；Linux CI 将运行相同测试，Windows 真机行为未实测时据实报告。
 

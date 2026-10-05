@@ -290,7 +290,7 @@ V1 规模用 Vue 组合式 API 的 `reactive` + `computed` 即可，不需要引
 **store 职责拆分（§10.0 前端分层）**：
 
 - `store/song.ts` **只留** reactive 状态 + 动作（`selectSong` / `activateFolder` / `refreshFolder` / `open` / `save` / `undo`）+ `dirty` getter；目录监听随当前激活目录切换，异步刷新以目录 epoch/请求序号作废过期结果。
-  `refreshFolder` 只更新列表和刷新错误态；必须保留 selection、current/original/dirty、候选、搜索和筛选条件，查漏筛选启用时按原维度复扫。
+  `refreshFolder` 只更新列表和刷新错误态；必须保留 selection、current/original/dirty、候选、搜索和筛选条件，查漏筛选启用时按原维度复扫。`filteredSongs` 仅在缺失扫描 `done` 后应用命中筛选，`idle`/`scanning`/`error` 时回退展示完整列表。
   动作的 IPC 依赖（`loadSong` / `loadSongs` / `saveFn`）一律注入（默认 loader 为 `api/songs.ts` 封装），测试可注入桩不依赖 Tauri。
 - `dirty` getter 是 **reactive 字面量内的 getter（Vue 3.5 转 live computed）**，**必须原位保留在 `reactive({...})` 内**——
   挪出即失去响应式追踪，dirty 不再随编辑更新。
@@ -378,7 +378,7 @@ interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; 
 | `scan_missing(dir, checks)` | `String, MissingField[] → Result<MissingScanResult, String>` | 按需只读扫描所选缺失维度；返回命中歌曲及单文件错误，不读取封面 base64/歌词全文，不写盘 |
 | `watch_folder(dir, watch_id)` | `Option<String>, u64 → Result<(), String>` | 替换当前递归监听目标；`dir=None` 停止监听；较旧 `watch_id` 不生效 |
 
-文件系统失效事件 `folder-changed` 的 payload 为 `{ dir: string, watchId: number, error: string | null }`，只通知前端重读列表；目录读取仍通过 `list_songs`。前端监听通过统一 `api/client.ts` 的 Tauri event `listen`/`unlisten` 封装。Tauri event API 使用其默认 event 权限，不新增 capability。
+文件系统失效事件 `folder-changed` 的 payload 为 `{ dir: string, watchId: number, error: string | null }`，只通知前端重读列表；目录读取仍通过 `list_songs`。前端监听通过统一 `api/client.ts` 的 Tauri event `listen`/`unlisten` 封装。`src-tauri/capabilities/default.json` 仅对 `main` 窗口授予 `core:event:allow-listen` 和 `core:event:allow-unlisten`，满足事件订阅与清理所需 ACL。
 
 **封面传递**：`Song.cover` 用 **base64 data URL**（`data:image/jpeg;base64,...`），`<img :src="song.cover">` 直接用；一次只编辑一首、图不大，不必配置 asset 协议。写盘时 `save_song` 收到 base64，Rust 侧解码回 `Vec<u8>` 再写原文件（磁盘落盘形式仍是原始字节，见 PRD §5.3）。
 
