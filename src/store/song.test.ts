@@ -1691,6 +1691,54 @@ describe('songStore — v1-search-ui 搜索联动（D1–D7：选中即搜/只�
       expect(songStore.lyricSourcePlatform).toBe('kugou')
     })
 
+    it('C2 身份校验繁简归一化（fix-search-sources-locale 5.1）：cand 为繁体 → 单源返回简体同曲 → 折叠后一致 → 可换源', async () => {
+      // 与既有 :1678「全角 ＡＢＣ vs 半角 abc」同结构，只把「全角/半角」换成「繁体/简体」：
+      // 点选 iTunes HK 的繁体候选取词失败 → C2 换源到返回简体条目的源。
+      // 折叠前 `周杰倫` ≠ `周杰伦` → findSameSong 判「同名不同歌」跳过 → 换源失败（spec C2 的
+      // 繁体匹配 scenario）；折叠后逐字相等 → 命中同一首 → 填入并把 badge 记为换源成功的源。
+      // 这条钉住「`lib/normalize` 的折叠步确实接进了 `findSameSong` 的比较侧」——删掉折叠调用
+      // （或 `store/song.ts` 改回不折叠的本地实现）本条即红。
+      const cand = makeCand({ title: '周杰倫', artist: '周杰倫' })
+      const fetchLyric = vi.fn(async (source: MusicSourceId) =>
+        source === 'netease' ? null : source === 'kugou' ? '[00:00.00] 酷狗词' : null,
+      )
+      // kugou 返回简体同曲「周杰伦」→ 归一化（繁→简折叠）后 == cand 的「周杰倫」折叠结果
+      const searchSource = vi.fn(async (source: MusicSourceId) =>
+        source === 'kugou'
+          ? [makeCand({ source: 'kugou', id: 'k1', title: '周杰伦', artist: '周杰伦', album: '葉惠美' })]
+          : [],
+      )
+
+      await pickLyricCandidate(cand, fetchLyric, searchSource)
+
+      expect(songStore.current!.lyrics).toBe('[00:00.00] 酷狗词')
+      expect(songStore.lyricSourcePlatform).toBe('kugou')
+      expect(songStore.lyricFetchEmpty).toBe(false)
+    })
+
+    it('C2 繁简归一化不得放宽旧行为（5.1）：繁体同曲通过，但「歌名 (Live)」翻唱仍被判同名不同歌 → 跳过该源', async () => {
+      // **不得**因为折叠被引入就放宽「同名不同歌」拒斥：既有 :1661（简体 (Live)）已覆盖本条的
+      // 简体同族，本条钉**繁体同族**——`周杰倫 (Live)` 折叠后是 `周杰伦 (Live)`，与 `周杰倫`
+      // 归一化后**仍不等**（`(Live)` 后缀不被剥离），故必须继续拒斥。
+      // 判别力：若有人把折叠实现成「剥括号/后缀后再比」或让折叠误吞 ` (Live)`，本条红。
+      const cand = makeCand({ title: '周杰倫', artist: '周杰倫' })
+      const fetchLyric = vi.fn(async (source: MusicSourceId) =>
+        source === 'netease' ? null : source === 'kugou' ? '[00:00.00] 不同歌的歌词' : null,
+      )
+      // kugou 只返回 Live 版本 → 折叠后仍不一致 → findSameSong 跳过，绝不填「同名不同歌」
+      const searchSource = vi.fn(async (source: MusicSourceId) =>
+        source === 'kugou'
+          ? [makeCand({ source: 'kugou', id: 'k1', title: '周杰倫 (Live)', artist: '周杰倫', album: '葉惠美' })]
+          : [],
+      )
+
+      await pickLyricCandidate(cand, fetchLyric, searchSource)
+
+      expect(songStore.current!.lyrics).toBe('') // 绝不填「同名不同歌」
+      expect(songStore.lyricSourcePlatform).toBeNull()
+      expect(songStore.lyricFetchEmpty).toBe(true) // 全源（含校验跳过）失败 → 空态
+    })
+
     it('C2 单源 reject（命令级异常）→ 该源跳过，其余源仍可成功（CR 第 2 轮 minor：Promise.all 鲁棒性）', async () => {
       const cand = makeCand() // netease
       const fetchLyric = vi.fn(async (source: MusicSourceId) =>

@@ -42,7 +42,7 @@ Domain: `both`，顺序固定 **Rust → Vue**（前端 C2 归一化镜像依赖
 
 ## 5. Vue 测试（tester）
 
-- [ ] **5.1** `src/lib/simplified.test.ts` 与 `src/lib/normalize.test.ts` 用与 Rust **完全相同**的 fixture 组与期望值（design §5 表）；`src/store/song.test.ts` 补「繁体候选 → 简体换源结果命中同一首（不再被判同名不同歌）」与「Live 版/翻唱仍被拒」两条（参照既有 C2 归一化用例 `song.test.ts:1678` 的写法，**旧行为不许被折叠放宽**）。Owner: Tester；文件 `src/lib/simplified.test.ts`、`src/lib/normalize.test.ts`、`src/store/song.test.ts`；依赖 4.2；映射 spec「取词失败自动换源（C2）」的繁体匹配 / 同名不同歌两 scenario。Leader 审计并提交 checkpoint。
+- [x] **5.1** `src/lib/simplified.test.ts` 与 `src/lib/normalize.test.ts` 用与 Rust **完全相同**的 fixture 组与期望值（design §5 表）；`src/store/song.test.ts` 补「繁体候选 → 简体换源结果命中同一首（不再被判同名不同歌）」与「Live 版/翻唱仍被拒」两条（参照既有 C2 归一化用例 `song.test.ts:1678` 的写法，**旧行为不许被折叠放宽**）。Owner: Tester；文件 `src/lib/simplified.test.ts`、`src/lib/normalize.test.ts`、`src/store/song.test.ts`；依赖 4.2；映射 spec「取词失败自动换源（C2）」的繁体匹配 / 同名不同歌两 scenario。Leader 审计并提交 checkpoint。
 
 ## 6. CR、Verify 与 Integrate（Leader）
 
