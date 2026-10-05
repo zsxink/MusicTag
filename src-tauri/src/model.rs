@@ -14,6 +14,15 @@ pub struct SongSummary {
     pub artist: String,
 }
 
+/// 目录监听的失效通知；前端按目录和 watchId 过滤后重新读取列表。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderChanged {
+    pub dir: String,
+    pub watch_id: u64,
+    pub error: Option<String>,
+}
+
 /// 缺失字段筛选维度（missing-fields-filter）。
 ///
 /// 序列化字面量是前端 IPC 契约的一部分；业务检查顺序由 service 层固定为

@@ -3,13 +3,28 @@
 // 只做参数接收与对 service 层委托，不含 lofty/IO 逻辑：
 // - `pick_folder` → rfd 原生文件夹选择器；
 // - `list_songs` → `meta::is_audio_file` 过滤 + `reader::read_summary` 读 title/artist。
-// `#[tauri::command]` 与 Tauri command 字符串契约零改动。
+// - `watch_folder` → `folder_watch` 递归监听并发出目录失效事件。
 
 use crate::model::SongSummary;
 use crate::service::config;
+use crate::service::folder_watch::FolderWatch;
 use crate::service::meta::is_audio_file;
 use crate::service::reader::read_summary;
+use tauri::Emitter;
 use walkdir::WalkDir;
+
+/// 替换当前递归监听；较旧请求不会改变监听目标，None 表示停止。
+#[tauri::command]
+pub fn watch_folder(
+    dir: Option<String>,
+    watch_id: u64,
+    state: tauri::State<'_, FolderWatch>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    state.watch(dir, watch_id, move |event| {
+        let _ = app.emit("folder-changed", event);
+    })
+}
 
 /// 打开原生文件夹选择器。取消返回 `None`，否则返回目录绝对路径。
 /// 有上次目录 → 选择器默认定位到该目录（spec「选择器默认定位」）。
