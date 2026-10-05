@@ -1,7 +1,9 @@
-// MusicTag — QQ 音乐客户端（client_search_cp GET 搜索 + fcg_query_lyric_new 取词，search-sources-renewal D2）。
+// MusicTag — QQ 音乐客户端（search_for_qq_cp GET 搜索 + fcg_query_lyric_new 取词，search-sources-renewal D2）。
 //
-// 2026-08 起 musicu.fcg 搜索被内层 code:2001 空响应，换公开 GET `client_search_cp`（零加密零签名）：
-// - 搜索：GET `c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=10&w=<title>&format=json`
+// 2026-08 起 musicu.fcg 搜索被内层 code:2001 空响应，换公开 GET 搜索端点（零加密零签名）；
+// 2026-10（fix-search-sources-locale D1）实测旧端点已恒 HTTP 500，换同族可用端点 `search_for_qq_cp`
+// （同 `data.song.list[]` 结构、同顶层 `code`，故解析路径逐字不动）：
+// - 搜索：GET `c.y.qq.com/soso/fcgi-bin/search_for_qq_cp?p=1&n=10&w=<title>&format=json`
 //   → 解析 `data.song.list[]`；顶层 `code` 字段沿用 `is_error_response`（`code!=0` → 源失败）；
 // - 取词：GET `c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=<mid>`，响应 `lyric` 字段 **base64** → utf-8
 //   （实测正常，保持不动；UA 用 ASCII 兜底——非 ASCII UA 被部分中间层拒绝）。
@@ -15,7 +17,7 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
 pub struct QqMusic {
-    /// client_search_cp 搜索接口（Tester：HTTP 状态分支 mock 注入点）。
+    /// search_for_qq_cp 搜索接口（Tester：HTTP 状态分支 mock 注入点）。
     pub search_url: String,
     /// fcg_query_lyric_new 取词接口 base。
     pub lyric_url_base: String,
@@ -24,7 +26,7 @@ pub struct QqMusic {
 impl Default for QqMusic {
     fn default() -> Self {
         Self {
-            search_url: "https://c.y.qq.com/soso/fcgi-bin/client_search_cp".to_string(),
+            search_url: "https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp".to_string(),
             lyric_url_base: "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg".to_string(),
         }
     }
@@ -47,7 +49,7 @@ impl MusicSource for QqMusic {
         artist: &str,
         album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
-        // client_search_cp：公开 GET，`w` 关键词、`p/n` 分页、`format=json`（零加密零签名）。
+        // search_for_qq_cp：公开 GET，`w` 关键词、`p/n` 分页、`format=json`（零加密零签名）。
         // search-cover-album：`w` = title + artist + album 拼接（空段跳过）。
         // 用 Url::parse_with_params 保证中文 keyword 正确 URL 编码。
         let kw = join_query_terms(title, artist, album);
@@ -106,7 +108,7 @@ pub fn is_error_response(json: &serde_json::Value) -> bool {
     json["code"].as_i64().is_some_and(|c| c != 0)
 }
 
-/// 解析 client_search_cp 搜索响应 `data.song.list[]` → 候选。
+/// 解析 search_for_qq_cp 搜索响应 `data.song.list[]` → 候选。
 ///
 /// 映射（search-sources-renewal D2）：`songmid` → id（取歌词用 songmid）；`songname` → title；
 /// `singer[].name` → artist（逗号连接）；`albumname` → album（空 → `未分类专辑`）；

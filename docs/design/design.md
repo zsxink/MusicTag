@@ -202,6 +202,8 @@
 - **手动触发**：歌词区/封面区各有「搜索歌词 / 搜索封面」虚线按钮，随时可主动发起——删除内容后要重新搜就用它。
 - **结果形态**：一律候选展示（封面缩略图网格 / 歌词候选条），用户**手动点选才填入**，不自动写盘、不自动覆盖。
 - **聚合语义（各家内部聚合、跨源不折叠，Issue #115）**：五源候选按归一化 `(source, title, artist)` 去重——**同源内**同曲（归一化 title/artist 相同）保留该源得分最高一条，**跨源候选各自保留、并排展示**（各带来源 badge）；排序按来源分组（Netease→QqMusic→Kugou→Lrclib→Itunes）、组内分降序，每源 TOP 3（最多 15 条）。歌词与封面候选统一生效。
+- **归一化与确定性（Issue #152）**：归一化 = trim + **繁→简折叠**（内嵌 OpenCC `TSCharacters` + `TSPhrases`，Apache-2.0，零新增运行时依赖）+ 全角半角 + 小写，**前后端同规则同表**（前端 `src/lib/simplified.ts` 以 `?raw` 加载 Rust 侧同一份 `.txt`，单一来源无副本漂移）。折叠**只作用于比较侧**（打分 / 去重 key / 排序 tie-break），候选展示文本与点选填入/写盘文本均为远端原文。聚合输入按**固定来源序**展开（iTunes 内部再按店面序 HK→US），使同分同曲的取舍与 TOP 3 截断可复现。
+- **iTunes 双店面（Issue #152）**：固定并发查询 `country=HK` 与 `country=US` 两店面、按店面序拼接为该源候选（同属 `MusicSourceId::Itunes`，不新增枚举值，前端 badge 不显示店面）。语种与店面的错配是双向的（HK 对西方歌给本地化/别名艺名，US 对中文歌给罗马音或错艺人），故**不做语种判断**，两个都查、由打分与同源去重（含繁简折叠）决定展示。**任一店面成功即该源成功**（含成功但空结果，不计入 `all_failed`），两店面全失败才计失败、`source_stats` 记 0；成功时 `source_stats` 记**合并后条数**。合并后仍受每源 TOP 3 约束。
 - **无结果 / 断网**：候选区显示明确空态 + 保留手动填写入口。
 - **候选区可折叠（candidate-collapse）**：歌词/封面候选区各一个「隐藏候选 ▲ / 展开候选 ▼」折叠按钮（默认展开），收起后候选区整体隐藏、再次点击恢复。折叠态为面板组件局部 `ref`（`candidatesCollapsed`，不进入 store），`v-show` 保留 DOM、不参与搜索生命周期（resetSearchState 语义不变）。**切歌（`current.path` 变）时折叠重置为默认展开**（`watch` 显式重置——原「跨切歌保持」实测不好用，用户收起后切歌、新歌候选区保持折叠易误以为搜索没出结果，改为切歌即展开）；换目录清空编辑态（面板卸载）同样重置为默认展开。**仅候选区有内容**（searching / 空态 / 离线 / done+候选）时按钮才显示（`candidatesVisible` computed，与候选区 v-if 分支逐条对齐）。
 
@@ -339,8 +341,8 @@ interface SongCandidate {
 
 interface SearchResult {
   songs: SongCandidate[];
-  source_stats: Array<[MusicSourceId, number]>;  // 各家返回条数（失败/超时记 0）
-  all_failed: boolean;  // 五源全部失败（网络错误/超时）→ true；至少一源成功（含正常空结果）→ false
+  source_stats: Array<[MusicSourceId, number]>;  // 各家返回条数（失败/超时记 0；iTunes 记 HK+US 合并后的条数，Issue #152）
+  all_failed: boolean;  // 五源全部失败（网络错误/超时）→ true；至少一源成功（含正常空结果）→ false。注：iTunes 仅 HK/US 两店面全部失败才算失败（Issue #152）
 }
 
 type MissingField = 'title' | 'artist' | 'album' | 'cover' | 'lyrics';
@@ -371,7 +373,7 @@ interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; 
 | `read_cover_path(path)` | `String → Result<CoverInput, String>` | 拖拽封面路径 → 读文件 + 压缩 + data URL；读失败/非图片 → `Err(中文原因)` |
 | `pick_cover_save_path(song_path)` | `String → Result<Option<String>, String>` | 弹 rfd 存盘框取导出目标路径，默认文件名 = 音频文件名去扩展名 + 按图片 mime 推断的扩展名；取消 → Ok(None) |
 | `export_cover(song_path, dest_path)` | `(String, String) → Result<(), String>` | 把标签内第一个 front cover 的**原始字节**写到 dest_path（`std::fs::write`，无 UI）；只读、不改标签/表单 |
-| `search_song(title, artist, album)` | `String, String, String → SearchResult` | 五源并发搜索 + **同源去重、跨源保留、来源分组排序（每源 TOP 3）**（含 `all_failed`：五源全失败才 true，冷门歌空结果 false） |
+| `search_song(title, artist, album)` | `String, String, String → SearchResult` | 五源并发搜索（iTunes 内部再并发 HK/US 双店面）+ **同源去重、跨源保留、来源分组排序（每源 TOP 3）**；归一化含繁→简折叠但只作用于比较侧，候选文本原样返回（含 `all_failed`：五源全失败才 true，iTunes 仅两店面全失败才算失败，冷门歌空结果 false）。**契约零变化**（Issue #152） |
 | `search_source(source, title, artist, album)` | `MusicSourceId, String, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（C2 换源用，绕过跨源聚合）：逐源拿该源全部原始候选，不受每源 TOP 3 截断；失败/超时 → 空列表，前端跳过该源 |
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |
 | `download_cover(url)` | `String → Result<Vec<u8>, String>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`；失败 → `Err` 前端静默忽略该张） |

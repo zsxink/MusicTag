@@ -10,9 +10,12 @@
 //
 // 数据流（design.md）：
 // - `search_song(title, artist, album)`：`tokio::join_all`（JoinSet）五源并发 + 单源 6s 超时 →
-//   失败降级空列表 + `source_stats`（该源记 0）→ `aggregate` 打分 → **同源去重、跨源不折叠** →
-//   每源 TOP 3 → 按来源分组（最多 5×3=15 条）；
+//   失败降级空列表 + `source_stats`（该源记 0）→ 候选按**固定来源序**展开（D7，iTunes 源内部已按
+//   店面序 HK→US 定序）→ `aggregate` 打分 → **同源去重、跨源不折叠** → 每源 TOP 3 → 按来源分组
+//   （最多 5×3=15 条）；
 //   album（search-cover-album）综合进各源查询关键词与打分，空 → 回退现行为；
+// - 繁简折叠（fix-search-sources-locale D5）：`simplified::to_simplified` 只接进 `norm()`，
+//   即**只作用于比较侧**（打分 / 同源去重 key / 排序 tie-break），**不改写候选展示与写盘文本**；
 // - `fetch_lyric(source, id)`：点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源；
 //   iTunes 恒 None，不参与 C2 取词链）；
 // - `download_cover(url)`：点选封面下载（5s 超时 + 12MB 响应体限流）。
@@ -23,6 +26,7 @@ pub mod kugou;
 pub mod lrclib;
 pub mod netease;
 pub mod qqmusic;
+pub mod simplified;
 
 use crate::model::{MusicSourceId, SearchResult, SongCandidate};
 use async_trait::async_trait;
@@ -167,10 +171,14 @@ pub async fn search_song_with_sources(
     // all_failed：五源全部失败（None）→ true；至少一源成功 → false（冷门歌空结果不判离线）。
     let all_failed = raw.values().all(|o| o.is_none());
 
-    let all: Vec<SongCandidate> = raw
-        .values()
+    // 候选展开：**按固定来源序**（D7）——原 `raw.values()` 遍历 `HashMap` 顺序不确定，导致同分同 key
+    // 候选（`if score > entry.0` 首插获胜）的胜者与展示文本在不同运行间抖动。`order` 数组就地复用。
+    // iTunes 源内部**再按店面序 HK→US**（`Itunes::search` 内已定序拼接为一个 Vec 返回）。
+    let all: Vec<SongCandidate> = order
+        .iter()
+        .filter_map(|id| raw.get(id).and_then(|o| o.as_ref()))
         .flatten()
-        .flat_map(|l| l.iter().cloned())
+        .cloned()
         .collect();
     let songs = aggregate(title, artist, album, all);
     SearchResult {
@@ -276,9 +284,18 @@ pub async fn download_cover_with_timeout(
     Ok(buf)
 }
 
-/// 归一化 `norm(s)`：trim + 全角转半角 + `to_lowercase`（V1 不做简繁，design.md D3）。
+/// 归一化 `norm(s)`：trim + **繁→简折叠** + 全角转半角 + `to_lowercase`（fix-search-sources-locale D5）。
+///
+/// 顺序按 D5：先折叠（内嵌 OpenCC `TSPhrases` + `TSCharacters`，Apache-2.0，**零新增依赖**），
+/// 再全角转半角、最后小写——三者对同一字符集互不冲突，但折叠在前可让繁体的全角标点与词条
+/// 一并按原表语义处理。
+///
+/// **只作用于比较侧**：`norm()` 的返回值仅用于打分、同源去重 key 与组内排序 tie-break；
+/// 候选的 `title`/`artist`/`album`/`cover_url` 文本（候选列表展示、点选后填入表单、写盘）
+/// **一律不折叠**——用户从 iTunes HK 点选到的仍是远端原文（如 `周杰倫`）。
+/// 折叠只影响「能不能匹配上」，「存什么」是独立的产品决策。
 pub fn norm(s: &str) -> String {
-    s.trim()
+    simplified::to_simplified(s.trim())
         .chars()
         .map(to_halfwidth)
         .flat_map(char::to_lowercase)
@@ -369,13 +386,18 @@ pub fn album_match(q: &str, a: &str) -> f32 {
     }
 }
 
-/// 打分聚合（design.md D3 + search-cover-album D3 + multi-source-candidates）：过滤 title 零关联 →
+/// 打分聚合（design.md D3 + search-cover-album D3 + multi-source-candidates + fix-search-sources-locale D7）：
+/// 过滤 title 零关联 →
 /// 打分（title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3，
 /// 上限 1.2）→ 归一化 `(source, title, artist)` **同源去重**（同源同曲保留该源得分最高一条，
-/// 同分保留先到/HashMap 首插）→ 按来源分组、组内 score 降序（同分按归一化 title/artist 稳定）
-/// 每源截 `PER_SOURCE_TOP` → 按 `source_rank` 分组拼接（Netease→QqMusic→Kugou→Lrclib→Itunes，
-/// 最多 5×3=15 条）。**跨源不折叠**：不同来源的候选各自保留、多源并排展示（用户拍板，供
-/// 歌词/封面候选多源点选）。album 维度仅对非空 album 计分（空 → 完全回退现行为）。
+/// 同分保留**先到者**；`norm()` 含繁→简折叠，故繁简同曲自然折叠为一条）→ 按来源分组、组内 score 降序
+/// （同分按归一化 title/artist 稳定）每源截 `PER_SOURCE_TOP` → 按 `source_rank` 分组拼接
+/// （Netease→QqMusic→Kugou→Lrclib→Itunes，最多 5×3=15 条）。**跨源不折叠**：不同来源的候选各自保留、
+/// 多源并排展示（用户拍板，供歌词/封面候选多源点选）。album 维度仅对非空 album 计分（空 → 完全回退现行为）。
+///
+/// **输入须按固定来源序展开**（`search_song_with_sources` 用 `order` 数组，D7）：`candidates` 是
+/// `Vec`，同分同 key 时「先到者赢」，故调用方顺序决定结果。**输出候选文本不折叠**——繁简折叠只在
+/// `norm()` 派生的比较侧生效，返回的 `SongCandidate` 仍是远端原文。
 pub fn aggregate(
     query_title: &str,
     query_artist: &str,
@@ -387,41 +409,50 @@ pub fn aggregate(
     let qal = norm(query_album);
 
     // 打分 + 过滤 `title_match == 0`（与查询 title 零关联不进候选集，避免噪音）。
-    let scored: Vec<(f32, SongCandidate)> = candidates
+    // 归一化值在此**一次算好**并随候选流转，下游去重 key 与排序 tie-break 直接复用（D7）——
+    // 原实现排序比较器每次比较重算两遍 `norm()`，纯浪费。
+    let scored: Vec<ScoredCandidate> = candidates
         .into_iter()
         .filter_map(|c| {
-            let t = norm(&c.title);
-            let tm = title_match(&qn, &t);
+            let n_title = norm(&c.title);
+            let tm = title_match(&qn, &n_title);
             if tm == 0.0 {
                 return None;
             }
-            let am = artist_match(&qa, &norm(&c.artist));
+            let n_artist = norm(&c.artist);
+            let am = artist_match(&qa, &n_artist);
             let alm = album_match(&qal, &norm(&c.album));
-            Some((tm + am + alm, c))
+            Some(ScoredCandidate {
+                score: tm + am + alm,
+                n_title,
+                n_artist,
+                candidate: c,
+            })
         })
         .collect();
 
     // 同源去重：key = (source, norm(title), norm(artist))——同源同曲折叠（保留最高分，
-    // 同分首插/HashMap 先到者赢），**跨源 key 不同 → 各自保留、互不折叠**。
-    let mut best: HashMap<(MusicSourceId, String, String), (f32, SongCandidate)> = HashMap::new();
-    for (score, c) in scored {
-        let key = (c.source, norm(&c.title), norm(&c.artist));
+    // 同分保留**先到者**），**跨源 key 不同 → 各自保留、互不折叠**。
+    // D5 之后繁简同曲自然折叠（如 iTunes 的 HK 繁体条目与 US 简体条目折叠为一条，同分即 HK）。
+    let mut best: HashMap<(MusicSourceId, String, String), ScoredCandidate> = HashMap::new();
+    for item in scored {
+        let key = (item.candidate.source, item.n_title.clone(), item.n_artist.clone());
         match best.get_mut(&key) {
             Some(entry) => {
-                if score > entry.0 {
-                    *entry = (score, c);
+                if item.score > entry.score {
+                    *entry = item;
                 }
             }
             None => {
-                best.insert(key, (score, c));
+                best.insert(key, item);
             }
         }
     }
 
     // 按源分组 → 组内 score 降序（同分按归一化 title/artist 稳定，可复现）→ 每源截 PER_SOURCE_TOP。
-    let mut by_source: HashMap<MusicSourceId, Vec<(f32, SongCandidate)>> = HashMap::new();
-    for (score, c) in best.into_values() {
-        by_source.entry(c.source).or_default().push((score, c));
+    let mut by_source: HashMap<MusicSourceId, Vec<ScoredCandidate>> = HashMap::new();
+    for item in best.into_values() {
+        by_source.entry(item.candidate.source).or_default().push(item);
     }
 
     // 按来源分组拼接：source_rank 升序（Netease→QqMusic→Kugou→Lrclib→Itunes），组内已分降序。
@@ -435,16 +466,30 @@ pub fn aggregate(
     ] {
         if let Some(mut group) = by_source.remove(&source) {
             group.sort_by(|a, b| {
-                b.0.partial_cmp(&a.0)
+                b.score
+                    .partial_cmp(&a.score)
                     .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| norm(&a.1.title).cmp(&norm(&b.1.title)))
-                    .then_with(|| norm(&a.1.artist).cmp(&norm(&b.1.artist)))
+                    .then_with(|| a.n_title.cmp(&b.n_title))
+                    .then_with(|| a.n_artist.cmp(&b.n_artist))
             });
             group.truncate(PER_SOURCE_TOP);
-            songs.extend(group.into_iter().map(|(_, c)| c));
+            songs.extend(group.into_iter().map(|item| item.candidate));
         }
     }
     songs
+}
+
+/// 打分后带归一化衍生值的候选（`aggregate()` 内部）：`n_title`/`n_artist` 供去重 key 与
+/// 排序 tie-break **复用**，避免在 `HashMap` 键与比较器里重复调用 `norm()`（D7）。
+struct ScoredCandidate {
+    /// 总分（title 相等 0.5 + artist 相等 0.4 + title 包含 0.2 + artist 包含 0.1 + album 相等 0.3）。
+    score: f32,
+    /// `norm(candidate.title)`（打分阶段算一次）。
+    n_title: String,
+    /// `norm(candidate.artist)`（打分阶段算一次）。
+    n_artist: String,
+    /// 原始候选（**文本不折叠**，展示/填入/写盘用的就是它）。
+    candidate: SongCandidate,
 }
 
 /// JSON 值转字符串（string / int / uint 兜底；酷狗 `FileHash`/取词候选 `id` 可能是数字）。

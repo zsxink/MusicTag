@@ -59,8 +59,135 @@ fn norm_trims_fullwidth_and_lowercases() {
     assert_eq!(norm(" 晴天 "), "晴天");
     assert_eq!(norm("ＨＥＬＬＯ　ＷＯＲＬＤ"), "hello world");
     assert_eq!(norm("  AbC　１２３ "), "abc 123");
-    // 半角已保序；简繁不转换（V1 不做）
+    // 半角已保序
     assert_eq!(norm("晴天"), "晴天");
+}
+
+#[test]
+fn norm_folds_traditional_to_simplified() {
+    // fix-search-sources-locale D5：`norm` 管线新增 **繁→简折叠**（trim → 繁→简 → 全角半角 → 小写）。
+    // 折叠只作用于**比较侧**，让 iTunes HK 的繁体候选能匹配简体本地标签。
+    assert_eq!(norm("周杰倫"), "周杰伦", "繁体艺人应折叠为简体后再比较");
+    assert_eq!(norm("葉惠美"), "叶惠美");
+    assert_eq!(norm("  乾紅  "), "干红", "trim 与折叠同时生效");
+    // 全角 + 繁体混合：折叠在全角半角之前
+    assert_eq!(norm("周杰倫Ａ"), "周杰伦a", "折叠 + 全角转半角 + 小写串联");
+    // 幂等：反复 norm 不漂移
+    assert_eq!(norm(&norm("周杰倫")), norm("周杰倫"));
+}
+
+#[test]
+fn artist_match_folds_traditional_candidate() {
+    // spec「繁简艺人匹配」：本地 artist = 简体「周杰伦」、远端候选 = 繁体「周杰倫」
+    // → 归一化后相等 → `artist_match` = 0.4（**不折叠时为 0**，中文歌走 HK 时最强信号丢失）。
+    assert_eq!(
+        artist_match(&norm("周杰伦"), &norm("周杰倫")),
+        0.4,
+        "繁体候选折叠后与简体查询 artist 相等，应得满分 0.4（不折叠时为 0）"
+    );
+    // 直接对未归一化值比较仍是 0（守住「打分函数收已归一化值」这一契约：
+    // 折叠发生在 norm()，不在 title_match/artist_match 内部）
+    assert_eq!(
+        artist_match("周杰伦", "周杰倫"),
+        0.0,
+        "artist_match 本身不折叠——折叠由 norm() 负责"
+    );
+    // 繁体专辑同理（album_match 亦收归一化值）
+    assert_eq!(album_match(&norm("葉惠美"), &norm("叶惠美")), 0.3);
+}
+
+#[test]
+fn norm_is_only_used_for_comparison_and_candidate_text_is_preserved() {
+    // spec「只折叠比较侧」：折叠 SHALL NOT 改写候选展示/填入/写盘的文本。
+    // 用 iTunes 双店面合并后的形态验证：HK 繁体条目 + US 简体条目同曲 → 聚合折叠为一条，
+    // 且**保留下来的那条仍是远端原文** `周杰倫`（未变成简体），cover_url 也原样保留。
+    let merged = vec![
+        cand(MusicSourceId::Itunes, "hk", "稻香", "周杰倫"),
+        cand(MusicSourceId::Itunes, "us", "稻香", "周杰伦"),
+    ];
+    let songs = aggregate("稻香", "周杰伦", "", merged);
+    assert_eq!(songs.len(), 1, "同源繁简同曲折叠为一条");
+    assert_eq!(
+        songs[0].artist, "周杰倫",
+        "候选文本必须保持远端原文（折叠只作用于比较侧，不改写展示/填入/写盘文本）"
+    );
+    assert_eq!(songs[0].id, "hk", "同分保留先出现者");
+}
+
+#[test]
+fn aggregate_keeps_traditional_and_simplified_on_same_song_across_sources() {
+    // spec「繁简不影响跨源保留」：**不同来源**返回同一首歌的繁体与简体条目 → 跨源不折叠、
+    // 各自保留并排展示（各带来源 badge）。与上面的「同源折叠」构成对照。
+    let songs = aggregate(
+        "稻香",
+        "周杰伦",
+        "",
+        vec![
+            cand(MusicSourceId::Itunes, "i-hk", "稻香", "周杰倫"),
+            cand(MusicSourceId::Netease, "n", "稻香", "周杰伦"),
+        ],
+    );
+    assert_eq!(songs.len(), 2, "跨源不折叠：繁/简两条各自保留");
+    assert_eq!(songs[0].source, MusicSourceId::Netease, "按来源分组：Netease 在前");
+    assert_eq!(songs[0].id, "n");
+    assert_eq!(songs[1].source, MusicSourceId::Itunes);
+    assert_eq!(songs[1].id, "i-hk");
+    assert_eq!(songs[1].artist, "周杰倫", "繁体条目文本保持原文");
+}
+
+#[test]
+fn aggregate_dedups_same_source_traditional_vs_simplified() {
+    // spec「繁简同曲同源折叠」：**同一来源**返回同一首歌的繁体与简体两条（归一化 key 相同）
+    // → 该源只保留得分最高一条；同分保留先出现的一条。
+    let songs = aggregate(
+        "稻香",
+        "周杰伦",
+        "",
+        vec![
+            cand(MusicSourceId::Itunes, "hk", "稻香", "周杰倫"),
+            cand(MusicSourceId::Itunes, "us", "稻香", "周杰伦"),
+            cand(MusicSourceId::Itunes, "hk-live", "稻香", "周杰倫"),
+        ],
+    );
+    assert_eq!(songs.len(), 1, "同源繁简同曲折叠为一条");
+    assert_eq!(songs[0].id, "hk", "同分保留先出现者");
+    assert_eq!(songs[0].artist, "周杰倫");
+}
+
+#[test]
+fn aggregate_first_wins_tie_break_is_by_input_order() {
+    // `aggregate` 的**契约前提**：输入须按固定来源序展开（D7），同分同 key 时「先到者赢」。
+    // 故 aggregate 本身对输入顺序**敏感**（这是设计，不是缺陷）——iTunes 双店面合并后
+    // 「同曲保留先出现的 HK 繁体条目」正是依赖这条（spec「繁简同曲同源折叠」：
+    // 同分保留先出现的一条，即店面序在前的 HK）。
+    //
+    // 本用例把该前提显式钉住：顺序 A 先喂繁体、后喂简体 → 保留繁体；顺序 B 相反 → 保留简体。
+    // 「结果可复现」由 `search_song_with_sources` 按固定来源序展开来保证（见下面的
+    // `search_song_result_is_reproducible_across_join_completion_order`）。
+    let songs = aggregate(
+        "稻香",
+        "周杰伦",
+        "",
+        vec![
+            cand(MusicSourceId::Itunes, "i-hk", "稻香", "周杰倫"),
+            cand(MusicSourceId::Itunes, "i-us", "稻香", "周杰伦"),
+        ],
+    );
+    assert_eq!(songs.len(), 1);
+    assert_eq!(songs[0].id, "i-hk", "同分保留先出现者");
+    assert_eq!(songs[0].artist, "周杰倫");
+
+    let songs = aggregate(
+        "稻香",
+        "周杰伦",
+        "",
+        vec![
+            cand(MusicSourceId::Itunes, "i-us", "稻香", "周杰伦"),
+            cand(MusicSourceId::Itunes, "i-hk", "稻香", "周杰倫"),
+        ],
+    );
+    assert_eq!(songs.len(), 1);
+    assert_eq!(songs[0].id, "i-us", "顺序反转 → 保留先出现的那条");
 }
 
 // ---- 打分权重 ----
@@ -579,6 +706,98 @@ impl MusicSource for FakeSource {
     }
     async fn fetch_lyric(&self, _client: &reqwest::Client, _id: &str) -> Option<String> {
         None
+    }
+}
+
+#[tokio::test]
+async fn search_song_result_is_reproducible_across_join_completion_order() {
+    // spec「结果可复现」（D7）：**「固定来源序展开」的真实 seam 是 `search_song_with_sources`**
+    // ——它的 JoinSet 完成顺序不确定（每次运行都可能不同），但候选必须按固定 `order` 展开后再聚合，
+    // 故最终候选列表与顺序一致。
+    //
+    // 用语种错配 + 同分同 key 制造仲裁点：iTunes 组内繁简同曲的胜者取决于**展开序**，
+    // 若展开退化为 `raw.values()`（HashMap 序）或按 JoinSet 完成序展开，胜者与展示文本就会抖动。
+    // 下面**连续运行 8 次**（每次 JoinSet 完成序都可能不同）并断言结果完全一致。
+    let client = reqwest::Client::new();
+    let shape = |songs: &[SongCandidate]| -> Vec<(MusicSourceId, String, String, String)> {
+        songs
+            .iter()
+            .map(|s| (s.source, s.id.clone(), s.artist.clone(), s.album.clone()))
+            .collect()
+    };
+
+    let mut first: Option<Vec<(MusicSourceId, String, String, String)>> = None;
+    for _ in 0..8 {
+        let sources: Vec<Box<dyn MusicSource>> = vec![
+            Box::new(FakeSource {
+                id: MusicSourceId::Netease,
+                behavior: FakeBehavior::Return(vec![cand(
+                    MusicSourceId::Netease,
+                    "n1",
+                    "稻香",
+                    "周杰伦",
+                )]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::QqMusic,
+                behavior: FakeBehavior::Return(vec![cand(
+                    MusicSourceId::QqMusic,
+                    "q1",
+                    "稻香",
+                    "周杰伦",
+                )]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Kugou,
+                behavior: FakeBehavior::Return(vec![cand(
+                    MusicSourceId::Kugou,
+                    "k1",
+                    "稻香",
+                    "周杰伦",
+                )]),
+            }),
+            Box::new(FakeSource {
+                id: MusicSourceId::Lrclib,
+                behavior: FakeBehavior::Return(vec![cand(
+                    MusicSourceId::Lrclib,
+                    "l1",
+                    "稻香",
+                    "周杰伦",
+                )]),
+            }),
+            // 同源 Itunes 繁简同曲两条（不同 id、不同文本 → 胜者决定展示文本）
+            Box::new(FakeSource {
+                id: MusicSourceId::Itunes,
+                behavior: FakeBehavior::Return(vec![
+                    cand(MusicSourceId::Itunes, "i-hk", "稻香", "周杰倫"),
+                    cand(MusicSourceId::Itunes, "i-us", "稻香", "周杰伦"),
+                ]),
+            }),
+        ];
+        let result = search_song_with_sources(
+            &client,
+            "稻香",
+            "周杰伦",
+            "",
+            sources,
+            Duration::from_secs(2),
+        )
+        .await;
+        let got = shape(&result.songs);
+        match &first {
+            None => {
+                // 早检 + 关键事实：跨源不折叠（五源各 1 条 = 5 条；Itunes 的 2 条繁简同曲折叠为 1 条）。
+                assert_eq!(got.len(), 5, "五源各 1 条（Itunes 繁简折叠后为 1 条）= 5 条");
+                assert_eq!(got[4].0, MusicSourceId::Itunes, "Itunes 组垫底");
+                assert_eq!(got[4].1, "i-hk", "Itunes 组内保留 HK 繁体条目");
+                assert_eq!(got[4].2, "周杰倫", "展示文本为远端原文（未折叠）");
+                first = Some(got);
+            }
+            Some(expected) => assert_eq!(
+                &got, expected,
+                "多次运行的聚合结果必须一致（固定来源序展开，spec「结果可复现」）"
+            ),
+        }
     }
 }
 

@@ -6,6 +6,8 @@
 //   secret `NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt` 前后包裹 → `md5` 摘要（小写 hex）做 `signature`；
 //   不传 `callback` → 服务器返回**纯 JSON**（非 JSONP 包裹），解析 `data.lists[]`；
 //   `error_code` 非 0（如 20006 签名错）→ 计为源失败；
+//   （2026-10 fix-search-sources-locale D2）响应**本就带** `Image` 封面字段 → 经 `kugou_cover_url`
+//   派生 cover_url（`{size}`→480、http→https、singerimg 歌手头像丢弃），此前误记「无封面 URL」；
 // - 取词：两步 —— `lyrics.kugou.com/search?ver=1&man=yes&client=pc&hash=<FileHash>` 拿候选
 //   `id`+`accesskey` → `lyrics.kugou.com/download?id=&accesskey=&fmt=lrc&charset=utf8` 返回 base64 LRC。
 // 签名纯 Rust 实现（`md5` 依赖，无 JS 引擎）；已知向量单测锁算法（与 crypto.rs weapi/linuxapi 同哲学）。
@@ -210,8 +212,8 @@ pub fn is_error_response(json: &serde_json::Value) -> bool {
 /// 解析 complexsearch 搜索响应 `data.lists[]` → 候选。
 ///
 /// 映射（search-sources-renewal D3）：`FileHash` → id；`SongName` → title；`SingerName` → artist；
-/// `AlbumName` → album；封面缺省 None（酷狗搜索响应无封面 URL，点选走 download_cover 需另行构造，
-/// V1 封面搜索由其他源/前端兜底）。空字段兜底空串 / None（Rust 不 trim）。
+/// `AlbumName` → album；`Image` → 封面 URL（经 `kugou_cover_url` 清洗：占位符替换 + https 升级 +
+/// 歌手头像丢弃）。空字段兜空串 / None（Rust 不 trim）。
 pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
     let lists = match json["data"]["lists"].as_array() {
         Some(a) => a,
@@ -225,9 +227,55 @@ pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
             title: it["SongName"].as_str().unwrap_or_default().to_string(),
             artist: it["SingerName"].as_str().unwrap_or_default().to_string(),
             album: it["AlbumName"].as_str().unwrap_or_default().to_string(),
-            cover_url: None,
+            cover_url: it["Image"].as_str().and_then(kugou_cover_url),
         })
         .collect()
+}
+
+/// 酷狗 `Image` 字段 → 候选 `cover_url`（fix-search-sources-locale D2，零新增依赖）。
+///
+/// 规则**依次**为：
+/// 1. 空 / 缺字段 → `None`；
+/// 2. `{size}` 是**字面占位符**（上游原文就是花括号），整串替换为 `480`；
+/// 3. `http://` → `https://`（Issue #113：WKWebView 拦 http 混合内容）；
+/// 4. host 为 `singerimg.kugou.com`（歌手头像，不是专辑封面，混进封面网格会误导点选）→ `None`；
+///    其余 host（实测 `imge.kugou.com` 为专辑封面）保留。
+///
+/// `pub`：供 `src-tauri/tests/searcher_kugou_tests.rs` 直接断言四类输入（集成测试是独立 crate，
+/// 仅 `pub` 可见；同 `parse_search_response` 惯例），避免把 URL 清洗逻辑埋进 map 闭包。
+pub fn kugou_cover_url(raw: &str) -> Option<String> {
+    let url = raw.trim().replace("{size}", "480");
+    if url.is_empty() {
+        return None;
+    }
+    let url = if let Some(rest) = url.strip_prefix("http://") {
+        format!("https://{rest}")
+    } else {
+        url
+    };
+    if singer_image_host(&url) {
+        return None;
+    }
+    Some(url)
+}
+
+/// host 是否为酷狗歌手头像域（`singerimg.kugou.com`，含其子域/端口形态）。
+///
+/// 按 `://` 后的 authority 段判定（到第一个 `/`、`?` 或 `#` 为止），大小写不敏感；
+/// 端口后缀（`singerimg.kugou.com:80`）同样识别。
+fn singer_image_host(url: &str) -> bool {
+    let after_scheme = match url.split_once("://") {
+        Some((_, rest)) => rest,
+        None => return false,
+    };
+    let authority = after_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    // 去掉 userinfo 与端口。
+    let host = authority.rsplit('@').next().unwrap_or_default();
+    let host = host.split(':').next().unwrap_or_default();
+    host.eq_ignore_ascii_case("singerimg.kugou.com")
 }
 
 /// 解析 `/search` 候选第一个：`id` + `accesskey`（两步取词第一步，供 `/download`）。

@@ -76,6 +76,41 @@ pub fn mock_http_capture(response: Vec<u8>) -> (String, Arc<Mutex<String>>) {
     (format!("http://{addr}"), captured)
 }
 
+/// 启动可应答多次的极简 HTTP 服务器：按请求目标（含 query）分流响应，返回
+/// `(mock_url, 捕获的请求目标序列)`。
+///
+/// 供 iTunes 双店面并发搜索（`storefronts` 按 `country=HK`/`country=US` 各发一次请求）
+/// 断言「请求 2 次 + 按 query 分流不同响应」：`routes` 收到完整请求目标返回本次响应
+/// 字节，捕获值按到达顺序追加。应答 `expected` 次后关闭（并发连接落 backlog，不会死锁）。
+pub fn mock_http_router(
+    routes: impl Fn(&str) -> Vec<u8> + Send + 'static,
+    expected: usize,
+) -> (String, Arc<Mutex<Vec<String>>>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
+    let addr = listener.local_addr().expect("取本地端口");
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_thread = captured.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().take(expected) {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 8192];
+            let _ = s.read(&mut buf);
+            let text = String::from_utf8_lossy(&buf);
+            let target = text
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or_default()
+                .to_string();
+            captured_for_thread.lock().unwrap().push(target.clone());
+            let response = routes(&target);
+            let _ = s.write_all(&response);
+            let _ = s.flush();
+        }
+    });
+    (format!("http://{addr}"), captured)
+}
+
 /// 生成一张 2x2 红色 PNG 的字节（`image` crate 编码）。
 pub fn tiny_png_bytes() -> Vec<u8> {
     let mut buf = Cursor::new(Vec::new());

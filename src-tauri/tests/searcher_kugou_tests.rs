@@ -12,8 +12,8 @@
 mod common;
 
 use app_lib::service::searcher::kugou::{
-    Kugou, is_error_response, parse_lyric_download, parse_lyric_search, parse_search_response,
-    search_params, signature,
+    Kugou, is_error_response, kugou_cover_url, parse_lyric_download, parse_lyric_search,
+    parse_search_response, search_params, signature,
 };
 use app_lib::service::searcher::MusicSource;
 use app_lib::model::MusicSourceId;
@@ -146,7 +146,101 @@ fn parses_search_response_full_fields() {
     assert_eq!(s.title, "晴天");
     assert_eq!(s.artist, "周杰伦");
     assert_eq!(s.album, "叶惠美");
-    assert_eq!(s.cover_url, None, "酷狗搜索响应无封面 URL");
+    // `Image` 缺失 → cover_url = None（fix-search-sources-locale D2 语义翻转：响应**本就有**
+    // 封面字段，此前「无封面 URL」是事实错误陈述；缺字段时才是 None）。
+    assert_eq!(
+        s.cover_url, None,
+        "`Image` 缺失时应为 None（响应无封面字段，不是「酷狗无封面」）；非空 Image 见下方解析用例"
+    );
+}
+
+#[test]
+fn parses_search_response_maps_image_field_to_cover_url() {
+    // spec「封面 URL 派生」（D2）：`Image` = `http://imge.kugou.com/stdmusic/{size}/...jpg`
+    // → `cover_url` = `https://imge.kugou.com/stdmusic/480/...jpg`（占位符替换 + https 升级）。
+    // 解析层（`parse_search_response`）必须真的调用 `kugou_cover_url`，不是恒 None。
+    let json = serde_json::json!({
+        "status": 1,
+        "error_code": 0,
+        "data": {
+            "lists": [{
+                "FileHash": "B3A52A7A958BF0AED0EBFBA2E9A818B7",
+                "SongName": "晴天",
+                "SingerName": "周杰伦",
+                "AlbumName": "叶惠美",
+                "Image": "http://imge.kugou.com/stdmusic/{size}/20170101/abcdef.jpg"
+            }]
+        }
+    });
+    let songs = parse_search_response(&json);
+    assert_eq!(
+        songs[0].cover_url.as_deref(),
+        Some("https://imge.kugou.com/stdmusic/480/20170101/abcdef.jpg"),
+        "Image 字段应派生为封面 URL（{{size}} → 480 + http → https）"
+    );
+
+    // `Image` 指向歌手头像（singerimg.kugou.com）→ 不入封面候选（spec「歌手头像不入封面候选」）
+    let json_singer = serde_json::json!({
+        "data": {"lists": [{
+            "FileHash": "H1", "SongName": "晴天", "SingerName": "周杰伦",
+            "Image": "http://singerimg.kugou.com/{size}/singer.jpg"
+        }]}
+    });
+    assert_eq!(
+        parse_search_response(&json_singer)[0].cover_url, None,
+        "歌手头像不入封面候选"
+    );
+
+    // `Image` 为空串 → None（spec「无封面字段」）
+    let json_empty = serde_json::json!({
+        "data": {"lists": [{"FileHash": "E1", "SongName": "晴天", "Image": ""}]}
+    });
+    assert_eq!(
+        parse_search_response(&json_empty)[0].cover_url, None,
+        "空 Image → None"
+    );
+}
+
+#[test]
+fn kugou_cover_url_derives_four_input_classes() {
+    // D2 `kugou_cover_url` 四类输入单测（spec「封面 URL 派生」/「歌手头像不入封面候选」/
+    // 「无封面字段」）。此处直接断言纯函数，避免把 URL 清洗逻辑埋进 parse 的 map 闭包。
+    //
+    // ① 正常 `imge` host（实测 imge.kugou.com 为专辑封面）：占位符替换 + https 升级
+    assert_eq!(
+        kugou_cover_url("http://imge.kugou.com/stdmusic/{size}/20170101/abcdef.jpg").as_deref(),
+        Some("https://imge.kugou.com/stdmusic/480/20170101/abcdef.jpg"),
+        "① 正常 imge：{{size}} → 480、http → https"
+    );
+    // 已是 https 且无占位符 → 原样保留（只做无损清洗）
+    assert_eq!(
+        kugou_cover_url("https://imge.kugou.com/stdmusic/480/20170101/abcdef.jpg").as_deref(),
+        Some("https://imge.kugou.com/stdmusic/480/20170101/abcdef.jpg"),
+        "① 正常 imge（已 https）：原样保留"
+    );
+
+    // ② `{size}` 字面占位符整串替换为 480（上游原文就是花括号，不是模板语法）
+    assert_eq!(
+        kugou_cover_url("http://imge.kugou.com/stdmusic/{size}/x.jpg").as_deref(),
+        Some("https://imge.kugou.com/stdmusic/480/x.jpg"),
+        "② {{size}} 字面占位符 → 480"
+    );
+
+    // ③ 歌手头像 host（singerimg.kugou.com）→ None（含端口形态）
+    assert_eq!(
+        kugou_cover_url("http://singerimg.kugou.com/{size}/singer.jpg"),
+        None,
+        "③ singerimg 歌手头像不入封面候选"
+    );
+    assert_eq!(
+        kugou_cover_url("http://singerimg.kugou.com:80/{size}/singer.jpg"),
+        None,
+        "③ singerimg（带端口）仍应识别为歌手头像"
+    );
+
+    // ④ 空 / 空白 → None
+    assert_eq!(kugou_cover_url(""), None, "④ 空串 → None");
+    assert_eq!(kugou_cover_url("   "), None, "④ 纯空白 → None");
 }
 
 #[test]
