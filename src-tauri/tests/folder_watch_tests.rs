@@ -57,3 +57,22 @@ fn event_serialization_matches_the_frontend_contract() {
         serde_json::json!({ "dir": "/music", "watchId": 42, "error": null })
     );
 }
+
+#[test]
+fn main_window_can_subscribe_and_unsubscribe_from_folder_events() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json");
+    let capability: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+
+    assert_eq!(capability["windows"], serde_json::json!(["main"]));
+    let permissions = capability["permissions"].as_array().unwrap();
+    let granted: std::collections::BTreeSet<_> = permissions
+        .iter()
+        .map(|permission| permission.as_str().unwrap())
+        .collect();
+    assert_eq!(permissions.len(), 2);
+    assert_eq!(
+        granted,
+        std::collections::BTreeSet::from(["core:event:allow-listen", "core:event:allow-unlisten",])
+    );
+}
