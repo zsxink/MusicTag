@@ -37,8 +37,8 @@ Domain: `both`，顺序固定 **Rust → Vue**（前端 C2 归一化镜像依赖
 
 ## 4. Vue 归一化镜像（vue-frontend，Rust 完成后）
 
-- [ ] **4.1** 新增 `src/lib/simplified.ts`（`?raw` 加载 `../../src-tauri/src/service/searcher/opencc/*.txt` + `toSimplified`，**与 Rust 同规则同表**：先词后字、最长优先、取第一个候选、同样按 `\t`/单空格解析、同样跳过 `#` 与空行）与 `src/lib/normalize.ts`（由 `src/store/song.ts:851 normalizeForMatch` 迁出，接入 `toSimplified` + 全角半角 + 小写）。落位遵守 `design.md §10.0`：`lib/` 纯工具层，**无 Vue / IPC 依赖**，`src/lib/` 目录已存在（含 `cover.ts`/`path.ts`/`theme.ts`）。跨目录 `?raw` 已实测在 vitest / vue-tsc / vite build 三链路通过（design D6），**若失败**按 D6 兜底改 codegen + 漂移断言并在 progress 记录。Owner: Vue Dev；文件 `src/lib/{simplified.ts,normalize.ts}`；依赖 2.5；映射 spec「繁简归一化」前后端同规则 scenario。
-- [ ] **4.2** `src/store/song.ts` 改为从 `src/lib/normalize.ts` 引入并删除本地实现（`:851-863`）；`findSameSong`（`:866`）语义不变（仍拒同名不同歌）。Owner: 同一 Vue Dev；文件 `src/store/song.ts`；依赖 4.1。运行 `npm run test` 与 `npm run build`；Leader 审计并提交 checkpoint。
+- [x] **4.1** 新增 `src/lib/simplified.ts`（`?raw` 加载 `../../src-tauri/src/service/searcher/opencc/*.txt` + `toSimplified`，**与 Rust 同规则同表**：先词后字、最长优先、取第一个候选、同样按 `\t`/单空格解析、同样跳过 `#` 与空行）与 `src/lib/normalize.ts`（由 `src/store/song.ts:851 normalizeForMatch` 迁出，接入 `toSimplified` + 全角半角 + 小写）。落位遵守 `design.md §10.0`：`lib/` 纯工具层，**无 Vue / IPC 依赖**，`src/lib/` 目录已存在（含 `cover.ts`/`path.ts`/`theme.ts`）。跨目录 `?raw` 已实测在 vitest / vue-tsc / vite build 三链路通过（design D6），**若失败**按 D6 兜底改 codegen + 漂移断言并在 progress 记录。Owner: Vue Dev；文件 `src/lib/{simplified.ts,normalize.ts}`；依赖 2.5；映射 spec「繁简归一化」前后端同规则 scenario。
+- [x] **4.2** `src/store/song.ts` 改为从 `src/lib/normalize.ts` 引入并删除本地实现（`:851-863`）；`findSameSong`（`:866`）语义不变（仍拒同名不同歌）。Owner: 同一 Vue Dev；文件 `src/store/song.ts`；依赖 4.1。运行 `npm run test` 与 `npm run build`；Leader 审计并提交 checkpoint。
 
 ## 5. Vue 测试（tester）
 

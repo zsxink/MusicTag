@@ -30,6 +30,7 @@ import type {
   SongSummary,
 } from '../api/types'
 import { bytesToCoverInput as defaultBytesToCoverInput } from '../lib/cover'
+import { normalizeForMatch } from '../lib/normalize'
 import { fileName, replaceFileName } from '../lib/path'
 
 /** 参与 dirty 判定的可编辑字段（design.md D6：path/lyrics_source 不参与）。 */
@@ -843,24 +844,6 @@ export async function manualSearch(
 
 /** C2 换源固定顺序（netease → qqmusic → kugou → lrclib，search-sources-renewal D9：iTunes 无歌词不入链），跳过原源。 */
 const C2_SOURCE_ORDER: MusicSourceId[] = ['netease', 'qqmusic', 'kugou', 'lrclib']
-
-/**
- * 归一化（对齐 Rust `searcher::norm`：trim + 全角转半角 + 小写），供 C2 候选身份校验。
- * 与后端打分归一化保持同规则，避免前后端判定不一致。
- */
-function normalizeForMatch(s: string): string {
-  return s
-    .trim()
-    .split('')
-    .map((ch) => {
-      const code = ch.charCodeAt(0)
-      if (code === 0x3000) return ' ' // 全角空格
-      if (code >= 0xff01 && code <= 0xff5e) return String.fromCharCode(code - 0xfee0)
-      return ch
-    })
-    .join('')
-    .toLowerCase()
-}
 
 /** C2：在单源原始候选中找「归一化 title/artist 与点选候选一致」的那条（防「同名不同歌」）。 */
 function findSameSong(list: SongCandidate[], cand: SongCandidate): SongCandidate | undefined {
