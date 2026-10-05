@@ -27,7 +27,7 @@ Domain: `both`，顺序固定 **Rust → Vue**（前端 C2 归一化镜像依赖
 ## 3. Rust 测试（tester）
 
 - [x] **3.1** `tests/common/mod.rs` 新增 `mock_http_router(routes: impl Fn(&str) -> Vec<u8> + Send + 'static, expected: usize) -> (String, Arc<Mutex<Vec<String>>>)`：按请求目标（含 query）分流响应、应答 `expected` 次后关闭、返回全部捕获目标。**不得**复用现有两个助手（`mock_http_once:30` / `mock_http_capture:53` 末端 `break`，各只服务一个请求且响应固定）——它们被其它测试共用，**保持不动**。Owner: Tester；文件 `src-tauri/tests/common/mod.rs`；依赖 2.3。
-- [ ] **3.2** 补足断言。
+- [x] **3.2** 补足断言。**结果**：新增 26 个测试（itunes +6、kugou +2、mod +7、qqmusic +1、simplified +10 新建文件），`cargo test` exit 0（267 passed / 0 failed / 0 ignored，27 个 test binary）、`cargo check --all-targets` exit 0 零 warning；3 处 E0063 改 `..Default::default()`；`http_error_status_returns_err` 假通过已消除（两店面都真收到 404 + 断言捕获数 == 2）。Leader 独立核验：fixture 判别力逐条对上上游表（`沈→沈 沉` 首候选为原字故测试推理成立；`乾隆→乾隆` 为恒等条目、确实无法证明查词表，判别用例是 `一坏→一坯`）；写边界仅 5 个授权文件；`aggregate` 生产唯一调用点 `mod.rs:183` 入参来自 `order` 固定序，「输入须按固定来源序」前提在生产成立。
   - **双店面**（`searcher_itunes_tests.rs`）：HK→繁体 JSON、US→简体 JSON → 断言请求 **2 次**、`country` 分别 `HK`/`US`、**返回序 HK 在前**；一路 500 一路 200 → `Ok` 且只含成功店面；两路 500 → `Err`，**并断言该情形下 `search_song_with_sources` 的 `all_failed` 才为 true、且 `source_stats` 记 0**（映射 `search-ui` delta「离线降级」：iTunes 仅两店面全失败才计为失败）；经 `aggregate` 后 HK/US 同曲（繁/简）折叠为一条。
   - **更新既有 3 处 `Itunes { search_url }` 字面构造**（`:87/:106/:125`，加字段后缺字段编译不过，建议 `..Default::default()`）与 **1 处 `country=CN` 断言**（`:99`）。
   - **酷狗封面**（`searcher_kugou_tests.rs`）：`kugou_cover_url` 四类输入（正常 `imge` / `{size}` 替换 / `singerimg` 丢弃 / 空或缺失）；更新 `:149` 的 `cover_url: None` 断言**及其断言消息**。

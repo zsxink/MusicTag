@@ -1,7 +1,8 @@
 // MusicTag — `service/searcher/qqmusic.rs` QQ 音乐客户端单测（rust-tests-separation 外置）。
 //
 // 原 `#[cfg(test)] mod tests` 内嵌块整体迁出（production `src/` 零 `#[cfg(test)]`）。
-// 覆盖 search-sources-renewal D2：
+// 覆盖 search-sources-renewal D2 + fix-search-sources-locale D1：
+// - 默认搜索端点为 `search_for_qq_cp`（旧端点 `client_search_cp` 已失效、不留旧路径）；
 // - `parse_search_response` 字段映射（songmid 作 id / singer 逗号连接 / 空 album 兜底未分类专辑 /
 //   albummid 封面模板 / 无 songmid 回退 songid）；
 // - `is_error_response`（HTTP 200 但 code≠0 → 源失败）；
@@ -20,8 +21,26 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use common::{mock_http_capture, mock_http_once};
 
 #[test]
+fn default_search_url_uses_search_for_qq_cp_endpoint() {
+    // spec「端点失效不留旧路径」（fix-search-sources-locale D1）：默认端点必须是
+    // `search_for_qq_cp`；已失效的 `client_search_cp` 不得再作为可用端点出现
+    //（实测 `client_search_cp` 4/4 HTTPError，`search_for_qq_cp` 4/4 HTTP 200/code:0）。
+    let qq = QqMusic::default();
+    assert!(
+        qq.search_url.contains("search_for_qq_cp"),
+        "默认搜索端点应为 search_for_qq_cp，实际: {}",
+        qq.search_url
+    );
+    assert!(
+        !qq.search_url.contains("client_search_cp"),
+        "已失效的 client_search_cp 不得再作为默认端点，实际: {}",
+        qq.search_url
+    );
+}
+
+#[test]
 fn parses_search_response_full_fields() {
-    // client_search_cp 响应：`data.song.list[]`，顶层 `code:0`
+    // `search_for_qq_cp` 响应：`data.song.list[]`，顶层 `code:0`（与旧端点同结构）
     let json = serde_json::json!({
         "code": 0,
         "data": {
