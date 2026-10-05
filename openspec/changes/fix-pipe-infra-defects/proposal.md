@@ -1,5 +1,7 @@
 ## Why
 
+关联 GitHub Issue：#147（`[Infra] pipe 工作流基建既有缺陷汇总`）。
+
 pipe 工作流的四项既有基建缺陷（Issue #147）在最近一次完整跑通 bootstrap → integrate 时暴露，都会让主 Agent 拿到**错误的事实**并据此误判：归档 wrapper 报出的 `Rules for 'all' must be an array of strings` 与 openspec 版本无关，真因是 `openspec/config.yaml` 的规则写法在 YAML 层就失效了；`source-fingerprint.js` 的指纹随「删除是否已提交」漂移，导致 Verify 记录值与 integrate 复算值不一致而使整条验证作废；`wait-ci.js` 对瞬时网络错误不重试且与真实 CI 失败同码同形；仓库 CI 从不运行 pipe 自身的 13 个原生测试套件，使这些质量门在远端完全不可见。四项彼此独立，但都属同一类问题——**工具给出不可复核或不可区分的结果**，故合为一个 infra 变更统一排期。
 
 ## What Changes
