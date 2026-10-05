@@ -2218,4 +2218,30 @@ describe('目录监听与独立列表刷新（#123）', () => {
     await settle()
     expect(lateUnlisten).toHaveBeenCalledOnce()
   })
+
+  it('事件订阅完成后才允许安装 watcher，随后首次列表读取', async () => {
+    stopFolderWatching()
+    await settle()
+    const order: string[] = []
+    let resolveListen!: (release: () => void) => void
+    const listen = vi.fn(() => {
+      order.push('listen-start')
+      return new Promise<() => void>((resolve) => { resolveListen = resolve })
+    })
+    const orderedWatch = vi.fn(async (dir: string | null) => {
+      order.push(`watch:${dir}`)
+    })
+    const starting = startFolderWatching({ listen, watch: orderedWatch })
+    await settle()
+    expect(orderedWatch).not.toHaveBeenCalled()
+    resolveListen(vi.fn())
+    await starting
+
+    const loader = vi.fn(async () => {
+      order.push('list')
+      return [s('/a/song')]
+    })
+    await activateFolder('/a', loader)
+    expect(order).toEqual(['listen-start', 'watch:/a', 'list'])
+  })
 })
