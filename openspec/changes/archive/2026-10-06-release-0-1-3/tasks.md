@@ -13,7 +13,7 @@
 ## Validation and release
 
 - [x] 8. Run focused regression checks for changed behavior; if no defects were found, preserve CR evidence and run/cite relevant existing tests.
-- [ ] 9. Run strict OpenSpec validation for this change and all applicable CI-equivalent checks from the current workflow; verify all version declarations and README badge agree.
+- [x] 9. Run strict OpenSpec validation for this change and all applicable CI-equivalent checks from the current workflow; verify all version declarations and README badge agree.
 - [ ] 10. After merge and required CI success, tag `v0.1.3` using the existing tag-triggered release workflow, create the draft Release, and verify build artifacts/workflow conclusion and release notes.
 
 ## Acceptance evidence
