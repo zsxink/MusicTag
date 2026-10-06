@@ -5,13 +5,19 @@
 # MusicTag
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v0.1.2-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/版本-v0.1.3-blue.svg" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
   <img src="https://img.shields.io/badge/License-BUSL%201.1-red.svg" alt="license" />
   <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
 </p>
+
+## v0.1.3 更新
+
+- 支持导出音乐文件中已嵌入的封面。
+- 文件夹内容变化后自动刷新歌曲列表。
+- 展示搜索源可用状态，并适配中文和英文界面。
 
 ## 项目简介
 
