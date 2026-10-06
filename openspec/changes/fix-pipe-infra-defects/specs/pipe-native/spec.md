@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: 工具版本固定与 artifact 规则有效性
-pipe 工作流 SHALL 把 openspec CLI 的版本固定为与仓库 CI 同源的单一版本（当前 `@fission-ai/openspec@1.5.0`），并 SHALL 在唯一的共享常量处声明该版本，使所有调用点（确定性命令 wrapper、pipe-core 与 pipe-native 工具、preflight 脚本）SHALL 经由该常量或等价的显式固定形式调用，不得依赖 PATH 上解析到的任意版本。静态自检 SHALL 断言所有 openspec 调用点确实固定了版本，并在版本固定缺失或不一致时 fail-closed。
+pipe 工作流 SHALL 把 openspec CLI 的版本固定为与仓库 CI 同源的单一版本（当前 `@fission-ai/openspec@1.5.0`），并 SHALL 在唯一的共享常量处声明该版本，使所有调用点（确定性命令 wrapper、pipe-core 与 pipe-native 工具、preflight 脚本、散文指令面与只读角色权限白名单）SHALL 经由该常量或等价的显式固定形式调用，不得依赖 PATH 上解析到的任意版本；散文指令面写死与常量同源的完整版本，权限白名单可用 `@fission-ai/openspec@*` 版本通配。静态自检 SHALL 断言所有 openspec 调用点确实固定了版本，并在版本固定缺失或不一致时 fail-closed。
 
 `openspec/config.yaml` 的 `rules` SHALL 能被 YAML 解析为字符串数组：任何含冒号加空格等 YAML 特殊结构的规则条目 SHALL 加引号，使 artifact 级规则真正生效。自检或等价门禁 SHALL 能发现规则被静默丢弃（CLI 输出 rules 解析告警）的情形。
 

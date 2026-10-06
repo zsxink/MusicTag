@@ -21,7 +21,7 @@ This is an **agent-driven** operation - you will read delta specs and directly e
 
 1. **If no change name provided, prompt for selection**
 
-   Run `openspec list --json` to get available changes. Use the **AskUserQuestion tool** to let the user select.
+   Run `npx --yes @fission-ai/openspec@1.5.0 list --json` to get available changes. Use the **AskUserQuestion tool** to let the user select.
 
    Show changes that have delta specs (under `specs/` directory).
 
@@ -31,7 +31,7 @@ This is an **agent-driven** operation - you will read delta specs and directly e
 
    Run:
    ```bash
-   openspec status --change "<name>" --json
+   npx --yes @fission-ai/openspec@1.5.0 status --change "<name>" --json
    ```
 
 3. **Find delta specs**

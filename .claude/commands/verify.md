@@ -1,5 +1,5 @@
 ---
-description: 自动验证——派 verify-agent subagent 跑 cargo check/test、npm run build、openspec validate 全绿才算过
+description: 自动验证——派 verify-agent subagent 跑 cargo check/test、npm run build、OpenSpec validate 全绿才算过
 ---
 
 # 自动验证
@@ -14,7 +14,7 @@ description: 自动验证——派 verify-agent subagent 跑 cargo check/test、
 cargo check --manifest-path src-tauri/Cargo.toml  # Rust 类型检查
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust 测试（lofty 读写、加密、压缩等）
 npm run build        # 前端构建（Vite + TS）
-openspec validate <name>   # 变更的 specs/design/tasks 有效性（有变更名时）
+npx --yes @fission-ai/openspec@1.5.0 validate <name>   # 变更的 specs/design/tasks 有效性（有变更名时）
 ```
 
 ## verify-agent 的判定规则（写进 prompt）
@@ -22,7 +22,7 @@ openspec validate <name>   # 变更的 specs/design/tasks 有效性（有变更�
 1. `cargo check --manifest-path src-tauri/Cargo.toml` → 失败立即报告，不继续
 2. `cargo test --manifest-path src-tauri/Cargo.toml` → 有失败列出具体失败测试
 3. `npm run build` → TS 编译错误立即报告
-4. `openspec validate` → 有变更名时校验 artifacts
+4. `npx --yes @fission-ai/openspec@1.5.0 validate` → 有变更名时校验 artifacts
 
 ## 输出（verify-agent 返回）
 
@@ -32,7 +32,7 @@ openspec validate <name>   # 变更的 specs/design/tasks 有效性（有变更�
 ✅ cargo check      通过
 ✅ cargo test       通过（N tests passed）
 ✅ npm run build    通过
-✅ openspec validate 通过
+✅ OpenSpec validate 通过
 
 结论：全部通过，可进入合并。
 ```

@@ -33,13 +33,13 @@ When ready to implement, run /opsx:apply
 
 2. **Create the change directory**
    ```bash
-   openspec new change "<name>"
+   npx --yes @fission-ai/openspec@1.5.0 new change "<name>"
    ```
    This creates a scaffolded change in the planning home resolved by the CLI with `.openspec.yaml`.
 
 3. **Get the artifact build order**
    ```bash
-   openspec status --change "<name>" --json
+   npx --yes @fission-ai/openspec@1.5.0 status --change "<name>" --json
    ```
    Parse the JSON to get:
    - `applyRequires`: array of artifact IDs needed before implementation (e.g., `["tasks"]`)
@@ -55,7 +55,7 @@ When ready to implement, run /opsx:apply
    a. **For each artifact that is `ready` (dependencies satisfied)**:
       - Get instructions:
         ```bash
-        openspec instructions <artifact-id> --change "<name>" --json
+        npx --yes @fission-ai/openspec@1.5.0 instructions <artifact-id> --change "<name>" --json
         ```
       - The instructions JSON includes:
         - `context`: Project background (constraints for you - do NOT include in output)
@@ -70,7 +70,7 @@ When ready to implement, run /opsx:apply
       - Show brief progress: "Created <artifact-id>"
 
    b. **Continue until all `applyRequires` artifacts are complete**
-      - After creating each artifact, re-run `openspec status --change "<name>" --json`
+      - After creating each artifact, re-run `npx --yes @fission-ai/openspec@1.5.0 status --change "<name>" --json`
       - Check if every artifact ID in `applyRequires` has `status: "done"` in the artifacts array
       - Stop when all `applyRequires` artifacts are done
 
@@ -80,7 +80,7 @@ When ready to implement, run /opsx:apply
 
 5. **Show final status**
    ```bash
-   openspec status --change "<name>"
+   npx --yes @fission-ai/openspec@1.5.0 status --change "<name>"
    ```
 
 **Output**
@@ -93,7 +93,7 @@ After completing all artifacts, summarize:
 
 **Artifact Creation Guidelines**
 
-- Follow the `instruction` field from `openspec instructions` for each artifact type
+- Follow the `instruction` field from `npx --yes @fission-ai/openspec@1.5.0 instructions` for each artifact type
 - The schema defines what each artifact should contain - follow it
 - Read dependency artifacts for context before creating new ones
 - Use `template` as the structure for your output file - fill in its sections

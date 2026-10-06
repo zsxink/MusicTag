@@ -11,6 +11,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { makeRunCommand } = require('./command-adapter.js');
 const stateApi = require('./state.js');
+// 归档回退分支同样固定 openspec 版本（design D1），与 archive-change.js 保持一致。
+const { openspecArchiveArgs } = require('../pipe-native/openspec-version.cjs');
 
 // 固定 checkpoint 顺序。
 const CHECKPOINTS = [
@@ -301,7 +303,7 @@ async function runArchiveCommand(root, change, log) {
     const r = await execCommand({ command: process.execPath, args: [script, change], cwd: root, timeoutMs: 120_000 });
     return r.ok ? { ok: true } : { ok: false, error: r.outputTail || r.error };
   }
-  const r = await execCommand({ command: 'openspec', args: ['archive', change, '--yes'], cwd: root, timeoutMs: 120_000 });
+  const r = await execCommand({ command: 'npx', args: openspecArchiveArgs(change), cwd: root, timeoutMs: 120_000 });
   return r.ok ? { ok: true } : { ok: false, error: r.outputTail || r.error };
 }
 

@@ -7,7 +7,7 @@ pipe 工作流的四项既有基建缺陷（Issue #147）在最近一次完整�
 ## What Changes
 
 - **修复 `openspec/config.yaml` 规则失效**：给 `rules.all` 首条含 `feat(<issue>): <任务>` 的项加引号（冒号+空格被 YAML 解析为嵌套映射，导致整组 rules 被静默忽略），使 warning 消失、artifact 规则重新生效。
-- **统一 openspec CLI 版本固定点**：抽出共享版本常量，把 `.agents/commands/archive-change.js`（唯一裸调 PATH `openspec` 的位置）、`verify.js`、`pipe-preflight.sh`、`pipe-epic-preflight.sh` 的调用统一到与 CI 同源的 `1.5.0`，并在静态自检中断言调用点确实固定了版本，使版本漂移不可能静默复发。
+- **统一 openspec CLI 版本固定点**：抽出共享版本常量，把 `.agents/commands/archive-change.js`（唯一裸调 PATH `openspec` 的位置）、`verify.js`、`pipe-preflight.sh`、`pipe-epic-preflight.sh` 的调用统一到与 CI 同源的 `1.5.0`；散文指令面（`AGENTS.md`、`.claude/CLAUDE.md`、`WORKFLOW.md`、角色规则、`.opencode` 权限白名单、legacy opsx 命令与 `openspec-*` skill）同样固定，自检对散文裸形态 fail-closed，使版本漂移不可能静默复发。
 - **消除源码指纹的提交状态漂移**：让指纹只由工作区内容决定——「已跟踪但当前不存在」的文件不再产生 `kind: "deleted"` 条目；同步更新 `progress.js` 的 kind 白名单、WORKFLOW.md 与 canonical spec 的表述，并补一条「删除 tracked 文件在提交前后指纹相同」的回归测试。
 - **`wait-ci.js` 对瞬时网络错误有界退避重试**：对 `gh` 的 EOF / 连接重置 / 超时 / 5xx 等可重试错误做有上限的退避重试；输出增加 `errorKind` 以区分「取不到远端事实」与「required CI 真的未通过」，两者不再同码同形。顺带把 15 秒忙等换成定时器等待。
 - **CI 运行 pipe 原生测试套件**：`ci.yml` 的 `validate` job 追加运行 `node --test`（pipe-core + workflow-core + pipe-native 三组，含 glob 形式以规避 Node 24 的 `MODULE_NOT_FOUND`）与 `self-check.js`；`release.yml` 的 `test` job 追加同一门禁；并补 `verify.js` infra 计划遗漏的 `.agents/tools/pipe-native/test/*.test.js`。

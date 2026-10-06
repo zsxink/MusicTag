@@ -6,7 +6,7 @@
 
 | # | Issue 描述 | 实测结论 |
 |---|---|---|
-| 1 | 归档因 PATH 上 openspec 1.13.2 与固定 1.5.0 不一致而 exit 1 | **归因不成立**：`Rules for 'all' must be an array of strings` 在 1.5.0 与 1.13.2 下**都出现**；PATH 的 1.13.2 实测能成功归档（wrapper 返回 `{"ok":true,...,"archived":true}`），exit 1 未复现。真实根因是 `openspec/config.yaml` 的 `rules.all` 首条含 `feat(<issue>): <任务>`——冒号+空格使 YAML 将其解析为嵌套映射，该条被丢弃、整组 rules 失效。**版本固定仍需做**（`archive-change.js:13` 是唯一裸调 PATH `openspec` 的位置），但它是独立的 hardening，不是该 warning 的成因。 |
+| 1 | 归档因 PATH 上 openspec 1.13.2 与固定 1.5.0 不一致而 exit 1 | **归因不成立**：`Rules for 'all' must be an array of strings` 在 1.5.0 与 1.13.2 下**都出现**；PATH 的 1.13.2 实测能成功归档（wrapper 返回 `{"ok":true,...,"archived":true}`），exit 1 未复现。真实根因有两层：**其一**，`rules.all` 首条含 `feat(<issue>): <任务>`——冒号+空格使 YAML 将其解析为嵌套映射，该条被丢弃、整组 rules 失效；**其二**（Dev 阶段实测追加），`all` 根本不是合法 artifact ID——`instruction-loader.js:118` 按 artifactId 精确取值、无全局回退，而 `spec-driven` schema 只定义 `proposal`/`specs`/`design`/`tasks`，因此这两条规则自 `ae058b2` 引入以来**从未生效**。加引号只能把告警从「must be an array of strings」换成「Unknown artifact ID: all」，不修第二层则告警不会归零。**版本固定仍需做**（`archive-change.js:13` 是唯一裸调 PATH `openspec` 的位置），但它是独立的 hardening，不是该 warning 的成因。 |
 | 2 | 指纹随「删除是否已提交」漂移 | **成立**：删除前 308 条含一条 `kind:"deleted"`，提交后 307 条无该条，指纹 `60af8b0c…` → `58c8aeff…`。 |
 | 3 | `wait-ci.js` 瞬时网络错误不重试且与 CI 失败同码同形 | **成立**：伪造 `gh` 前两次 EOF、第三次成功，实测仅调用 1 次 `gh` 即 exit 1。 |
 | 4 | CI 不跑原生测试套件 | **成立**：`ci.yml`/`release.yml` 中 `node --test` 出现 0 次；`package.json` 的 `test` 为 `vitest run`，`vitest.config.ts` 只收 `src/**/*.test.ts`，13 个原生套件（108 例）无人执行。 |
@@ -41,9 +41,43 @@
 
 ## Decisions
 
+### D0: `config.yaml` 的全局规则移到全局 `context` 块，删除失效的 `rules.all`
+
+**问题重述**：规格 Scenario 要求「CLI 不输出 rules 解析告警」，但 `rules.all` 是死 key——`instruction-loader.js:118` 为 `projectConfig?.rules?.[artifactId]` 的精确键取值，无全局回退；`spec-driven` schema 仅定义 `proposal`/`specs`/`design`/`tasks`。因此只加引号会把告警换成 `Unknown artifact ID: "all"`，而这两条规则在任何 openspec 版本下都从未注入过 artifact 指令。
+
+**选择**：把这两条全局流程规则移入 `config.yaml` 顶层的 `context` 块（唯一真正全局的字段），并删除 `rules.all`。
+
+**已实测验证**（四个 artifact 逐一取 instructions）：
+
+| artifact | 自身 `rules` 是否仍正确 | context 含「Issue 驱动」 | context 含「Epic 拆分」 |
+|---|---|---|---|
+| `proposal` | ✅ | ✅ | ✅ |
+| `specs` | ✅ | ✅ | ✅ |
+| `tasks` | ✅ | ✅ | ✅ |
+| `design` | ✅ | ✅ | ✅ |
+
+rules 解析告警数：改前 1 → 改后 **0**。
+
+**备选与否决**：
+- *只加引号、保留 `all`*：告警变为「Unknown artifact ID」，规格 Scenario 字面未满足。
+- *复制到 4 个合法 key*：告警同样归零，但同一段文字维护 4 份，改一处漏三处的漂移风险高于收益。
+- *升级 openspec 以获得 `all` 语义*：范围最大，且 30 个 canonical spec 的 strict 校验会受影响（与既有否决理由相同）。
+
+**全量审计（Dev 阶段实测追加）**：只修 `all[0]` 不足够。`rules.design[1]` 末尾的 `（Issue #46/#47）` 含 ` #`，同样被 YAML 当作注释起点截断——实解析长度 79 → 69，`#46/#47）。` 整段丢失。这是**同一机制的第二处实例**，故 1.1 要求全量审计 `rules` 下 9 条条目，而非只修报错的那一条。修复后全量审计结果：9/9 条均为完整字符串，无截断、无非字符串。
+
+**测试策略**：新增测试**不引入 `yaml` 依赖**（根 `package.json` 无 `yaml`，CI `npm ci` 冷 cache 下会 fail-closed）。改为对 config.yaml 原文做定点形态断言：`rules` 下每个 key 的每个条目必须引号闭合、非空、以 `- ` 开头；含 `:`+空格或 ` #` 的条目若未加引号即判失败并报出**行号**；并断言这两条全局规则出现在 `context` 块内、且 `rules` 下不存在 `all`。**刻意不重建 YAML 结构**——自实现的兜底解析器曾实测产出空数组造成假通过，故形态断言优于「半吊子解析」。
+
+**模块归属**：该测试置于 `.agents/tools/pipe-native/test/`（CJS，最近的 `package.json` 为 `{"type":"commonjs"}`），故用 `require`/`__dirname`，由最近的 package.json 覆盖根的 `{"type":"module"}`。实测在 `/`、`/tmp`、`src-tauri/`、`openspec/` 四个 cwd 及其余清空 `NODE_PATH` 的冷 cache 场景下均 exit 0。
+
 ### D1: 用共享常量固定 openspec 版本，自检强制校验
 
-**选择**：新增单一版本常量（建议 `.agents/tools/pipe-native/openspec-version.js` 导出 `OPENSPEC_CLI_SPEC = '@fission-ai/openspec@1.5.0'` 与派生的 npx 参数数组），`archive-change.js` / `verify.js` 从该常量派生命令；`pipe-preflight.sh` / `pipe-epic-preflight.sh` 因是 shell，改为显式写 `npx --yes @fission-ai/openspec@1.5.0`；`integrate.js:304` 的回退分支同步。在 `self-check.js` 增加一项检查：扫描上述调用点，任一处在固定版本缺失时 fail-closed。
+**选择**：新增单一版本常量（`.agents/tools/pipe-native/openspec-version.cjs` 导出 `OPENSPEC_CLI_SPEC = '@fission-ai/openspec@1.5.0'` 与派生的 npx 参数数组；扩展名必须是 `.cjs`——根 `package.json` 为 `type: module`，CJS 侧 `require` 与 ESM 侧具名导入都要能加载它），`archive-change.js` / `verify.js` 从该常量派生命令；`pipe-preflight.sh` / `pipe-epic-preflight.sh` 因是 shell，改为显式写 `npx --yes @fission-ai/openspec@1.5.0`；`integrate.js:304` 的回退分支同步。在 `self-check.js` 增加一项检查：扫描上述调用点，任一处在固定版本缺失时 fail-closed。
+
+**散文指令面与权限白名单扩展（Dev 阶段用户裁决「全修」）**：除可执行调用点外，教 Agent「怎么跑 openspec」的散文同样会造成实际漂移——PATH 实测 1.13.2、CI/自检固定 1.5.0。全量盘点后把 17 个指令文件一并固定：管道面（`AGENTS.md`、`.claude/CLAUDE.md`、`WORKFLOW.md` 两处、`roles/verify-agent.md`、`.opencode/agents/verify-agent.md` 权限白名单）+ legacy 面（`.claude/commands/verify.md`、6 个 `opsx/*`、5 个 `openspec-*` skill）。散文行写死完整版本；权限白名单一行用 `npx --yes @fission-ai/openspec@* validate *`（版本通配，bump 不 churn 权限表）。`self-check.js` 新增 `OPENSPEC_PROSE_CALL_SITES` 清单与裸散文判据（`openspec` 后直接跟空白 + 子命令，或 `npx openspec`；固定形态 `openspec@<ver|*> …` 天然不命中，`OpenSpec validate` 大写叙述与目录路径 `openspec/changes` 不误报），红测覆盖 WORKFLOW/AGENTS/白名单三处回退。不入清单的同类文字：`pipeline.js` / `epic-preflight.js` 的报错与叙述串（退役驱动或回调注入，非调用点）、历史 `progress.md` 与归档记录（只读证据）。
+
+**备选与否决**：
+- *仅固定已批准的 5 处管道面文件*：被用户否决——`/verify` 与 opsx/skills 的 `openspec validate` 门仍会用 PATH 1.13.2，与 CI 1.5.0 漂移，属同类缺陷；且 spec Scenario 要求「全部调用点」。
+- *只固定 validate/archive 门、放任 `list/status/new/instructions`*：同文件混合形态且 guard 需按子命令区分；实测 1.5.0 支持 legacy 所需全部子命令、`status --json` 关键字段与 1.13.2 一致，全固定无技术障碍。
 
 **备选与否决**：
 - *只修 config.yaml 不动版本*：被用户否决——`archive-change.js` 裸调 PATH 仍是真实漂移入口。
@@ -101,12 +135,12 @@
 ## Risks / Trade-offs
 
 - **指纹算法升版使旧 progress 失效** → `progress.js` 会对旧版本的 checkpoint 证据 fail-closed。影响面仅限「正在运行中的 pipe 会话」，本变更在 main 上完成后无活跃 run 受影响；progressive 恢复时按「输入已变 → 相关阶段待重做」处理，符合既有恢复语义。
-- **FS 遍历的成本与边界** → 已实测 307 条目规模下单次指纹在秒级完成。但 FS 遍历必须正确排除被忽略路径，否则 `node_modules`、`target` 等会让指纹体积与耗时暴涨；实现时 SHALL 用 `git check-ignore` 逐路径判定（已验证可行），并保留原排除集合。**实现前必须先补一条红测**（构造 deleted-uncommitted 场景，断言提交前后指纹相同）。
-- **`check-ignore` 逐路径调用的开销** → 对数百条路径逐个 spawn 进程较慢；实现时 SHALL 考虑一次性批量查询（如 `git check-ignore --stdin`），并保持结果与逐路径一致。
+- **FS 遍历的成本与边界** → 已实测真实仓库 308 条目、单次指纹耗时 0.04s、manifest 41.7KB（JSON 化 52.4KB），量级完全可接受。红测已先行（删除提交前后指纹不同 → 修复后相同）。忽略路径未混入已三重复核：临时仓造 `ignored/`、`node_modules/` 验证测试层；真实仓正则扫 308 条路径命中排除词 **0 条**，其中 `.codegraph/`（约 11M）与 `.opencode/node_modules/`（约 61M / 3645 文件）均未出现——307 的条目量级本身即为证据。
+- **`check-ignore` 调用开销** → 已采用一次性批量查询 `git check-ignore -z --stdin --no-index`。真实仓 320 条候选路径实测：批量 **8ms** vs 逐路径 spawn **1726ms**（**215.8x**），且两者忽略集合**逐条完全一致**（onlyBatch=0 / onlyPer=0）。退出码语义已固化：0=至少一条被忽略、1=无一条被忽略（非错误）、其他码才抛错。`--no-index` 保留了 v1 `--exclude-standard` 对 force-add 文件的判定语义（实测 `node_modules/tracked.js` 由 exit 1 变 exit 0）。
 - **自检新增检查可能误伤** → 新检查只匹配已知调用点文件与固定版本字符串，不做通用 YAML/JS 解析，避免误报；测试须覆盖「版本被移除时自检确实失败」。
 - **`wait-ci.js` 改 async 影响退出码契约** → 现有 `commands.test.js:130-159` 断言 exit 0/1 与 JSON 形状，是回归护栏；改造须保持这两者不变，并新增 EOF 重试用例。
 - **CI 增加约 108 个用例的耗时** → 三个套件均为纯 Node 单测、无外部依赖，耗时可接受；不引入新依赖。
-- **`config.yaml` 加引号属纯文本改动但影响 artifact 规则生效** → 规则真正生效后，后续变更的 proposal/specs/tasks/design 会开始受约束，属预期效果；需在 CR 中确认无规则本身写错。
+- **`config.yaml` 的规则注入方式变更** → 按 D0 把两条全局规则从死 key 移到 `context`。对 Agent 而言仍是同一份提示文本，只是不再依赖 `rules` 的 per-artifact 结构；已实测 4 个 artifact 全部照常收到，且 rules 告警归零。需在 CR 中确认两条规则文本本身写错。
 
 ## Migration Plan
 
@@ -148,5 +182,6 @@
 
 ## Open Questions
 
-- `progress.js:51` 的 kind 白名单在 v2 下是否保留 `deleted`：v2 的生产者不再可能产出该 kind，但对**旧** progress 记录采取「保留接受」还是「明确拒绝」需权衡。前者更平滑，后者更 fail-closed。倾向保留接受（避免恢复旧 run 时被硬拒），并由 `fingerprintVersion` 校验承担隔离职责——实现时确认。
+- ~~`progress.js:51` 的 kind 白名单在 v2 下是否保留 `deleted`~~ → **已裁决：保留接受**。隔离职责由 `progress.js:45` 的 `fingerprintVersion` 闸门承担，它在**任何** manifest 内容检查之前执行：v1 证据无论自身多自洽都会被拒；随后 `:62` 又用**当前版本前缀**重算指纹，`manifestSha256`/`sourceFingerprint` 对不上同样被拒。删掉 `deleted` 不增加任何拒绝能力，只会让历史 run 的证据形状更难读。
+- canonical spec 是否需要 delta → **已裁决：不需要**。`openspec/specs/workflow-core/spec.md:239` 的 Scenario 只说「`source-fingerprint.js` 的版本化 UTF-8 路径清单算法」，不含版本号、kind 枚举或 `ls-files`/`check-ignore` 等算法细节（全文 grep 零命中），算法细节只活在 WORKFLOW.md（已同步）。
 - 是否把版本常量同时用于 `openspec/specs/*.md` 与 WORKFLOW.md 的散文表述（当前是硬编码 `@1.5.0` 文本）：本次按既有做法保留硬编码散文，由自检保证调用点一致，不引入文档生成。

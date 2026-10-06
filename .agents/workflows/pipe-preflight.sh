@@ -35,7 +35,9 @@ run_spec_gate() {
   test -f "$change_dir/design.md"
   test -f "$change_dir/tasks.md"
   test -n "$(rg --files "$change_dir/specs" -g '*.md' | head -1)"
-  npx openspec validate "$change_name" --strict --no-interactive
+  # 版本固定（design D1）：shell 无法 require openspec-version.cjs，显式写字面量；
+  # 与 .agents/tools/pipe-native/openspec-version.cjs 的一致性由 self-check.js 静态校验。
+  npx --yes @fission-ai/openspec@1.5.0 validate "$change_name" --strict --no-interactive
 }
 
 case "$stage" in

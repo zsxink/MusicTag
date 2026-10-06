@@ -60,9 +60,12 @@ test('native quality gates: CR, Verify, and Integrate remain mandatory ordered c
   assert.match(workflow, /最多三轮.*挂起交用户/s);
   assert.match(workflow, /Tester\/CR 后的源码变化使旧 Verify 失效/);
 
-  for (const command of ['cargo check', 'cargo test', 'npm run test', 'npm run build', 'openspec validate']) {
+  for (const command of ['cargo check', 'cargo test', 'npm run test', 'npm run build']) {
     assert.match(workflow, new RegExp(command.replaceAll(' ', '\\s+')));
   }
+  // openspec 校验必须以固定版本形态出现（Issue #147 D1）：裸 `openspec validate`
+  // 不再是合格的验证基线表述，退回去本断言即红。
+  assert.match(workflow, /@fission-ai\/openspec@\S+\s+validate\s+--all/);
   assert.match(workflow, /失败即停，不能集成/);
 
   const checkpoints = ['archive', 'commit', 'sync-main', 'push', 'get-or-create-pr', 'wait-required-ci', 'merge', 'verify-remote', 'cleanup-local'];
@@ -248,6 +251,151 @@ test('source fingerprint is stable across cwd and OpenSpec archive moves, and ch
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('source fingerprint does not drift when a tracked deletion becomes committed', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-fingerprint-delete-drift-'));
+  const git = (args) => execFileSync('git', args, { cwd: root, stdio: 'ignore' });
+  try {
+    git(['init', '-b', 'main']);
+    git(['config', 'user.name', 'Pipe Test']);
+    git(['config', 'user.email', 'pipe-test@example.invalid']);
+    fs.writeFileSync(path.join(root, 'kept.js'), 'const kept = 1;\n');
+    fs.writeFileSync(path.join(root, 'removed.js'), 'const removed = 1;\n');
+    git(['add', 'kept.js', 'removed.js']);
+    git(['commit', '-m', 'baseline']);
+
+    fs.unlinkSync(path.join(root, 'removed.js'));
+    const uncommitted = sourceFingerprint.buildManifest(root);
+
+    git(['add', '-A']);
+    git(['commit', '-m', 'delete removed']);
+    const committed = sourceFingerprint.buildManifest(root);
+
+    // The deletion is visible either way, so committing it must not move the
+    // fingerprint: an in-flight Verify would otherwise be invalidated by the
+    // archive/commit checkpoints recording the very same source state.
+    assert.equal(uncommitted.fingerprint, committed.fingerprint);
+    assert.equal(uncommitted.manifestSha256, committed.manifestSha256);
+    assert.deepEqual(uncommitted.manifest.map((entry) => entry.path), ['kept.js']);
+    assert.deepEqual(committed.manifest.map((entry) => entry.path), ['kept.js']);
+    assert.ok(!committed.manifest.some((entry) => entry.kind === 'deleted'));
+    assert.equal(committed.fingerprintVersion, sourceFingerprint.VERSION);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('source fingerprint reacts to content edits, additions and deletions, and returns to the same value when reverted', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-fingerprint-sensitivity-'));
+  const git = (args) => execFileSync('git', args, { cwd: root, stdio: 'ignore' });
+  try {
+    git(['init', '-b', 'main']);
+    git(['config', 'user.name', 'Pipe Test']);
+    git(['config', 'user.email', 'pipe-test@example.invalid']);
+    fs.writeFileSync(path.join(root, '.gitignore'), 'ignored/\n*.log\n');
+    fs.writeFileSync(path.join(root, 'source.js'), 'const value = 1;\n');
+    fs.mkdirSync(path.join(root, 'ignored'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'ignored', 'noise.js'), 'not source\n');
+    fs.writeFileSync(path.join(root, 'debug.log'), 'noise\n');
+    git(['add', '.gitignore', 'source.js']);
+    git(['commit', '-m', 'baseline']);
+
+    const baseline = sourceFingerprint.buildManifest(root);
+    assert.deepEqual(baseline.manifest.map((entry) => entry.path), ['.gitignore', 'source.js']);
+
+    fs.writeFileSync(path.join(root, 'source.js'), 'const value = 2;\n');
+    const edited = sourceFingerprint.buildManifest(root);
+    assert.notEqual(edited.fingerprint, baseline.fingerprint);
+
+    fs.writeFileSync(path.join(root, 'source.js'), 'const value = 1;\n');
+    assert.equal(sourceFingerprint.buildManifest(root).fingerprint, baseline.fingerprint);
+
+    fs.writeFileSync(path.join(root, 'added.js'), 'const added = 1;\n');
+    const added = sourceFingerprint.buildManifest(root);
+    assert.notEqual(added.fingerprint, baseline.fingerprint);
+    assert.deepEqual(added.manifest.map((entry) => entry.path), ['.gitignore', 'added.js', 'source.js']);
+
+    fs.unlinkSync(path.join(root, 'added.js'));
+    assert.equal(sourceFingerprint.buildManifest(root).fingerprint, baseline.fingerprint);
+
+    // Deleting a tracked file must be visible even though v2 has no `deleted`
+    // kind: the entry disappears, so the fingerprint still moves.
+    fs.unlinkSync(path.join(root, 'source.js'));
+    const deleted = sourceFingerprint.buildManifest(root);
+    assert.notEqual(deleted.fingerprint, baseline.fingerprint);
+    assert.deepEqual(deleted.manifest.map((entry) => entry.path), ['.gitignore']);
+    assert.ok(!sourceFingerprint.buildManifest(root).manifest.some((entry) => entry.kind === 'deleted'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('source fingerprint records symlinks by link target, skips directories, and keeps ignored paths out of the manifest', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-fingerprint-kinds-'));
+  const git = (args) => execFileSync('git', args, { cwd: root, stdio: 'ignore' });
+  try {
+    git(['init', '-b', 'main']);
+    git(['config', 'user.name', 'Pipe Test']);
+    git(['config', 'user.email', 'pipe-test@example.invalid']);
+    fs.writeFileSync(path.join(root, '.gitignore'), 'ignored/\n');
+    fs.mkdirSync(path.join(root, 'real-dir'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'real-dir', 'inside.js'), 'inside\n');
+    fs.mkdirSync(path.join(root, 'ignored'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'ignored', 'noise.js'), 'noise\n');
+    fs.mkdirSync(path.join(root, 'node_modules'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'node_modules', 'dep.js'), 'dep\n');
+    fs.symlinkSync('real-dir', path.join(root, 'link-to-dir'));
+    fs.symlinkSync('real-dir/inside.js', path.join(root, 'link-to-file'));
+    git(['add', '.gitignore', 'real-dir', 'link-to-dir', 'link-to-file']);
+    git(['commit', '-m', 'baseline']);
+
+    const manifest = sourceFingerprint.buildManifest(root);
+    assert.deepEqual(manifest.manifest.map((entry) => entry.path), [
+      '.gitignore',
+      'link-to-dir',
+      'link-to-file',
+      'real-dir/inside.js',
+    ]);
+    const byPath = Object.fromEntries(manifest.manifest.map((entry) => [entry.path, entry]));
+    assert.equal(byPath['link-to-dir'].kind, 'symlink');
+    assert.equal(byPath['link-to-file'].kind, 'symlink');
+    assert.equal(byPath['real-dir/inside.js'].kind, 'file');
+    assert.deepEqual([...new Set(manifest.manifest.map((entry) => entry.kind))].sort(), ['file', 'symlink']);
+    // The symlink digest covers the link target string, not the pointed-to content.
+    assert.equal(byPath['link-to-file'].sha256, sourceFingerprint.sha256Target('real-dir/inside.js'));
+
+    fs.writeFileSync(path.join(root, 'real-dir', 'inside.js'), 'changed\n');
+    const retargeted = sourceFingerprint.buildManifest(root);
+    assert.equal(retargeted.manifest.find((entry) => entry.path === 'link-to-file').sha256, byPath['link-to-file'].sha256);
+    assert.notEqual(retargeted.fingerprint, manifest.fingerprint);
+
+    // Removing the pointed-to target must not crash the walk; the broken
+    // symlink itself is still a workspace path.
+    fs.unlinkSync(path.join(root, 'real-dir', 'inside.js'));
+    const broken = sourceFingerprint.buildManifest(root);
+    assert.ok(broken.manifest.some((entry) => entry.path === 'link-to-file' && entry.kind === 'symlink'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('source fingerprint excludes .git and is documented as the workspace-filesystem algorithm in WORKFLOW.md', () => {
+  const manifest = sourceFingerprint.buildManifest(REPO);
+  assert.ok(manifest.manifest.length > 0);
+  assert.ok(!manifest.manifest.some((entry) => entry.path === '.git' || entry.path.startsWith('.git/')));
+  assert.ok(!manifest.manifest.some((entry) => entry.path.split('/').includes('.git')));
+  for (const excluded of ['openspec', 'node_modules', 'target', 'dist', 'coverage', '.worktrees']) {
+    assert.ok(!manifest.manifest.some((entry) => entry.path.split('/').includes(excluded)), excluded);
+  }
+  assert.ok(!manifest.manifest.some((entry) => entry.path.startsWith('.agents/runs/')));
+  assert.equal(manifest.fingerprintVersion, 'pipe-source-fingerprint/v2');
+
+  const workflow = read('.agents', 'skills', 'pipe', 'WORKFLOW.md');
+  assert.match(workflow, /pipe-source-fingerprint\/v2/);
+  assert.doesNotMatch(workflow, /ls-files --cached --others --exclude-standard/);
+  assert.match(workflow, /check-ignore/);
+  assert.match(workflow, /普通文件\/符号链接/);
 });
 
 test('native workspace guard: the main worktree and linked worktrees both pass with a mode marker', () => {

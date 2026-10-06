@@ -9,6 +9,9 @@ const crypto = require('node:crypto');
 const { makeRunCommand } = require('./command-adapter.js');
 const workspace = require('./workspace.js');
 const stateApi = require('./state.js');
+// openspec 版本固定（Issue #147 第 1 条 hardening / design D1）：验证计划不再用
+// 不带版本的 `npx openspec`，改由共享常量派生（该常量同时被 ESM 侧 archive-change.js 使用）。
+const { openspecValidateArgs } = require('../pipe-native/openspec-version.cjs');
 
 // 构建产物白名单：Verify 命令允许写这些目录/文件类型，之外的任何新增或修改 = 源码污染。
 const BUILD_WHITELIST = ['target/', 'dist/', 'node_modules/.cache/', '.cache/', 'tmp/', 'coverage/', '*.log'];
@@ -31,15 +34,17 @@ function buildPlan({ change, domain, root }) {
       cwd: root, timeoutMs: 60_000,
     });
     plans.push({
-      step: 'pipe-core/workflow-core 全量测试',
+      step: 'pipe-core/workflow-core/pipe-native 全量测试',
       command: 'node',
       // glob 形式而非目录：Node v24 对目录形式 `node --test <dir>` 报 MODULE_NOT_FOUND；
       // 测试 glob 由 test runner 自身展开（shell=false 下目录参数不会 glob）。
-      args: ['--test', path.join(root, '.agents', 'tools', 'pipe-core', 'test', '*.test.js'), path.join(root, 'tests', 'workflow-core', '*.test.cjs')],
+      args: ['--test', path.join(root, '.agents', 'tools', 'pipe-core', 'test', '*.test.js'), path.join(root, 'tests', 'workflow-core', '*.test.cjs'), path.join(root, '.agents', 'tools', 'pipe-native', 'test', '*.test.js')],
       cwd: root, timeoutMs: 600_000,
     });
-    plans.push({ step: 'self-check', command: 'node', args: [path.join(root, '.agents', 'tools', 'pipe-core', 'run.js'), '--self-check'], cwd: root, timeoutMs: 120_000 });
-    plans.push({ step: 'OpenSpec strict validate', command: 'npx', args: ['openspec', 'validate', change, '--strict', '--no-interactive'], cwd: root, timeoutMs: 180_000 });
+    // 自检走 pipe-native/self-check.js：旧的 pipe-core/run.js --self-check 是退役 shim，
+    // 按 run.test.js 的退役边界断言恒非零退出，留着会让本步骤永远失败（形同没有门禁）。
+    plans.push({ step: 'self-check', command: 'node', args: [path.join(root, '.agents', 'tools', 'pipe-native', 'self-check.js')], cwd: root, timeoutMs: 120_000 });
+    plans.push({ step: 'OpenSpec strict validate', command: 'npx', args: openspecValidateArgs(change), cwd: root, timeoutMs: 180_000 });
   } else if (domain === 'docs' || domain === 'spec') {
     // docs/spec：不跑业务编译；文档一致性审计（.agents/commands/docs-audit.js）+ OpenSpec strict validate。
     plans.push({
@@ -48,7 +53,7 @@ function buildPlan({ change, domain, root }) {
       args: [path.join(root, '.agents', 'commands', 'docs-audit.js'), change],
       cwd: root, timeoutMs: 60_000,
     });
-    plans.push({ step: 'OpenSpec strict validate', command: 'npx', args: ['openspec', 'validate', change, '--strict', '--no-interactive'], cwd: root, timeoutMs: 180_000 });
+    plans.push({ step: 'OpenSpec strict validate', command: 'npx', args: openspecValidateArgs(change), cwd: root, timeoutMs: 180_000 });
   } else {
     // backend / frontend / both：cargo/npm 基线。
     if (domain === 'backend' || domain === 'both') {
@@ -61,9 +66,9 @@ function buildPlan({ change, domain, root }) {
     }
     if (domain === 'both') {
       // both：OpenSpec 在 lane 汇合后执行。
-      plans.push({ step: 'OpenSpec strict validate', command: 'npx', args: ['openspec', 'validate', change, '--strict', '--no-interactive'], cwd: root, timeoutMs: 180_000 });
+      plans.push({ step: 'OpenSpec strict validate', command: 'npx', args: openspecValidateArgs(change), cwd: root, timeoutMs: 180_000 });
     } else {
-      plans.push({ step: 'OpenSpec strict validate', command: 'npx', args: ['openspec', 'validate', change, '--strict', '--no-interactive'], cwd: root, timeoutMs: 180_000 });
+      plans.push({ step: 'OpenSpec strict validate', command: 'npx', args: openspecValidateArgs(change), cwd: root, timeoutMs: 180_000 });
     }
   }
   return plans;

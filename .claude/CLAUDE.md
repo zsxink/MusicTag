@@ -29,4 +29,4 @@ MusicTag 是 Tauri 2 + Rust + Vue 3 的本地单曲标签编辑器。产品行�
 
 ## 验证
 
-代码域依序运行 `cargo check --manifest-path src-tauri/Cargo.toml`、`cargo test --manifest-path src-tauri/Cargo.toml`、`npm run test`、`npm run build` 与 `npx openspec validate <change> --strict --no-interactive`。docs/spec/infra 域运行适用脚本检查和 OpenSpec 校验。报告如实使用中文。
+代码域依序运行 `cargo check --manifest-path src-tauri/Cargo.toml`、`cargo test --manifest-path src-tauri/Cargo.toml`、`npm run test`、`npm run build` 与 `npx --yes @fission-ai/openspec@1.5.0 validate <change> --strict --no-interactive`。docs/spec/infra 域运行适用脚本检查和 OpenSpec 校验。报告如实使用中文。
