@@ -206,6 +206,8 @@ Leader、Architect、开发、Tester、CR 和验证角色 SHALL 由 `.agents/` �
 ### Requirement: 中立工作流与确定性命令（P6）
 共享 pipe skill SHALL 定义跨宿主一致的阶段、证据和 checkpoint；每阶段成功证据 SHALL 符合阶段所需类型，阶段不得越过未成功的前置阶段。Verify 成功 SHALL 记录本次验证 HEAD、源码与规格快照指纹、预期命令清单和逐命令退出码；Integrate 开始及每个 checkpoint 前 SHALL 确认源码指纹仍与 Verify 一致，并在类型化 checkpoint 证据中保留该指纹；仅 OpenSpec 归档导致规格指纹变化时可沿用 Verify。恢复时重新核对。主 Agent SHALL 直接调用中立 shell 命令或纯校验工具完成 bootstrap、spec-gate、Verify 和 Integrate；正式运行路径不得使用通过 Node `child_process` 包装 git/gh/openspec 的旧命令脚本。归档先于 PR，每个外部副作用前先检查本地或远端事实，完成后立即记录 checkpoint；每个集成 checkpoint 的类型化证据 SHALL 在恢复时与当前本地或远端事实匹配。
 
+确定性命令 wrapper 调用 openspec 时 SHALL 使用与 CI 同源的固定版本，不得依赖 PATH 上解析到的版本。依赖远端事实的命令（如等待 required checks）在遇到瞬时网络错误（EOF、连接重置、超时、5xx 等可重试故障）时 SHALL 做有上限的退避重试，并在输出中以可区分的字段（如 `errorKind`）标明「未能取到远端事实」与「远端事实表明 CI 未通过」，两者 SHALL NOT 共用同一退出语义与同一 JSON 形状。轮询等待 SHALL NOT 以忙等实现。
+
 #### Scenario: 集成幂等
 - **WHEN** 恢复时已有该分支 PR 或远端已合并
 - **THEN** 主 Agent 复用 GitHub 事实，继续下一 checkpoint，不重复创建 PR、等待新一轮 CI 或再次合并
@@ -242,6 +244,18 @@ Leader、Architect、开发、Tester、CR 和验证角色 SHALL 由 `.agents/` �
 - **WHEN** 用户分别从三种宿主启动 pipe
 - **THEN** 三个宿主入口加载同一个共享工作流和 Markdown 状态协议。
 
+#### Scenario: 瞬时网络错误自愈
+- **WHEN** 等待 required checks 时远端查询因 EOF、连接重置、超时或 5xx 失败，随后恢复
+- **THEN** 命令在有上限的退避重试内自愈并返回真实的 checks 事实，不把瞬时故障报告为 CI 失败
+
+#### Scenario: 取不到远端事实与 CI 失败可区分
+- **WHEN** 重试耗尽后仍无法取得远端 checks 事实，或远端事实表明 required checks 失败
+- **THEN** 输出以可区分字段标明两类情形，调用方能据此判断该重试、该查证远端还是该修复 CI
+
+#### Scenario: 归档不受 PATH 版本影响
+- **WHEN** 本机 PATH 上的 openspec 版本与仓库固定版本不同
+- **THEN** 归档 wrapper 仍以仓库固定版本执行，产出与版本无关的一致结果
+
 ### Requirement: 流程脚本静态自检（沿用既有门禁）
 pipe 前置检查 SHALL 校验共享 skill、宿主入口、公共角色、Markdown 模板及适用脚本语法；不得依赖旧 `run.js --self-check`。自检可使用不启动子进程的纯解析程序；任何缺失或不一致在写入阶段前 fail-closed。
 
@@ -277,7 +291,7 @@ Codex 的 `AGENTS.md`、Claude Code 的 `/pipe` 和 OpenCode 的 `/pipe` SHALL �
 - **THEN** Claude Code 与 Codex 读取 .agents/skills/pipe/SKILL.md 同一物理文件。
 
 ### Requirement: 统一验证基线（继承 workflow-optimize 既有门禁）
-最终完整验证 SHALL 在 Tester 与 CR 产物确定后的适用 HEAD 上运行。代码域执行 cargo check、cargo test、npm test、npm build 和 OpenSpec strict validate；docs/spec/infra 域执行对应文档或脚本检查与 OpenSpec validate。验证子 Agent 可执行命令，但主 Agent SHALL 核对退出码、HEAD、源码/规格快照并写入 Markdown 证据；任一步失败不得进入集成。搜索联动类变更额外保留专项回归清单。
+最终完整验证 SHALL 在 Tester 与 CR 产物确定后的适用 HEAD 上运行。代码域执行 cargo check、cargo test、npm test、npm build 和 OpenSpec strict validate；docs/spec/infra 域执行对应文档或脚本检查与 OpenSpec validate。验证子 Agent 可执行命令，但主 Agent SHALL 核对退出码、HEAD、源码/规格快照并写入 Markdown 证据；任一步失败不得进入集成。搜索联动类变更额外保留专项回归清单。infra/docs/spec 域 SHALL 运行 pipe 自身的全部原生测试套件（pipe-core、pipe-native 与 workflow-core 三组 `node --test` 用例）与原生入口自检，且该覆盖集合与仓库 CI 中运行的集合一致。
 
 #### Scenario: 验证只读源码
 - **WHEN** 最终验证命令写出构建产物或缓存
@@ -298,6 +312,10 @@ Codex 的 `AGENTS.md`、Claude Code 的 `/pipe` 和 OpenCode 的 `/pipe` SHALL �
 #### Scenario: 搜索联动类变更回归清单
 - **WHEN** 改动涉及取词、换源、并发或离线判定
 - **THEN** 主 Agent 追加单源换源、跨 kind 串扰和离线判定的专项检查并记录结果。
+
+#### Scenario: 原生套件纳入 infra 基线
+- **WHEN** infra、docs 或 spec 域进入最终 Verify 阶段
+- **THEN** 主 Agent 运行全部原生测试套件与自检，使用的 glob 形式在 Node 24 下可执行，且套件集合与 CI workflow 中运行的集合一致
 
 ### Requirement: CR 复盘专项维度（继承 workflow-optimize 既有门禁）
 CR 审查 SHALL 在一致性/遗漏/缺陷之外，保留复盘专项三检（跨模块状态语义 / 竞态与串扰 / 网络与离线判定）；阻断/major 每项含 file + issue + specReference + suggestion；`pass=true` 仅当无阻断且无 major。该门禁在新核心（leader 决断节点 + CR 节点）中原样保留。（继承标注：同「统一验证基线」——继承自已归档变更 `workflow-optimize`，作为 `workflow-core` 规格基线，不挂主规格锚点。）
@@ -354,4 +372,3 @@ pipe SHALL 默认在当前工作目录开发：从 main 切出与 change 同名�
 #### Scenario: 原地收尾
 - **WHEN** 变更 PR 已合并且集成进入 cleanup-local
 - **THEN** 主 Agent 切回 main 并删除已合并的 change 分支，progress 记录的 cleanup-local 证据仍满足既有契约
-
