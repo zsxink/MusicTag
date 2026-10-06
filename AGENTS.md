@@ -55,7 +55,7 @@ npm run build
 npm run test
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
-npx openspec validate <change> --strict --no-interactive
+npx --yes @fission-ai/openspec@1.5.0 validate <change> --strict --no-interactive
 ```
 
 ## 语言

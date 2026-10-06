@@ -19,6 +19,15 @@ jobs:
           node-version: 24
       - name: Validate OpenSpec
         run: npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive
+      # pipe 原生测试套件（Issue #147 第 4 条 / design D4）。
+      # glob 形式而非目录：Node 24 对 `node --test <dir>` 报 MODULE_NOT_FOUND。
+      # 无条件执行（不加 hashFiles 门）：这三个套件是 pipe 自身的回归护栏，不依赖
+      # package.json / src-tauri；一旦某次改动误删或漏跑本步骤，门禁会静默消失而无人察觉。
+      # 放在 npm ci 之前：零依赖，失败更快，且不与前端构建抢时间。
+      - name: Test pipe native suites
+        run: node --test '.agents/tools/pipe-core/test/*.test.js' 'tests/workflow-core/*.test.cjs' '.agents/tools/pipe-native/test/*.test.js'
+      - name: Run pipe self-check
+        run: node .agents/tools/pipe-native/self-check.js
       - name: Install frontend dependencies
         if: ${{ hashFiles('package.json') != '' }}
         run: npm ci

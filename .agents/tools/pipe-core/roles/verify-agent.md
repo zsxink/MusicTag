@@ -4,7 +4,7 @@
 
 ## 基线
 
-- `backend`、`frontend`、`both`：依序运行 `cargo check --manifest-path src-tauri/Cargo.toml`、`cargo test --manifest-path src-tauri/Cargo.toml`、`npm run test`、`npm run build`、`npx openspec validate <change> --strict --no-interactive`。
+- `backend`、`frontend`、`both`：依序运行 `cargo check --manifest-path src-tauri/Cargo.toml`、`cargo test --manifest-path src-tauri/Cargo.toml`、`npm run test`、`npm run build`、`npx --yes @fission-ai/openspec@1.5.0 validate <change> --strict --no-interactive`。
 - `docs`、`spec`、`infra`：运行适用文档或脚本检查和同一 OpenSpec 严格校验，不运行无关业务编译。
 - 搜索联动类变更分别记录单源换源、跨 kind 串扰与离线判定的专项结果。
 

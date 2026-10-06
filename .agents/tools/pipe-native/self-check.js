@@ -98,6 +98,154 @@ function checkRoles(root, issues) {
   if (fs.existsSync(path.join(root, '.opencode/agents/leader.md'))) issues.push('.opencode/agents/leader.md 已过时：Leader 必须由当前主会话担任');
 }
 
+// ── openspec 版本固定（Issue #147 第 1 条 hardening / design D1）────────────
+//
+// fail-closed 静态校验：任一 openspec 调用点都必须固定到 openspec-version.cjs 声明的
+// 同一版本。本检查只读文件、不启动子进程；命中未固定调用时报告「文件:行号」。
+// 与既有 self-check.js:157 的正则断言同一手法（断言调用点内容），只是断言点从
+// 「有没有 --strict」升级为「有没有固定版本」。
+
+const OPENSPEC_VERSION_MODULE = '.agents/tools/pipe-native/openspec-version.cjs';
+// 经共享常量派生的调用点：命令由 openspecArchiveArgs/openspecValidateArgs 生成，
+// 文件里不应再出现裸版本字面量或裸 openspec 可执行名。
+const OPENSPEC_DERIVED_CALL_SITES = [
+  '.agents/commands/archive-change.js',
+  '.agents/tools/pipe-core/verify.js',
+  '.agents/tools/pipe-core/integrate.js',
+];
+// shell 与 YAML 无法 require 该常量，按 design D1 显式写字面量并由此处校验一致性；
+// .github/workflows/ci.yml:21 是本项的既有基准。
+const OPENSPEC_LITERAL_CALL_SITES = [
+  '.agents/workflows/pipe-preflight.sh',
+  '.agents/workflows/pipe-epic-preflight.sh',
+  '.github/workflows/ci.yml',
+];
+// 散文指令面与只读角色权限白名单（Issue #147 D1 扩展 / 用户裁决「全修」）。
+// 这些文件教主 Agent 或子 Agent「怎么跑 openspec」，形态同样必须固定，否则
+// 执行时落到 PATH 版本（实测 1.13.2）与 CI/自检的固定版本（1.5.0）漂移。
+// 注意区分两种合法固定形态：散文行写死与常量同源的完整版本；
+// .opencode 权限白名单按模式匹配，版本用通配（@fission-ai/openspec@*），
+// 避免每次 bump 都要改权限表。本检查的判据是「不存在裸形态」，两种都天然通过。
+const OPENSPEC_PROSE_CALL_SITES = [
+  'AGENTS.md',
+  '.claude/CLAUDE.md',
+  '.agents/skills/pipe/WORKFLOW.md',
+  '.agents/tools/pipe-core/roles/verify-agent.md',
+  '.opencode/agents/verify-agent.md',
+  '.claude/commands/verify.md',
+  '.claude/commands/opsx/apply.md',
+  '.claude/commands/opsx/archive.md',
+  '.claude/commands/opsx/explore.md',
+  '.claude/commands/opsx/propose.md',
+  '.claude/commands/opsx/run.md',
+  '.claude/commands/opsx/sync.md',
+  '.claude/skills/openspec-apply-change/SKILL.md',
+  '.claude/skills/openspec-archive-change/SKILL.md',
+  '.claude/skills/openspec-explore/SKILL.md',
+  '.claude/skills/openspec-propose/SKILL.md',
+  '.claude/skills/openspec-sync-specs/SKILL.md',
+];
+
+// 去掉行注释：注释里合法地提到旧的裸命令形态（如「不再用 `npx openspec`」），
+// 不应被当成调用点误报。报告时仍用原始行，便于定位。
+function stripLineComment(line) {
+  const cuts = [line.indexOf('//')];
+  const hash = line.search(/\s#/);
+  if (hash >= 0) cuts.push(hash);
+  const valid = cuts.filter((i) => i >= 0);
+  return valid.length ? line.slice(0, Math.min(...valid)) : line;
+}
+
+// 该行（去注释后）是否在**执行** openspec。两种合法形态：
+//   1. 命令数组位置：command: 'npx', args: [...'openspec'...]  —— 未固定的裸 npx 调用
+//   2. 裸可执行名：command: 'openspec', args: [...]
+// 刻意不匹配 path.join(root, 'openspec', ...) 这类**目录路径**——那是规格目录布局
+// （openspec/changes、openspec/specs），不是 CLI 调用，不受版本固定约束。
+// 判据：'openspec' 出现在「可执行名位置」——即紧跟 command:/args:/spawnSync( 之后，
+// 或作为 npx 参数。'openspec', 'changes' 这种目录序列不匹配（后面跟的是路径段而非 CLI 子命令）。
+function invokesOpenspec(code) {
+  const npxCall = /\bnpx\b[^;'"]*\bopenspec\b/.test(code);
+  // 可执行名位置：'openspec' 后面必须跟 CLI 子命令或参数，且不是目录段。
+  const bareCall = /(['"`]openspec['"`]\s*,\s*(?:args\s*:\s*)?\[?\s*['"`](?:archive|validate|list|view|show|init)\b)/.test(code);
+  return npxCall || bareCall;
+}
+
+// 裸散文形态：`openspec` 后直接跟空白 + CLI 子命令（如 `openspec validate`、
+// 反引号包裹的 `` `npx openspec status` ``）。固定形态是
+// `@fission-ai/openspec@<ver|*> <子命令>`——@ 之后不匹配，目录路径
+// `openspec/changes`（/ 之后）也不匹配；行首边界排除 \w@./\- 防止把
+// `music-openspec` 这类词的一部分当命令。大小写敏感：`OpenSpec validate`
+// 是产品名叙述，不是可执行形态。
+function bareProseOpenspec(code) {
+  return /(^|[^@\w./\\-])openspec[ \t]+(validate|archive|new|status|instructions|list|show|init)\b/.test(code)
+    || /\bnpx[ \t]+openspec\b/.test(code);
+}
+
+function proseOpenspecPins(code, raw, relative, spec) {
+  const pins = [...code.matchAll(/@fission-ai\/openspec@([^\s"'`]+)/g)];
+  if (!pins.length) return false;
+  return pins.some((match) => {
+    const pin = '@fission-ai/openspec@' + match[1].replace(/[),.;]+$/, '');
+    const exactVerifyAllowlist = relative === '.opencode/agents/verify-agent.md'
+      && /^\s*"npx --yes @fission-ai\/openspec@\* validate \*": allow\s*$/.test(raw);
+    return pin !== spec && !(exactVerifyAllowlist && pin === '@fission-ai/openspec@*');
+  });
+}
+
+function checkOpenspecPinning(root, issues) {
+  // 唯一真值：从常量模块文本里静态取出固定版本。刻意用读文本 + 正则而非 require()，
+  // 以保持 self-check「纯静态、不执行仓库代码」的定位；取不到即 fail-closed。
+  const source = read(root, OPENSPEC_VERSION_MODULE, issues);
+  if (source === null) {
+    issues.push('缺少 openspec 版本常量，无法校验各调用点是否固定版本（fail-closed）');
+    return;
+  }
+  const matched = /OPENSPEC_CLI_SPEC\s*=\s*'@fission-ai\/openspec@([^']+)'/.exec(source);
+  if (!matched) {
+    issues.push(OPENSPEC_VERSION_MODULE + ' 未声明固定版本 OPENSPEC_CLI_SPEC（fail-closed）');
+    return;
+  }
+  const spec = '@fission-ai/openspec@' + matched[1];
+
+  for (const relative of OPENSPEC_DERIVED_CALL_SITES) {
+    const text = read(root, relative, issues);
+    if (text === null) continue;
+    if (!text.includes('openspec-version.cjs')) {
+      issues.push(relative + ' 必须从 ' + OPENSPEC_VERSION_MODULE + ' 派生 openspec 命令，不得自带版本字面量');
+    }
+    text.split('\n').forEach((raw, index) => {
+      if (invokesOpenspec(stripLineComment(raw))) {
+        issues.push(`${relative}:${index + 1} openspec 调用未固定版本（应由 ${OPENSPEC_VERSION_MODULE} 派生）：${raw.trim()}`);
+      }
+    });
+  }
+
+  for (const relative of OPENSPEC_LITERAL_CALL_SITES) {
+    const text = read(root, relative, issues);
+    if (text === null) continue;
+    text.split('\n').forEach((raw, index) => {
+      if (invokesOpenspec(stripLineComment(raw)) && !raw.includes(spec)) {
+        issues.push(`${relative}:${index + 1} openspec 调用未固定到 ${spec}：${raw.trim()}`);
+      }
+    });
+  }
+
+  // 散文/白名单：裸形态 fail-closed，显式版本必须与共享常量一致。
+  // 仅 OpenCode verify-agent 的 permission pattern 允许 @*，以免每次 bump 改权限表。
+  for (const relative of OPENSPEC_PROSE_CALL_SITES) {
+    const text = read(root, relative, issues);
+    if (text === null) continue;
+    text.split('\n').forEach((raw, index) => {
+      const code = stripLineComment(raw);
+      if (bareProseOpenspec(code)) {
+        issues.push(`${relative}:${index + 1} openspec 散文调用未固定版本（应为 npx --yes ${spec} <子命令> …）：${raw.trim()}`);
+      } else if (proseOpenspecPins(code, raw, relative, spec)) {
+        issues.push(`${relative}:${index + 1} openspec 散文调用未固定到共享版本 ${spec}（仅精确权限白名单行可用 @* 通配）：${raw.trim()}`);
+      }
+    });
+  }
+}
+
 function run(rootInput = process.cwd()) {
   const root = path.resolve(rootInput);
   const issues = [];
@@ -154,10 +302,11 @@ function run(rootInput = process.cwd()) {
     issues.push('Epic preflight 必须以精确匹配的本轮远端 merged facts 控制子项跳过');
   }
   const epicShell = read(root, '.agents/workflows/pipe-epic-preflight.sh', issues);
-  if (epicShell !== null && (!/gh issue view/.test(epicShell) || !/openspec validate .*--strict/.test(epicShell) || !/epic-preflight\.js active/.test(epicShell) || !/epic_owner=\$\{2/.test(epicShell) || /includeClosedPrs/.test(epicShell))) {
+  if (epicShell !== null && (!/gh issue view/.test(epicShell) || !/@fission-ai\/openspec@[\d.]+ validate .*--strict/.test(epicShell) || !/epic-preflight\.js active/.test(epicShell) || !/epic_owner=\$\{2/.test(epicShell) || /includeClosedPrs/.test(epicShell))) {
     issues.push('Epic preflight 必须验证显式 owner、精确 GitHub closing PR、Issue 与活动 OpenSpec strict');
   }
   if (read(root, '.agents/tools/pipe-native/progress-template.md', issues) === null) issues.push('缺少 progress 模板');
+  checkOpenspecPinning(root, issues);
 
   return { ok: issues.length === 0, issues, checkedAt: new Date().toISOString() };
 }

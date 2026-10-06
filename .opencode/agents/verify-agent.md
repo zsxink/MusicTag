@@ -10,7 +10,7 @@ permission:
     "cargo test *": allow
     "npm run test": allow
     "npm run build": allow
-    "npx openspec validate *": allow
+    "npx --yes @fission-ai/openspec@* validate *": allow
     "node --check *": allow
     "bash -n *": allow
     "git status *": allow

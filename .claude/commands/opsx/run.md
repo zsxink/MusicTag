@@ -26,7 +26,7 @@ tags: [workflow, automation, pipeline]
   ↓
 ④ 自动 CR   /cr <name>（subagent 审查：规格一致性、遗漏、缺陷）
   ↓
-⑤ 验证      /verify <name>（cargo check+test、npm run build、openspec validate）
+⑤ 验证      /verify <name>（cargo check+test、npm run build、npx --yes @fission-ai/openspec@1.5.0 validate）
   ↓
 ⑥ 归档+PR   archive → git add + commit → push → gh pr create → CI 全绿
   ↓
@@ -36,7 +36,7 @@ tags: [workflow, automation, pipeline]
 ## 执行步骤
 
 ### ① 规格产出
-- 输入是需求描述 → 按 `/opsx:propose` 流程：确认理解 → `openspec new change <name>` → 生成全部 artifacts（proposal/specs/design/tasks）→ 用户 review proposal 与 design 并批准。
+- 输入是需求描述 → 按 `/opsx:propose` 流程：确认理解 → `npx --yes @fission-ai/openspec@1.5.0 new change <name>` → 生成全部 artifacts（proposal/specs/design/tasks）→ 用户 review proposal 与 design 并批准。
 - 输入已是变更名 → 跳过 propose，直接进入 ②。
 - **涉及 V1 拍板决策**的变更：同步 `docs/V1-PRD.md` / `docs/design/design.md` 后再往下。
 
@@ -58,7 +58,7 @@ git checkout -b <change-name>   # 从 main 开分支，每变更一分支
 - **发现的问题自动修复**：回到 ③ 修复，重跑受影响测试，再回到 ④ 复审。循环直到 CR 通过。
 
 ### ⑤ 验证
-- 运行 `/verify <name>`：`cargo check`、`cargo test`、`npm run build`、`openspec validate <name>`。
+- 运行 `/verify <name>`：`cargo check`、`cargo test`、`npm run build`、`npx --yes @fission-ai/openspec@1.5.0 validate <name>`。
 - 任一失败：修复 → 重跑验证，直到全绿。
 
 ### ⑥ 归档与 PR

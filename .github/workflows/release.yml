@@ -17,6 +17,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # pipe 原生测试套件（Issue #147 第 4 条 / design D4）。与 ci.yml 保持同一份套件清单。
+      # 无条件执行 + 置于 npm ci 之前：零依赖、失败快，且不被 hashFiles 门静默跳过。
+      - name: Test pipe native suites
+        run: node --test '.agents/tools/pipe-core/test/*.test.js' 'tests/workflow-core/*.test.cjs' '.agents/tools/pipe-native/test/*.test.js'
+      - name: Run pipe self-check
+        run: node .agents/tools/pipe-native/self-check.js
       - name: Install frontend dependencies
         if: ${{ hashFiles('package.json') != '' }}
         run: npm ci

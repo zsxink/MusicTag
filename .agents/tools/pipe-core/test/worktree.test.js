@@ -9,7 +9,7 @@ const worktree = require('../worktree.js');
 
 function tmpRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-wt-'));
-  execSync('git init -q', { cwd: dir });
+  execSync('git init -q --initial-branch=main', { cwd: dir });
   execSync('git config user.email t@t && git config user.name t', { cwd: dir });
   fs.writeFileSync(path.join(dir, 'a.txt'), 'hello');
   // 与真实仓库一致：.worktrees/ 须 gitignore，否则主仓库工作区视其为未跟踪

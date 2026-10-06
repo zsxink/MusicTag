@@ -11,7 +11,7 @@ const runtime = require('../progress.js');
 const cli = require('../progress-cli.js');
 
 function sourceEvidence(seed = 'source') {
-  const fingerprintVersion = 'pipe-source-fingerprint/v1';
+  const fingerprintVersion = 'pipe-source-fingerprint/v2';
   const manifest = [{ path: 'src/fixture.ts', kind: 'file', sha256: crypto.createHash('sha256').update(seed).digest('hex') }];
   const manifestJson = JSON.stringify(manifest);
   return {

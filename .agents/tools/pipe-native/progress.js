@@ -14,7 +14,7 @@ const PHASE_STATUSES = Object.freeze(['pending', 'running', 'succeeded', 'failed
 const TASK_STATUSES = Object.freeze([...PHASE_STATUSES, 'needs-verification']);
 const EPIC_ITEM_STATUSES = Object.freeze(['pending', 'running', 'done', 'failed', 'suspended']);
 const EPIC_BLOCK_ITEM = '__pipe_native_dispatch_block__';
-const SOURCE_FINGERPRINT_VERSION = 'pipe-source-fingerprint/v1';
+const SOURCE_FINGERPRINT_VERSION = 'pipe-source-fingerprint/v2';
 const INTEGRATION_CHECKPOINTS = Object.freeze(['archive', 'commit', 'sync-main', 'push', 'get-or-create-pr', 'wait-required-ci', 'merge', 'verify-remote', 'cleanup-local']);
 const CHECKPOINT_EVIDENCE_FIELDS = Object.freeze({
   archive: ['archivePath', 'sourceFingerprint', 'fingerprintVersion', 'manifestSha256', 'manifest'],
@@ -48,6 +48,14 @@ function validateSourceFingerprintEvidence(evidence, name = 'source fingerprint'
   const seenPaths = new Set();
   let previousPath = null;
   for (const entry of evidence.manifest) {
+    // `deleted` is a v1 shape the v2 producer can no longer emit (the path set
+    // comes from the workspace, so a deletion shows up as a missing entry). It
+    // stays accepted here so this list describes "manifest item shapes ever
+    // valid" rather than "shapes this version emits"; isolation is carried
+    // entirely by the fingerprintVersion gate above, which rejects any evidence
+    // whose version is not the current one, and by the recomputed fingerprint
+    // below, which only validates a manifest that hashes under the current
+    // version prefix. Dropping `deleted` would add no extra rejection.
     if (!entry || typeof entry.path !== 'string' || !entry.path || !['file', 'symlink', 'deleted'].includes(entry.kind) || !/^[a-f0-9]{64}$/.test(entry.sha256)) {
       throw new Error(`${name} manifest 项必须包含有效 path/kind/sha256`);
     }

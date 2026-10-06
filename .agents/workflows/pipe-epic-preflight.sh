@@ -76,7 +76,9 @@ while IFS=$'\t' read -r item_name issue_number; do
   test -d "openspec/changes/$item_name/specs" || { echo "✗ [epic-preflight] 子变更 $item_name 缺 specs" >&2; exit 1; }
   actual_issue=$(gh issue view "$issue_number" --json number --jq '.number')
   test "$actual_issue" = "$issue_number" || { echo "✗ [epic-preflight] 子变更 $item_name 的 GitHub Issue #$issue_number 无法核实" >&2; exit 1; }
-  npx openspec validate "$item_name" --strict --no-interactive
+  # 版本固定（design D1）：shell 无法 require openspec-version.cjs，显式写字面量；
+  # 与 .agents/tools/pipe-native/openspec-version.cjs 的一致性由 self-check.js 静态校验。
+  npx --yes @fission-ai/openspec@1.5.0 validate "$item_name" --strict --no-interactive
 done <<< "$active_rows"
 
 node .agents/tools/pipe-native/progress-cli.js resume-apply "$epic_name" --epic --owner "$epic_owner" --facts "$facts_file" --json >/dev/null

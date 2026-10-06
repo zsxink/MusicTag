@@ -17,6 +17,10 @@ context: |
   - 保存失败：表单内容保留可重试，顶栏标「✕ 保存失败：原因」，dirty 保持 true，绝不假报已保存
   - 离线降级：会话内首次自动搜索全源失败 → 标记离线，后续选中不再自动搜，只留手动搜索按钮
 
+  流程约束（pipe 强制，非 V1 产品行为，放这里是因为 rules 无全局键、只有 context 是全局的）：
+  - Issue 驱动：任何变更（新功能/规格/修复）开始前必须先建 GitHub Issue 作为锚点；分支提交用 `feat(<issue>): <任务>`；PR 描述引用 `Closes #<issue>`（合并即自动关闭对应 Issue）
+  - Epic 拆分（pipe:init）：先建 1 个总 Epic Issue + 每子变更一个 Issue，子 Issue 引用 Epic Issue 号
+
   技术栈：外壳 Tauri 2 + Rust；前端 Vue 3 + Vite + TypeScript（<script setup>，单 store 不用 Pinia）；标签读写 lofty（MP3 写 ID3v2.4；FLAC Vorbis LYRICS/PICTURE、MP3 USLT/APIC 全支持）；其余 image（封面压缩）、walkdir、rfd、reqwest+serde_json、tokio、aes+cbc+rsa+rand（网易云加密，无 JS 引擎）。
 
   定稿规格（最终权威，改动先同步再动代码）：docs/V1-PRD.md、docs/design/design.md、记忆 music-tag-v1-spec.md。
@@ -30,9 +34,6 @@ context: |
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
 rules:
-  all:
-    - Issue 驱动：任何变更（新功能/规格/修复）开始前必须先建 GitHub Issue 作为锚点；分支提交用 `feat(<issue>): <任务>`；PR 描述引用 `Closes #<issue>`（合并即自动关闭对应 Issue）
-    - Epic 拆分（pipe:init）：先建 1 个总 Epic Issue + 每子变更一个 Issue，子 Issue 引用 Epic Issue 号
   proposal:
     - 先读 docs/V1-PRD.md / docs/design/design.md，判断是否与已拍板决策冲突
     - 一次一首边界：涉及批量能力的提议需明确标注为 V2，V1 不做
@@ -45,4 +46,4 @@ rules:
     - 任务按依赖排序，Rust 后端（Tauri command）优先于前端接入
   design:
     - 流程脚本变更（.agents/tools/pipe-native/、.agents/workflows/、宿主 pipe 命令）必须说明原生 Agent 边界与 Markdown 恢复，并附 node --check、bash -n、原生入口 self-check 和适用测试的验证计划。
-    - agent/skill 描述与共享 WORKFLOW.md 必须保持一致；变更涉及搜索联动时，CR/验证环节须体现复盘回归维度（Issue #46/#47）。
+    - 'agent/skill 描述与共享 WORKFLOW.md 必须保持一致；变更涉及搜索联动时，CR/验证环节须体现复盘回归维度（Issue #46/#47）。'
