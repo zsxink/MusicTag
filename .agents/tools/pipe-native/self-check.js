@@ -181,6 +181,16 @@ function bareProseOpenspec(code) {
     || /\bnpx[ \t]+openspec\b/.test(code);
 }
 
+function proseOpenspecPins(code, relative, spec) {
+  const pins = [...code.matchAll(/@fission-ai\/openspec@([^\s"'`]+)/g)];
+  if (!pins.length) return false;
+  const allowWildcard = relative === '.opencode/agents/verify-agent.md';
+  return pins.some((match) => {
+    const pin = '@fission-ai/openspec@' + match[1].replace(/[),.;]+$/, '');
+    return pin !== spec && !(allowWildcard && pin === '@fission-ai/openspec@*');
+  });
+}
+
 function checkOpenspecPinning(root, issues) {
   // 唯一真值：从常量模块文本里静态取出固定版本。刻意用读文本 + 正则而非 require()，
   // 以保持 self-check「纯静态、不执行仓库代码」的定位；取不到即 fail-closed。
@@ -219,14 +229,17 @@ function checkOpenspecPinning(root, issues) {
     });
   }
 
-  // 散文/白名单：只要出现裸形态即 fail-closed。固定后（完整版本或 @* 通配）
-  // 的行不再匹配裸形态，故无需再比对 spec 字面量。
+  // 散文/白名单：裸形态 fail-closed，显式版本必须与共享常量一致。
+  // 仅 OpenCode verify-agent 的 permission pattern 允许 @*，以免每次 bump 改权限表。
   for (const relative of OPENSPEC_PROSE_CALL_SITES) {
     const text = read(root, relative, issues);
     if (text === null) continue;
     text.split('\n').forEach((raw, index) => {
-      if (bareProseOpenspec(stripLineComment(raw))) {
+      const code = stripLineComment(raw);
+      if (bareProseOpenspec(code)) {
         issues.push(`${relative}:${index + 1} openspec 散文调用未固定版本（应为 npx --yes ${spec} <子命令> …；权限白名单可用 @* 通配）：${raw.trim()}`);
+      } else if (proseOpenspecPins(code, relative, spec)) {
+        issues.push(`${relative}:${index + 1} openspec 散文调用未固定到共享版本 ${spec}（仅权限白名单可用 @* 通配）：${raw.trim()}`);
       }
     });
   }

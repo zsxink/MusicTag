@@ -204,6 +204,118 @@ function runWrapperEnv(dir, script, args, extraEnv) {
   return spawnSync(process.execPath, [path.join(CMDS, script), ...args], { encoding: 'utf8', env, timeout: 60_000 });
 }
 
+// preload 替换 gh 的 spawnSync 返回值，覆盖真实 PATH 桩无法产生的 error.code，
+// 同时推进时钟以确定性模拟「查询返回时已过截止时间」。
+function runWaitCiSpawnStub(responses, timeoutMs, extraEnv = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-wait-ci-spawn-'));
+  const fixture = path.join(dir, 'responses.json');
+  const callsFile = path.join(dir, 'calls.json');
+  const preload = path.join(dir, 'spawn-stub.cjs');
+  fs.writeFileSync(fixture, JSON.stringify(responses));
+  fs.writeFileSync(preload, `const fs = require('node:fs');
+const path = require('node:path');
+const cp = require('node:child_process');
+const responses = JSON.parse(fs.readFileSync(path.join(__dirname, 'responses.json'), 'utf8'));
+const calls = [];
+const realNow = Date.now.bind(Date);
+let elapsed = 0;
+Date.now = () => realNow() + elapsed;
+cp.spawnSync = (bin, args, options) => {
+  if (bin !== 'gh') throw new Error('unexpected executable: ' + bin);
+  const response = responses[calls.length];
+  calls.push({ args, timeout: options.timeout });
+  fs.writeFileSync(path.join(__dirname, 'calls.json'), JSON.stringify(calls));
+  if (!response) throw new Error('unexpected extra gh query');
+  elapsed += response.elapsedMs || 0;
+  return response.result;
+};
+require('node:module').syncBuiltinESMExports();
+`);
+  try {
+    const r = spawnSync(process.execPath, ['--require', preload, path.join(CMDS, 'wait-ci.js'), '12', `--timeout=${timeoutMs}`], {
+      encoding: 'utf8', timeout: 60_000,
+      env: { ...process.env, ...FAST_RETRY_ENV, WAIT_CI_RETRY_BASE_MS: '0', ...extraEnv },
+    });
+    return { ...r, calls: JSON.parse(fs.readFileSync(callsFile, 'utf8')) };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('wait-ci: 空 stdout/stderr 的 spawnSync ETIMEDOUT/ECONNRESET 仍重试，并用剩余预算限制 gh', () => {
+  for (const code of ['ETIMEDOUT', 'ECONNRESET']) {
+    const r = runWaitCiSpawnStub([
+      { elapsedMs: 100, result: { status: null, stdout: '', stderr: '', error: { code, message: `spawnSync gh ${code}` } } },
+      { result: { status: 0, stdout: '[{"name":"cargo","state":"SUCCESS"}]', stderr: '' } },
+    ], 500);
+    assert.equal(r.status, 0, `${code}: ${r.stdout}${r.stderr}`);
+    assert.equal(JSON.parse(r.stdout).ok, true);
+    assert.equal(r.calls.length, 2, code);
+    assert.ok(r.calls[0].timeout > 0 && r.calls[0].timeout <= 500);
+    assert.ok(r.calls[1].timeout > 0 && r.calls[1].timeout <= r.calls[0].timeout - 100);
+  }
+});
+
+test('wait-ci: 慢查询越过截止时间后不接受成功、失败或无门禁结果', () => {
+  for (const result of [
+    { status: 0, stdout: '[{"name":"cargo","state":"SUCCESS"}]' },
+    { status: 0, stdout: '[{"name":"cargo","state":"FAILURE"}]' },
+    { status: 0, stdout: '[]' },
+    { status: 1, stdout: '', stderr: 'no required checks' },
+  ]) {
+    const r = runWaitCiSpawnStub([{ elapsedMs: 100, result }], 100);
+    assert.equal(r.status, 1, r.stdout);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.ok, false);
+    assert.equal(out.errorKind, 'timeout');
+    assert.deepEqual(out.checks, { total: 0, passed: 0, failed: 0 });
+    assert.equal(r.calls.length, 1);
+    assert.ok(r.calls[0].timeout <= 100);
+  }
+});
+
+test('wait-ci: 无输出的 gh 查询耗尽总预算时返回 network，且不再重试', () => {
+  const r = runWaitCiSpawnStub([{ elapsedMs: 100, result: {
+    status: null, stdout: '', stderr: '', error: { code: 'ETIMEDOUT', message: 'spawnSync gh ETIMEDOUT' },
+  } }], 100);
+  assert.equal(r.status, 1);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.errorKind, 'network');
+  assert.match(out.error, /ETIMEDOUT/);
+  assert.equal(out.retries, 0);
+  assert.equal(r.calls.length, 1);
+});
+
+test('wait-ci: 单次真实慢 gh 调用受总预算限制', () => {
+  const dir = fakeBinDir({});
+  fs.writeFileSync(path.join(dir, 'gh'), `#!${process.execPath}
+setTimeout(() => process.stdout.write('[{"name":"cargo","state":"SUCCESS"}]'), 1500);
+`, { mode: 0o755 });
+  try {
+    const started = Date.now();
+    const r = runWrapperEnv(dir, 'wait-ci.js', ['12', '--timeout=100'], FAST_RETRY_ENV);
+    const elapsed = Date.now() - started;
+    assert.equal(r.status, 1, r.stdout);
+    assert.equal(JSON.parse(r.stdout).errorKind, 'network');
+    assert.ok(elapsed < 1000, `gh 调用未受剩余预算限制：${elapsed}ms`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('wait-ci: 超时 passed 统计完成项，纯 pending 为 0，混合检查只计已通过项', () => {
+  for (const { runs, passed } of [
+    { runs: [{ name: 'cargo', state: 'IN_PROGRESS' }], passed: 0 },
+    { runs: [{ name: 'cargo', state: 'SUCCESS' }, { name: 'lint', state: 'QUEUED' }, { name: 'build', state: 'PENDING' }], passed: 1 },
+  ]) {
+    const r = runWaitCiSpawnStub([{ result: { status: 0, stdout: JSON.stringify(runs) } }], 100, { WAIT_CI_POLL_MS: '5000' });
+    assert.equal(r.status, 1);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.errorKind, 'timeout');
+    assert.deepEqual(out.checks, { total: runs.length, passed, failed: 0 });
+  }
+});
+
 test('wait-ci: 瞬时错误（前 2 次 EOF）后有界退避重试，自愈并返回真实 checks 事实', () => {
   const dir = fakeBinDir({});
   const calls = writeCountingGhost(dir, {
@@ -285,31 +397,29 @@ test('wait-ci: 认证失败属不可重试 → 立即 exit 1，不做退避重�
 });
 
 test('wait-ci: 退避不得超出总 timeout 预算（默认 1s 起步退避 vs 300ms 预算）', () => {
-  const dir = fakeBinDir({});
-  const calls = writeCountingGhost(dir, { failFirst: 999, stderrText: EOF_MSG, stdoutText: '[]' });
   const started = Date.now();
-  // 不注入退避：生产默认 RETRY_BASE_MS=1000ms，预算仅 300ms → 退避须被预算截断并及时收口。
-  const r = runWrapperEnv(dir, 'wait-ci.js', ['12', '--timeout=300'], {});
+  // 显式用生产退避值；直接注入返回值，避免 shell 启动先耗尽 300ms 预算。
+  const r = runWaitCiSpawnStub([{ result: { status: 1, stderr: EOF_MSG, stdout: '' } }], 300, {
+    WAIT_CI_RETRY_BASE_MS: '1000', WAIT_CI_RETRY_MAX_MS: '30000',
+  });
   const elapsed = Date.now() - started;
   assert.equal(r.status, 1);
   const out = JSON.parse(r.stdout);
   assert.equal(out.errorKind, 'network');
-  assert.ok(calls() >= 1 && calls() <= 2, `退避不得超出预算：实际调用 gh ${calls()} 次（预算 300ms < 退避 1000ms）`);
+  assert.equal(r.calls.length, 1, '退避耗尽预算后不得再查询 gh');
+  assert.equal(out.retries, 1);
   assert.ok(elapsed < 2000, `退避超出 timeout 预算：耗时 ${elapsed}ms（预算 300ms，默认退避 1000ms）`);
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('wait-ci: 轮询等待不超出剩余预算（定时器等待，不做整段盲等）', () => {
-  const dir = fakeBinDir({});
-  writeConstantGhost(dir, '[{"name":"cargo","state":"IN_PROGRESS","link":""}]');
   const started = Date.now();
   // 轮询间隔 5000ms 远大于预算 300ms → 必须在预算内收口而非盲等整段。
-  const r = runWrapperEnv(dir, 'wait-ci.js', ['12', '--timeout=300'], { WAIT_CI_POLL_MS: '5000' });
+  const r = runWaitCiSpawnStub([{ result: { status: 0, stdout: '[{"name":"cargo","state":"IN_PROGRESS","link":""}]' } }], 300, { WAIT_CI_POLL_MS: '5000' });
   const elapsed = Date.now() - started;
   assert.equal(r.status, 1);
   assert.equal(JSON.parse(r.stdout).errorKind, 'timeout');
+  assert.equal(r.calls.length, 1);
   assert.ok(elapsed < 2000, `轮询等待超出预算：耗时 ${elapsed}ms（预算 300ms）`);
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('wait-ci: 用法错误仍为 exit 2 且 stdout 为空', () => {

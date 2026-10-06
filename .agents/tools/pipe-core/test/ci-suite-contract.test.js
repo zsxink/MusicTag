@@ -57,19 +57,32 @@ test('ci-suite-contract: release.yml test job 跑全部三组套件 + self-check
   assert.ok(selfCheckAt.index < publishJob.index, 'self-check 必须早于 publish-tauri job');
 });
 
-test('ci-suite-contract: verify.js 的 infra 计划与两处 workflow 同清单', () => {
+test('ci-suite-contract: infra/docs/spec Verify 计划都运行全套件与 self-check', async (t) => {
   const { buildPlan } = require('../verify.js');
-  const plan = buildPlan({ change: 'demo', domain: 'infra', root: ROOT });
-  const testStep = plan.find((step) => step.args && step.args.includes('--test'));
-  assert.ok(testStep, 'verify.js infra 计划缺少 node --test 步骤');
-  assert.deepEqual(suitesIn(testStep.args.join(' ')), SUITES, 'verify.js 套件清单与 CI 不一致');
+  for (const domain of ['infra', 'docs', 'spec']) {
+    await t.test(domain, () => {
+      const plan = buildPlan({ change: 'demo', domain, root: ROOT });
+      const testStep = plan.find((step) => step.args && step.args.includes('--test'));
+      assert.ok(testStep, `verify.js ${domain} 计划缺少 node --test 步骤`);
+      assert.deepEqual(suitesIn(testStep.args.join(' ')), SUITES, `verify.js ${domain} 套件清单与 CI 不一致`);
 
-  // self-check 步骤必须真的执行 pipe-native/self-check.js。
-  // 旧写法指向 pipe-core/run.js --self-check，那是退役 shim，按 run.test.js 的
-  // 退役边界断言恒非零退出——留着等于没有门禁。
-  const selfCheckStep = plan.find((step) => step.step === 'self-check');
-  assert.ok(selfCheckStep, 'verify.js infra 计划缺少 self-check 步骤');
-  assert.deepEqual(selfCheckStep.args, [path.join(ROOT, '.agents', 'tools', 'pipe-native', 'self-check.js')]);
+      // self-check 必须执行 native 实现，不能指向退役的 pipe-core shim。
+      const selfCheckStep = plan.find((step) => step.step === 'self-check');
+      assert.ok(selfCheckStep, `verify.js ${domain} 计划缺少 self-check 步骤`);
+      assert.deepEqual(selfCheckStep.args, [path.join(ROOT, '.agents', 'tools', 'pipe-native', 'self-check.js')]);
+    });
+  }
+});
+
+test('ci-suite-contract: 所有 Verify OpenSpec 计划使用全量严格校验参数', () => {
+  const { buildPlan } = require('../verify.js');
+  const expected = ['--yes', '@fission-ai/openspec@1.5.0', 'validate', '--all', '--strict', '--no-interactive'];
+  for (const domain of ['infra', 'docs', 'spec', 'backend', 'frontend', 'both']) {
+    const plan = buildPlan({ change: 'demo', domain, root: ROOT });
+    const validate = plan.find((step) => step.step === 'OpenSpec strict validate');
+    assert.ok(validate, `verify.js ${domain} 计划缺少 OpenSpec 校验步骤`);
+    assert.deepEqual(validate.args, expected, `verify.js ${domain} 未执行 validate --all --strict --no-interactive`);
+  }
 });
 
 test('ci-suite-contract: 三处套件集合彼此完全一致（防单侧覆盖）', () => {

@@ -171,7 +171,7 @@ test('openspec-version 红测: 版本固定被移除时自检报出文件与行�
     {
       name: 'verify.js 退回不带版本的 npx openspec',
       file: '.agents/tools/pipe-core/verify.js',
-      mutate: (s) => s.split('openspecValidateArgs(change)').join("['openspec', 'validate', change, '--strict', '--no-interactive']"),
+      mutate: (s) => s.replace('// 构建产物白名单', "const unpinned = ['openspec', 'validate'];\n// 构建产物白名单"),
     },
     {
       name: 'integrate.js 退回不带版本的 npx openspec',
@@ -205,6 +205,19 @@ test('openspec-version 红测: 版本固定被移除时自检报出文件与行�
       name: 'AGENTS.md 散文退回裸 npx openspec',
       file: 'AGENTS.md',
       mutate: (s) => s.replace('npx --yes @fission-ai/openspec@1.5.0 validate <change>', 'npx openspec validate <change>'),
+    },
+    {
+      name: 'WORKFLOW.md 散文明示错误版本',
+      file: '.agents/skills/pipe/WORKFLOW.md',
+      mutate: (s) => s.replace('npx --yes @fission-ai/openspec@1.5.0 validate <change>', 'npx --yes @fission-ai/openspec@1.13.2 validate <change>'),
+    },
+    {
+      name: 'AGENTS.md 同时包含正确与错误版本',
+      file: 'AGENTS.md',
+      mutate: (s) => s.replace(
+        'npx --yes @fission-ai/openspec@1.5.0 validate <change>',
+        'npx --yes @fission-ai/openspec@1.5.0 validate <change>；npx --yes @fission-ai/openspec@1.13.2 validate <change>',
+      ),
     },
     {
       name: 'verify-agent 权限白名单退回 npx openspec',

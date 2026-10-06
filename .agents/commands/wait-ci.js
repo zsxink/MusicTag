@@ -69,13 +69,14 @@ function classifyFailure(message) {
   return { retryable: false, kind: 'unknown' };
 }
 
-function checksOnce() {
+function checksOnce(budgetMs) {
   const r = spawnSync('gh', ['pr', 'checks', target, '--required', '--json', 'name,state,link'], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: Math.min(GH_CALL_TIMEOUT_MS, Math.max(1_000, timeoutMs)),
+    timeout: Math.min(GH_CALL_TIMEOUT_MS, Math.max(1, Math.floor(budgetMs))),
   });
   if (r.error || r.status !== 0) {
-    const msg = r.stderr || r.stdout || `gh pr checks 失败（exit ${r.status}）`;
+    const msg = [r.stderr, r.stdout, r.error && r.error.code, r.error && r.error.message]
+      .filter(Boolean).join('\n') || `gh pr checks 失败（exit ${r.status}）`;
     // 无 required checks（`--required` 返回空）时 gh 可能报错：视为无门禁，直接通过。
     const { kind } = classifyFailure(msg);
     const empty = kind === 'no-checks';
@@ -101,18 +102,26 @@ async function main() {
   const remaining = () => deadline - Date.now();
   const timeoutPayload = (runs) => ({
     ok: false,
-    checks: { total: runs.length, passed: runs.length - runs.filter((c) => !PENDING_STATES.includes((c.state || c.status))).length, failed: 0 },
+    checks: { total: runs.length, passed: runs.filter((c) => !PENDING_STATES.includes(c.state || c.status)
+      && !FAILED_STATES.includes((c.conclusion || c.state || '').toUpperCase())).length, failed: 0 },
     error: `等待 required checks 超时（${Math.round(timeoutMs / 60000)}min）`,
     errorKind: 'timeout',
   });
 
+  let runs = [];
   for (;;) {
     // 瞬时错误的有上限退避重试：只在这一层重试，拿到远端事实后即进入判定。
-    let runs = [];
     let attempt = 0;
     for (;;) {
-      const result = checksOnce();
-      if (!result.error) { runs = result.runs; break; }
+      const callBudget = remaining();
+      if (callBudget <= 0) { emit(timeoutPayload(runs)); return 1; }
+      const result = checksOnce(callBudget);
+      if (!result.error) {
+        // 截止后返回的远端结果不再接受，避免慢查询把已超时等待判成成功。
+        if (remaining() <= 0) { emit(timeoutPayload(runs)); return 1; }
+        runs = result.runs;
+        break;
+      }
       if (result.noChecks) {
         // 无 required checks：视为无 CI 门禁，保持全绿。
         emit({ ok: true, checks: { total: 0, passed: 0, failed: 0 }, error: null, errorKind: null });

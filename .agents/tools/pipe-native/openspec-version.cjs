@@ -18,8 +18,9 @@ const OPENSPEC_CLI_SPEC = '@fission-ai/openspec@1.5.0';
 const OPENSPEC_NPX_PREFIX = ['--yes', OPENSPEC_CLI_SPEC];
 
 // `npx --yes @fission-ai/openspec@1.5.0 validate <change> --strict --no-interactive`
-function openspecValidateArgs(change) {
-  return [...OPENSPEC_NPX_PREFIX, 'validate', change, '--strict', '--no-interactive'];
+function openspecValidateArgs(change, options = {}) {
+  const target = options.all ? ['--all'] : [change];
+  return [...OPENSPEC_NPX_PREFIX, 'validate', ...target, '--strict', '--no-interactive'];
 }
 
 // `npx --yes @fission-ai/openspec@1.5.0 archive <change> --yes`
