@@ -181,13 +181,14 @@ function bareProseOpenspec(code) {
     || /\bnpx[ \t]+openspec\b/.test(code);
 }
 
-function proseOpenspecPins(code, relative, spec) {
+function proseOpenspecPins(code, raw, relative, spec) {
   const pins = [...code.matchAll(/@fission-ai\/openspec@([^\s"'`]+)/g)];
   if (!pins.length) return false;
-  const allowWildcard = relative === '.opencode/agents/verify-agent.md';
   return pins.some((match) => {
     const pin = '@fission-ai/openspec@' + match[1].replace(/[),.;]+$/, '');
-    return pin !== spec && !(allowWildcard && pin === '@fission-ai/openspec@*');
+    const exactVerifyAllowlist = relative === '.opencode/agents/verify-agent.md'
+      && /^\s*"npx --yes @fission-ai\/openspec@\* validate \*": allow\s*$/.test(raw);
+    return pin !== spec && !(exactVerifyAllowlist && pin === '@fission-ai/openspec@*');
   });
 }
 
@@ -237,9 +238,9 @@ function checkOpenspecPinning(root, issues) {
     text.split('\n').forEach((raw, index) => {
       const code = stripLineComment(raw);
       if (bareProseOpenspec(code)) {
-        issues.push(`${relative}:${index + 1} openspec 散文调用未固定版本（应为 npx --yes ${spec} <子命令> …；权限白名单可用 @* 通配）：${raw.trim()}`);
-      } else if (proseOpenspecPins(code, relative, spec)) {
-        issues.push(`${relative}:${index + 1} openspec 散文调用未固定到共享版本 ${spec}（仅权限白名单可用 @* 通配）：${raw.trim()}`);
+        issues.push(`${relative}:${index + 1} openspec 散文调用未固定版本（应为 npx --yes ${spec} <子命令> …）：${raw.trim()}`);
+      } else if (proseOpenspecPins(code, raw, relative, spec)) {
+        issues.push(`${relative}:${index + 1} openspec 散文调用未固定到共享版本 ${spec}（仅精确权限白名单行可用 @* 通配）：${raw.trim()}`);
       }
     });
   }

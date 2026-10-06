@@ -158,6 +158,24 @@ test('openspec-version 红测: 副本原样时版本固定检查无 issue（先�
   }
 });
 
+test('openspec-version 红测: 仅精确 verify 权限白名单行允许 @*，散文注入必须 fail-closed', () => {
+  const dir = tmpCopy(ALL_PIN_FILES);
+  try {
+    const relative = '.opencode/agents/verify-agent.md';
+    const target = path.join(dir, relative);
+    const original = fs.readFileSync(target, 'utf8');
+    assert.match(original, /^\s+"npx --yes @fission-ai\/openspec@\* validate \*": allow\s*$/m);
+    assert.deepEqual(pinIssues(dir), [], '精确权限白名单行应保持有效');
+
+    fs.writeFileSync(target, original + '\n文档示例可运行 npx --yes @fission-ai/openspec@* validate demo。\n');
+    const issues = pinIssues(dir);
+    assert.ok(issues.some((issue) => issue.startsWith(relative + ':')), `散文 @* 未 fail-closed：${JSON.stringify(issues)}`);
+    assert.match(issues.join('\n'), /:\d+ /, 'issue 缺少具体行号');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('openspec-version 红测: 版本固定被移除时自检报出文件与行号（fail-closed）', () => {
   const cases = [
     {
