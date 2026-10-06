@@ -41,8 +41,9 @@ type DragEventPayload = {
   paths?: string[]
   position?: { x: number; y: number }
 }
-const { dragHandler, unlisten } = vi.hoisted(() => {
+const { dragHandler, unlisten, dragSubscription } = vi.hoisted(() => {
   let handler: ((e: { payload: DragEventPayload }) => void) | undefined
+  let pending: Promise<() => void> | undefined
   const unlisten = vi.fn()
   return {
     dragHandler: {
@@ -52,6 +53,10 @@ const { dragHandler, unlisten } = vi.hoisted(() => {
       get: () => handler,
     },
     unlisten,
+    dragSubscription: {
+      set: (value: typeof pending) => { pending = value },
+      get: () => pending,
+    },
   }
 })
 
@@ -59,7 +64,7 @@ vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     onDragDropEvent: vi.fn(async (h: (e: { payload: DragEventPayload }) => void) => {
       dragHandler.set(h)
-      return unlisten
+      return dragSubscription.get() ?? unlisten
     }),
   }),
 }))
@@ -326,6 +331,26 @@ describe('CoverPanel — 拖拽嵌入（v1-cover-embed D4，Tauri 原生 drag-dr
     expect(unlisten).not.toHaveBeenCalled()
     w.unmount()
     expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['resolve', 'reject'] as const)('订阅尚未完成即卸载（%s）→ 释放迟到订阅，不再绑定右键全局监听', async (outcome) => {
+    let resolve!: (release: () => void) => void
+    let reject!: (error: Error) => void
+    dragSubscription.set(new Promise((res, rej) => { resolve = res; reject = rej }))
+    const addListener = vi.spyOn(window, 'addEventListener')
+    try {
+      const w = mount(CoverPanel)
+      w.unmount()
+      addListener.mockClear()
+      if (outcome === 'resolve') resolve(unlisten)
+      else reject(new Error('订阅失败'))
+      await flushPromises()
+      expect(unlisten).toHaveBeenCalledTimes(outcome === 'resolve' ? 1 : 0)
+      expect(addListener.mock.calls.filter(([type]) => type === 'keydown' || type === 'click')).toEqual([])
+    } finally {
+      dragSubscription.set(undefined)
+      addListener.mockRestore()
+    }
   })
 })
 

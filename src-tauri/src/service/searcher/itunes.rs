@@ -13,8 +13,9 @@
 // 单源失败一律降级为空列表 / None。
 
 use crate::model::{MusicSourceId, SongCandidate};
-use crate::service::searcher::{join_query_terms, MusicSource};
+use crate::service::searcher::{join_query_terms, MusicSource, SEARCH_TIMEOUT};
 use async_trait::async_trait;
+use std::time::Duration;
 use tokio::task::JoinSet;
 
 pub struct Itunes {
@@ -49,6 +50,19 @@ impl MusicSource for Itunes {
         artist: &str,
         album: &str,
     ) -> Result<Vec<SongCandidate>, String> {
+        self.search_with_timeout(client, title, artist, album, SEARCH_TIMEOUT)
+            .await
+    }
+
+    async fn search_with_timeout(
+        &self,
+        client: &reqwest::Client,
+        title: &str,
+        artist: &str,
+        album: &str,
+        timeout: Duration,
+    ) -> Result<Vec<SongCandidate>, String> {
+        let deadline = tokio::time::Instant::now() + timeout;
         // term = "<title> <artist> <album>"（search-cover-album：综合三段，空段跳过）；
         // country 由店面序参数化（不再硬编码 CN）、media=music&entity=song（只搜单曲）。
         // Url::parse_with_params 保证中文 term 正确 URL 编码。
@@ -76,13 +90,15 @@ impl MusicSource for Itunes {
         // JoinSet **完成顺序不确定** → 严格按任务回传的下标回填槽位（同 mod.rs
         // `search_song_with_sources` 的「先按固定序占位、再回填」惯用法），最后按店面序拼接，
         // 保证同分去重与最终排序可复现（直接 `join` 会让 HK/US 顺序随机）。
-        while let Some(joined) = set.join_next().await {
+        // 整个源共用一个截止时间；超时只作废未完成店面，保留已成功店面结果。
+        while let Ok(Some(joined)) = tokio::time::timeout_at(deadline, set.join_next()).await {
             if let Ok((index, res)) = joined {
                 if let Some(slot) = slots.get_mut(index) {
                     *slot = Some(res);
                 }
             }
         }
+        set.abort_all();
 
         // 任一店面成功即该源成功（**含成功但空结果**）→ 不误算「成功空」为失败；
         // 两店面全失败才 Err（`all_failed` 依赖此口径，iTunes 一次失败抵一整个源）。
@@ -96,8 +112,8 @@ impl MusicSource for Itunes {
                     songs.extend(list);
                 }
                 Some(Err(e)) => errors.push(format!("{storefront}: {e}")),
-                // 槽位未回填（JoinSet join 异常，如任务 panic）→ 视同该店面失败。
-                None => errors.push(format!("{storefront}: 搜索任务无结果")),
+                // 超时或 JoinSet 异常未回填的店面计为失败，不影响其他已成功的店面。
+                None => errors.push(format!("{storefront}: 搜索超时或任务无结果")),
             }
         }
         if any_ok || self.storefronts.is_empty() {
@@ -167,4 +183,3 @@ pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
         })
         .collect()
 }
-
