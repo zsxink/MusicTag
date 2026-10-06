@@ -193,10 +193,15 @@ async function applyDropped(paths: string[]) {
 
 /** Tauri 原生 drag-drop 订阅（enter/over 命中封面框 → 点亮高亮；drop 命中 → 路径；leave → 复位）。 */
 let unlisten: (() => void) | undefined
+let unmounted = false
 
 onMounted(async () => {
+  // 窗口监听同步安装，保证订阅 IPC 尚未完成时卸载也能成对释放。
+  window.addEventListener('keydown', onKeydown)
+  window.addEventListener('click', onWindowClick)
   try {
-    unlisten = await getCurrentWindow().onDragDropEvent((event) => {
+    const release = await getCurrentWindow().onDragDropEvent((event) => {
+      if (unmounted) return
       const { type } = event.payload
       if (readonly.value) return // 只读态不响应 drop（含高亮）
       if (type === 'enter' || type === 'over') {
@@ -214,17 +219,17 @@ onMounted(async () => {
         dragging.value = false
       }
     })
+    // 换目录可能在事件订阅返回前卸载面板；迟到的订阅不能留到下首歌。
+    if (unmounted) release()
+    else unlisten = release
   } catch {
     // 非 Tauri 环境（浏览器 dev / 单测 mock 缺失）无 drag-drop 能力，静默降级
     unlisten = undefined
   }
-  // 右键浮层的另两个关闭出口（另两个：点菜单项、切换歌曲）。窗口级监听挂在 mount 期，
-  // 组件常驻封面区，菜单开了才做事，无常驻开销。
-  window.addEventListener('keydown', onKeydown)
-  window.addEventListener('click', onWindowClick)
 })
 
 onBeforeUnmount(() => {
+  unmounted = true
   unlisten?.()
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('click', onWindowClick)

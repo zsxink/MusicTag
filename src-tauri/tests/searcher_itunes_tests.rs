@@ -19,6 +19,159 @@ use app_lib::model::MusicSourceId;
 use common::mock_http_router;
 use std::time::Duration;
 
+/// 挂起店面保留 TCP 连接直到测试结束；成功店面独立应答，不依赖请求到达顺序。
+fn mock_hanging_storefront(
+    successful_body: Option<&'static str>,
+) -> (
+    String,
+    std::sync::Arc<std::sync::Mutex<Vec<std::net::TcpStream>>>,
+) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let held = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let held_for_server = held.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().take(2) {
+            let mut stream = stream.unwrap();
+            let held = held_for_server.clone();
+            std::thread::spawn(move || {
+                let mut request = [0; 8192];
+                let count = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..count]);
+                if request.contains("country=HK") {
+                    if let Some(body) = successful_body {
+                        stream.write_all(&http_json(body)).unwrap();
+                        return;
+                    }
+                }
+                held.lock().unwrap().push(stream);
+            });
+        }
+    });
+    (url, held)
+}
+
+#[tokio::test]
+async fn search_song_preserves_success_when_other_storefront_times_out() {
+    let (url, held) = mock_hanging_storefront(Some(
+        r#"{"resultCount":1,"results":[{"trackId":1,"trackName":"晴天","artistName":"周杰倫","collectionName":"葉惠美"}]}"#,
+    ));
+    let mut sources = four_failing_stubs();
+    sources.push(Box::new(Itunes {
+        search_url: url,
+        ..Default::default()
+    }));
+    let result = search_song_with_sources(
+        &reqwest::Client::new(),
+        "晴天",
+        "周杰伦",
+        "叶惠美",
+        sources,
+        Duration::from_millis(300),
+    )
+    .await;
+    assert_eq!(
+        held.lock().unwrap().len(),
+        1,
+        "US connection must still be pending, not failed"
+    );
+    assert!(
+        !result.all_failed,
+        "HK succeeded before the deadline; US timeout must not mark iTunes failed"
+    );
+    assert_eq!(
+        result.source_stats.last(),
+        Some(&(MusicSourceId::Itunes, 1))
+    );
+    assert_eq!(result.songs.len(), 1);
+    assert_eq!(
+        result.songs[0].artist, "周杰倫",
+        "candidate text stays unchanged"
+    );
+}
+
+#[tokio::test]
+async fn search_song_preserves_successful_empty_storefront_at_deadline() {
+    let (url, held) = mock_hanging_storefront(Some(r#"{"resultCount":0,"results":[]}"#));
+    let mut sources = four_failing_stubs();
+    sources.push(Box::new(Itunes {
+        search_url: url,
+        ..Default::default()
+    }));
+    let result = search_song_with_sources(
+        &reqwest::Client::new(),
+        "冷门歌",
+        "",
+        "",
+        sources,
+        Duration::from_millis(300),
+    )
+    .await;
+    assert_eq!(held.lock().unwrap().len(), 1);
+    assert!(
+        !result.all_failed,
+        "successful empty HK response must not cause session offline"
+    );
+    assert!(result.songs.is_empty());
+    assert_eq!(
+        result.source_stats.last(),
+        Some(&(MusicSourceId::Itunes, 0))
+    );
+}
+
+#[tokio::test]
+async fn search_source_preserves_completed_storefront_at_deadline() {
+    let (url, held) = mock_hanging_storefront(Some(
+        r#"{"resultCount":1,"results":[{"trackId":1,"trackName":"晴天","artistName":"周杰倫"}]}"#,
+    ));
+    let songs = app_lib::service::searcher::search_source_with(
+        &reqwest::Client::new(),
+        Box::new(Itunes {
+            search_url: url,
+            ..Default::default()
+        }),
+        "晴天",
+        "周杰伦",
+        "",
+        Duration::from_millis(300),
+    )
+    .await;
+    assert_eq!(held.lock().unwrap().len(), 1);
+    assert_eq!(
+        songs.len(),
+        1,
+        "single-source search must retain the completed storefront too"
+    );
+}
+
+#[tokio::test]
+async fn search_song_both_storefronts_hanging_reaches_deadline_as_failure() {
+    let (url, held) = mock_hanging_storefront(None);
+    let mut sources = four_failing_stubs();
+    sources.push(Box::new(Itunes {
+        search_url: url,
+        ..Default::default()
+    }));
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        search_song_with_sources(
+            &reqwest::Client::new(),
+            "晴天",
+            "",
+            "",
+            sources,
+            Duration::from_millis(300),
+        ),
+    )
+    .await
+    .expect("both hanging storefronts must still obey the source deadline");
+    assert_eq!(held.lock().unwrap().len(), 2);
+    assert!(result.all_failed);
+    assert!(result.songs.is_empty());
+}
+
+
 /// HTTP 200 + JSON 响应字节（`body` 已是 JSON 文本）。
 fn http_json(body: &str) -> Vec<u8> {
     format!(

@@ -73,6 +73,19 @@ pub trait MusicSource: Send + Sync {
         artist: &str,
         album: &str,
     ) -> Result<Vec<SongCandidate>, String>;
+    /// 单源整体超时预算；普通源沿用超时即失败的语义，组合源可保留已成功的子请求。
+    async fn search_with_timeout(
+        &self,
+        client: &reqwest::Client,
+        title: &str,
+        artist: &str,
+        album: &str,
+        timeout: Duration,
+    ) -> Result<Vec<SongCandidate>, String> {
+        tokio::time::timeout(timeout, self.search(client, title, artist, album))
+            .await
+            .map_err(|_| "搜索超时".to_string())?
+    }
     async fn fetch_lyric(&self, client: &reqwest::Client, id: &str) -> Option<String>;
 }
 
@@ -139,9 +152,11 @@ pub async fn search_song_with_sources(
         let artist = artist.to_string();
         let album = album.to_string();
         set.spawn(async move {
-            let fut = source.search(&client, &title, &artist, &album);
-            match tokio::time::timeout(timeout, fut).await {
-                Ok(Ok(list)) => (source.id(), Some(list)),
+            match source
+                .search_with_timeout(&client, &title, &artist, &album, timeout)
+                .await
+            {
+                Ok(list) => (source.id(), Some(list)),
                 _ => (source.id(), None), // 超时 / 网络 / 解析失败 → 失败
             }
         });
@@ -220,8 +235,11 @@ pub async fn search_source_with(
     album: &str,
     timeout: Duration,
 ) -> Vec<SongCandidate> {
-    match tokio::time::timeout(timeout, source.search(client, title, artist, album)).await {
-        Ok(Ok(list)) => list.into_iter().take(TOP_N).collect(),
+    match source
+        .search_with_timeout(client, title, artist, album, timeout)
+        .await
+    {
+        Ok(list) => list.into_iter().take(TOP_N).collect(),
         _ => Vec::new(),
     }
 }
