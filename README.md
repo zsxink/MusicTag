@@ -33,6 +33,10 @@ MusicTag 是一个跨平台桌面工具，**逐首**为本地音乐文件补全�
 - **编辑歌词**：内嵌歌词，可同时导出 .lrc
 - **自动搜索**：选中歌曲后，对缺失的歌词与封面自动联网搜索（网易云、QQ 音乐、酷狗、LRCLIB、iTunes 多源并发），候选手动点选后写入
 
+## 推荐：Echo 音乐播放器
+
+[Echo](https://github.com/zsxink/Echo) 是一款本地优先的跨平台音乐播放器，用于管理和聆听本地曲库；MusicTag 则用于补全本地音乐文件的元数据。可前往 [Echo 发行版页面](https://github.com/zsxink/Echo/releases) 获取版本。
+
 ## 技术栈
 
 - 外壳 **Tauri 2** + **Rust**
