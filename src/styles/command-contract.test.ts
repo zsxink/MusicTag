@@ -115,4 +115,23 @@ describe('Tauri command 契约一致性守卫（真值 = lib.rs generate_handler
   it('PRD §7 无参 command 签名一致（pick_folder/pick_cover_file/get_last_dir/check_for_update 为 `name()`）', () => {
     assertParamless('PRD §7', prdCommands, prdSlice)
   })
+
+  it('原生帮助菜单 action ID 与 Vue 事件 payload 一致', () => {
+    const rustMenu = sliceBetween(
+      lib,
+      '.on_menu_event(|app, event| {',
+      '\n        });',
+      'lib.rs 原生菜单事件',
+    )
+    const api = read('../../src/api/updates.ts')
+    const vueActions = api.match(/export type UpdateMenuAction = ([^\n]+)/)?.[1]
+
+    expect(lib).toContain('MenuItem::with_id(app, "check-for-update"')
+    expect(lib).toContain('MenuItem::with_id(app, "show-about"')
+    expect(rustMenu).toContain('"check-for-update" => "check-for-update"')
+    expect(rustMenu).toContain('"show-about" => "show-about"')
+    expect(rustMenu).toContain('app.emit("update-menu-action", action)')
+    expect(vueActions).toBe("'check-for-update' | 'show-about'")
+    expect(api).toContain("listenEvent<UpdateMenuAction>('update-menu-action'")
+  })
 })
