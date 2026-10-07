@@ -11,6 +11,7 @@
 // - `search_source`（v1-search-fixes，单源搜索：C2 换源绕过聚合去重）
 // - `get_last_dir` / `save_last_dir`（dir-memory，config.json 记住上次打开目录）
 // - `scan_missing`（missing-fields-filter，按需只读扫描缺失维度）
+// - `check_for_update` / `open_release_page`（issue-158，正式版检查与详情链接）
 // 后续子变更在此逐个追加 `tauri::generate_handler![...]`。
 //
 // 模块声明必须 `pub`：`src-tauri/tests/` 集成测试经 `app_lib::` 访问
@@ -20,11 +21,18 @@ pub mod commands;
 pub mod model;
 pub mod service;
 
+#[cfg(desktop)]
+use tauri::Emitter;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .manage(service::folder_watch::FolderWatch::default())
         .invoke_handler(tauri::generate_handler![
             commands::folder::pick_folder,
@@ -44,7 +52,38 @@ pub fn run() {
             commands::search::search_source,
             commands::search::fetch_lyric,
             commands::search::download_cover,
-        ])
+            commands::update::check_for_update,
+            commands::update::open_release_page,
+        ]);
+
+    #[cfg(desktop)]
+    let builder = builder
+        .menu(|app| {
+            use tauri::menu::{Menu, MenuItem, Submenu, HELP_SUBMENU_ID};
+
+            // 保留系统编辑/窗口菜单（macOS 还需要首个应用菜单），替换帮助入口。
+            let menu = Menu::default(app)?;
+            if let Some(help) = menu.get(HELP_SUBMENU_ID) {
+                menu.remove(&help)?;
+            }
+            let check =
+                MenuItem::with_id(app, "check-for-update", "检查更新…", true, None::<&str>)?;
+            let about = MenuItem::with_id(app, "show-about", "关于", true, None::<&str>)?;
+            let help =
+                Submenu::with_id_and_items(app, HELP_SUBMENU_ID, "帮助", true, &[&check, &about])?;
+            menu.append(&help)?;
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            let action = match event.id().as_ref() {
+                "check-for-update" => "check-for-update",
+                "show-about" => "show-about",
+                _ => return,
+            };
+            let _ = app.emit("update-menu-action", action);
+        });
+
+    builder
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {

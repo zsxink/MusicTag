@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Tauri command 契约一致性守卫（spec: command-contract-sync，GATE #92 挂起修复）。
 // 真值基准 = src-tauri/src/lib.rs `invoke_handler(tauri::generate_handler![...])`
-// 实际注册的 17 个 command（代码是唯一事实来源，文档跟随代码）。
+// 实际注册的 19 个 command（代码是唯一事实来源，文档跟随代码）。
 // 断言 docs/design/design.md §10.3、docs/V1-PRD.md §7、openspec/config.yaml
 // 三处契约清单与 lib.rs 注册集一致——任一源缺 command（或 lib.rs 新增未同步）
 // 即红，失败消息列出该源相对 lib.rs 的缺/多余 command 名。
@@ -36,10 +36,10 @@ const lib = read('../../src-tauri/src/lib.rs')
 const libCommands = uniqSort([...lib.matchAll(/commands::([a-z_]+)::([a-z_]+)/g)].map((m) => m[2]))
 
 // 真值签名：commands/*.rs 定义文件 `pub fn name(` / `pub async fn name(`。
-// 17 个 command 中无参者恰为 pick_folder / pick_cover_file / get_last_dir。
+// 19 个 command 中无参者包括 pick_folder / pick_cover_file / get_last_dir / check_for_update。
 // 从定义文件提取（lib.rs 只注册不定义 download_cover 等，签名不在 lib.rs）。
 const sigSource = ['folder.rs', 'song.rs', 'cover.rs', 'search.rs']
-  .concat(['missing.rs'])
+  .concat(['missing.rs', 'update.rs'])
   .map((f) => read(`../../src-tauri/src/commands/${f}`))
   .join('\n')
 const libSignature = (name: string): string => {
@@ -92,27 +92,27 @@ function diffMessage(name: string, cmds: string[]): string {
 }
 
 describe('Tauri command 契约一致性守卫（真值 = lib.rs generate_handler! 注册集）', () => {
-  it('lib.rs 实际注册恰为 17 个 command（防正则退化/漏匹配）', () => {
-    expect(libCommands, `lib.rs 提取到 ${libCommands.length} 个: [${libCommands.join(', ')}]`).toHaveLength(17)
-    expect(new Set(libCommands).size).toBe(17)
+  it('lib.rs 实际注册恰为 19 个 command（防正则退化/漏匹配）', () => {
+    expect(libCommands, `lib.rs 提取到 ${libCommands.length} 个: [${libCommands.join(', ')}]`).toHaveLength(19)
+    expect(new Set(libCommands).size).toBe(19)
   })
 
   it.each(sources)('%s 与 lib.rs 注册集一致', (_name, cmds) => {
     expect(cmds, diffMessage(_name, cmds)).toEqual(libCommands)
   })
 
-  it.each(sources)('%s 契约清单去重后恰为 17 个（防正则漏匹配）', (_name, cmds) => {
-    expect(cmds, `${_name} 提取到 ${cmds.length} 个: [${cmds.join(', ')}]`).toHaveLength(17)
-    expect(new Set(cmds).size).toBe(17)
+  it.each(sources)('%s 契约清单去重后恰为 19 个（防正则漏匹配）', (_name, cmds) => {
+    expect(cmds, `${_name} 提取到 ${cmds.length} 个: [${cmds.join(', ')}]`).toHaveLength(19)
+    expect(new Set(cmds).size).toBe(19)
   })
 
   // 签名层 spot-check：lib.rs 无参 command 在三源契约表中必须写成 `name()`（无参）。
   // 防「仅名称一致、签名漂移」漏检——tester 抓到的 PRD §7 get_last_dir(dir) 即此类。
-  it('design §10.3 无参 command 签名一致（pick_folder/pick_cover_file/get_last_dir 为 `name()`）', () => {
+  it('design §10.3 无参 command 签名一致（pick_folder/pick_cover_file/get_last_dir/check_for_update 为 `name()`）', () => {
     assertParamless('design §10.3', designCommands, designSlice)
   })
 
-  it('PRD §7 无参 command 签名一致（pick_folder/pick_cover_file/get_last_dir 为 `name()`）', () => {
+  it('PRD §7 无参 command 签名一致（pick_folder/pick_cover_file/get_last_dir/check_for_update 为 `name()`）', () => {
     assertParamless('PRD §7', prdCommands, prdSlice)
   })
 })

@@ -1,18 +1,31 @@
 // App 壳集成测试（v1-ux-settings 2.4：SwitchDialog 由 store.pendingAction 驱动，App 级挂载）。
 // spec FR-6.3「模态，覆盖全窗口」：pendingAction 非 null → 渲染弹窗；cancel 后消失。
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 
 // mock invoke：App 树内组件（SongList/CoverPanel/EditorBar 等）不发 IPC，保持无副作用挂载。
-const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }))
+const { mockInvoke, mockListen, mockGetVersion } = vi.hoisted(() => ({ mockInvoke: vi.fn(), mockListen: vi.fn(), mockGetVersion: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }))
+vi.mock('@tauri-apps/api/event', () => ({ listen: mockListen }))
+vi.mock('@tauri-apps/api/app', () => ({ getVersion: mockGetVersion }))
 
 import App from '../App.vue'
 import type { Song } from '../api/types'
 import { EULA_STORAGE_KEY } from '../store/eula'
 import { songStore } from '../store/song'
+import { DISMISSED_UPDATE_STORAGE_KEY, updatesStore } from '../store/updates'
+import type { UpdateCheckResult } from '../api/updates'
+
+enableAutoUnmount(afterEach)
+beforeEach(() => {
+  mockListen.mockReset().mockResolvedValue(vi.fn())
+  mockGetVersion.mockReset().mockResolvedValue('0.1.3')
+  window.localStorage.removeItem(DISMISSED_UPDATE_STORAGE_KEY)
+  Object.assign(updatesStore, { status: 'idle', currentVersion: '', recentOutcome: null, dismissedVersion: null, noticeVisible: false, openingDetails: false, detailError: '' })
+})
 
 const makeSong = (over: Partial<Song> = {}): Song => ({
   path: '/a/song.flac',
@@ -238,5 +251,116 @@ describe('App — EulaDialog 授权门禁（pre-release-check：首次启动弹�
     expect(w.find('[data-testid="eula-dialog"]').exists()).toBe(false)
     // 关闭后 inert 移除——主界面恢复可交互
     for (const el of siblings) expect(el.hasAttribute('inert')).toBe(false)
+  })
+})
+
+describe('App — 启动检查与原生更新菜单', () => {
+  const release: UpdateCheckResult = {
+    current_version: '0.1.3', latest_version: '0.2.0', update_available: true,
+    release_url: 'https://github.com/zsxink/MusicTag/releases/tag/v0.2.0',
+  }
+  const menuHandler = () => mockListen.mock.calls.find(([event]) => event === 'update-menu-action')![1] as (event: { payload: string }) => void
+  beforeEach(() => {
+    window.localStorage.setItem(EULA_STORAGE_KEY, '1')
+    mockInvoke.mockReset().mockImplementation(async (command: string) => {
+      if (command === 'check_for_update') return release
+      if (command === 'list_songs') return [...songStore.songs]
+      if (command === 'get_last_dir') return null
+      return undefined
+    })
+    songStore.folderPath = '/a'
+    songStore.songs = [{ path: '/a/song.flac', title: '歌名', artist: '作者' }]
+    songStore.searchQuery = ''
+    songStore.selectedPath = '/a/song.flac'
+    songStore.current = makeSong()
+    songStore.original = makeSong()
+    songStore.readonly = false
+    songStore.saveState = 'idle'
+    songStore.saveError = ''
+    songStore.pendingAction = null
+  })
+
+  it('启动发起一次异步检查；等待或显示更新期间仍可编辑、不自动打开浏览器', async () => {
+    let resolve!: (result: UpdateCheckResult) => void
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === 'check_for_update') return new Promise((done) => { resolve = done })
+      if (command === 'list_songs') return Promise.resolve([...songStore.songs])
+      return Promise.resolve(undefined)
+    })
+    const w = mount(App, { attachTo: document.body })
+    expect(mockInvoke.mock.calls.filter(([command]) => command === 'check_for_update')).toHaveLength(1)
+    expect(w.find('.workspace').exists()).toBe(true)
+    await nextTick()
+    expect(w.text()).toContain('正在检查更新…')
+    const input = w.findAll('.field').find((field) => field.get('.field-label').text() === '歌名')!.get('input')
+    ;(input.element as HTMLInputElement).focus()
+    await input.setValue('检查中仍可编辑')
+    expect(songStore.current?.title).toBe('检查中仍可编辑')
+    resolve(release)
+    await flushPromises()
+    expect(w.text()).toContain('发现新版本 0.2.0')
+    expect(document.activeElement).toBe(input.element)
+    expect(w.get('.workspace').attributes('inert')).toBeUndefined()
+    await input.setValue('提示期间仍可编辑')
+    expect(songStore.current?.title).toBe('提示期间仍可编辑')
+    expect(mockInvoke.mock.calls.some(([command]) => command === 'open_release_page')).toBe(false)
+  })
+
+  it('原生菜单触发手动检查和关于界面；卸载释放订阅且不再处理动作', async () => {
+    const stop = vi.fn()
+    mockListen.mockImplementation(async (event: string) => event === 'update-menu-action' ? stop : vi.fn())
+    const w = mount(App)
+    await flushPromises()
+    expect(w.find('[data-testid="about-dialog"]').exists()).toBe(false)
+    const handler = menuHandler()
+    handler({ payload: 'show-about' })
+    await nextTick()
+    const about = w.get('[data-testid="about-dialog"]')
+    expect(about.text()).toContain('当前版本：0.1.3')
+    expect(about.text()).toContain('最近检查：发现新版本 0.2.0')
+    await about.get('button').trigger('click')
+    expect(w.find('[data-testid="about-dialog"]').exists()).toBe(false)
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'check_for_update') return { ...release, update_available: false }
+      if (command === 'list_songs') return [...songStore.songs]
+      return undefined
+    })
+    handler({ payload: 'check-for-update' })
+    expect(updatesStore.status).toBe('checking')
+    await flushPromises()
+    expect(w.text()).toContain('已是最新版本')
+    expect(mockInvoke.mock.calls.filter(([command]) => command === 'check_for_update')).toHaveLength(2)
+    w.unmount()
+    expect(stop).toHaveBeenCalledOnce()
+    handler({ payload: 'check-for-update' })
+    expect(mockInvoke.mock.calls.filter(([command]) => command === 'check_for_update')).toHaveLength(2)
+  })
+
+  it('订阅晚于卸载完成仍立即释放监听', async () => {
+    let resolve!: (stop: () => void) => void
+    mockListen.mockImplementation((event: string) => event === 'update-menu-action'
+      ? new Promise((done) => { resolve = done }) : Promise.resolve(vi.fn()))
+    const w = mount(App)
+    w.unmount()
+    const stop = vi.fn()
+    resolve(stop)
+    await flushPromises()
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('启动失败在提示和关于界面显示错误，工作区保留', async () => {
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'check_for_update') throw '网络请求失败'
+      if (command === 'list_songs') return [...songStore.songs]
+      return undefined
+    })
+    const w = mount(App)
+    await flushPromises()
+    expect(w.get('[data-testid="update-toast"]').text()).toContain('检查更新失败：网络请求失败')
+    menuHandler()({ payload: 'show-about' })
+    await nextTick()
+    expect(w.get('[data-testid="about-dialog"]').text()).toContain('当前版本：0.1.3')
+    expect(w.get('[data-testid="about-dialog"]').text()).toContain('网络请求失败')
+    expect(w.find('[data-testid="editor"]').exists()).toBe(true)
   })
 })

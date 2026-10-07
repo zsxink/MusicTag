@@ -13,4 +13,5 @@ pub mod missing;
 pub mod reader;
 pub mod rename;
 pub mod searcher;
+pub mod update;
 pub mod writer;
