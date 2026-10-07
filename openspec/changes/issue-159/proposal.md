@@ -1,5 +1,7 @@
 # 在 README 中推荐 Echo 音乐播放器
 
+GitHub Issue: #159
+
 ## Why
 
 MusicTag 与 Echo 服务于本地音乐用户，功能互补。README 可以帮助用户了解适合的音乐管理与播放工具组合。
