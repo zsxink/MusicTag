@@ -3,12 +3,16 @@
 // §10.0 规定 localStorage 属 Web API，只允许在 store/ 层触碰（lib/ 禁止）——故授权状态读写不落 lib/。
 // 分层：组件只依赖本 store（组件→store 方向合法）；`@tauri-apps/api/window` 的关闭经 env 注入而非组件直引。
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { reactive } from 'vue'
 
 /** localStorage 持久化 key（对齐既有 `music-tag-` 前缀，参照 THEME_STORAGE_KEY='music-tag-theme'）。 */
 export const EULA_STORAGE_KEY = 'music-tag-eula-accepted'
 
 /** 已同意标记值：仅 '1' = 已同意；缺失 = 未同意。不存在「拒绝后记忆」——拒绝即退出，二次启动仍弹。 */
 export const EULA_ACCEPTED_VALUE = '1'
+
+/** 会话内明示同意；不持久化，应用重启后仍依据 localStorage 决定是否重新询问。 */
+export const eulaStore = reactive({ acceptedInSession: false })
 
 /** 授权门禁依赖的环境（注入桩便于单测，默认实现用 Tauri WebView 的 window.localStorage + getCurrentWindow）。 */
 export interface EulaEnv {
@@ -44,13 +48,14 @@ function defaultEnv(): EulaEnv {
   }
 }
 
-/** 是否已同意授权（true 当且仅当持久化值为 '1'，同步读）。 */
+/** 是否已在本会话同意，或持久化值为 '1'（同步读）。 */
 export function isEulaAccepted(env: EulaEnv = defaultEnv()): boolean {
-  return env.readAccepted() === EULA_ACCEPTED_VALUE
+  return eulaStore.acceptedInSession || env.readAccepted() === EULA_ACCEPTED_VALUE
 }
 
-/** 同意授权：写持久化 '1'（二次启动不再弹窗）。 */
+/** 同意授权：先记录会话状态，再尝试写持久化 '1'；写失败仍允许本轮操作。 */
 export function acceptEula(env: EulaEnv = defaultEnv()): void {
+  eulaStore.acceptedInSession = true
   env.writeAccepted()
 }
 

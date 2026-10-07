@@ -14,13 +14,14 @@ vi.mock('@tauri-apps/api/app', () => ({ getVersion: mockGetVersion }))
 
 import App from '../App.vue'
 import type { Song } from '../api/types'
-import { EULA_STORAGE_KEY } from '../store/eula'
+import { EULA_STORAGE_KEY, eulaStore } from '../store/eula'
 import { songStore } from '../store/song'
 import { DISMISSED_UPDATE_STORAGE_KEY, updatesStore } from '../store/updates'
 import type { UpdateCheckResult } from '../api/updates'
 
 enableAutoUnmount(afterEach)
 beforeEach(() => {
+  eulaStore.acceptedInSession = false
   mockListen.mockReset().mockResolvedValue(vi.fn())
   mockGetVersion.mockReset().mockResolvedValue('0.1.3')
   window.localStorage.removeItem(DISMISSED_UPDATE_STORAGE_KEY)
@@ -383,6 +384,30 @@ describe('App — 启动检查与原生更新菜单', () => {
     expect(w.find('[data-testid="eula-dialog"]').exists()).toBe(false)
     const about = w.get('[data-testid="about-dialog"]')
     expect(document.activeElement).toBe(about.get('button').element)
+  })
+
+  it('EULA 存储写入失败后会话内仍能打开关于，重启后重新询问', async () => {
+    window.localStorage.removeItem(EULA_STORAGE_KEY)
+    const write = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => { throw new Error('禁止存储') })
+    try {
+      const w = mount(App, { attachTo: document.body })
+      await flushPromises()
+      const accept = w.get('[data-testid="eula-dialog"]').findAll('button').find((button) => button.text() === '同意并继续')!
+      await accept.trigger('click')
+      expect(w.find('[data-testid="eula-dialog"]').exists()).toBe(false)
+      expect(window.localStorage.getItem(EULA_STORAGE_KEY)).toBeNull()
+      menuHandler()({ payload: 'show-about' })
+      await nextTick()
+      const about = w.get('[data-testid="about-dialog"]')
+      expect(document.activeElement).toBe(about.get('button').element)
+      w.unmount()
+      // 模拟应用重启：持久化记录仍为空，会话内存重新初始化。
+      eulaStore.acceptedInSession = false
+      const restarted = mount(App)
+      expect(restarted.find('[data-testid="eula-dialog"]').exists()).toBe(true)
+    } finally {
+      write.mockRestore()
+    }
   })
 
   it('启动失败在提示和关于界面显示错误，工作区保留', async () => {
