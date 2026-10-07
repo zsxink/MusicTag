@@ -20,9 +20,9 @@
 
 ## CR 有界修复（第 1 轮）
 
-- [ ] 10. 修复 CR 发现：为当前版本读取补充最小 `core:app:allow-version` ACL 并同步契约；手动检查即使 Release 已稍后也必须显示结果；EULA 未完成时阻止“关于”视图抢焦点；存储写入失败时允许本会话继续并在重启后重新询问，并添加回归覆盖。
+- [x] 10. 修复 CR 发现：为当前版本读取补充最小 `core:app:allow-version` ACL 并同步契约；手动检查即使 Release 已稍后也必须显示结果；EULA 未完成时阻止“关于”视图抢焦点；存储写入失败时允许本会话继续并在重启后重新询问，并添加回归覆盖。
 
 ## 验证
 
-- [ ] 11. 按 `.github/workflows/ci.yml` 当前条件与运行环境运行所有适用 CI 命令（Node 24、`npm ci`、`npm run build`、`npm run test`；Rust stable、workflow 所需系统依赖、`cargo check --all-targets`、`cargo test --all-targets`，以 workflow 实际定义为准），并运行 `npx --yes @fission-ai/openspec@1.5.0 validate issue-158 --strict --no-interactive`。
-- [ ] 12. Verify 阶段执行 `npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive`，并按 pipe Verify 流程对当前源码快照复跑适用 CI 命令、记录退出码与源码指纹。
+- [x] 11. 按 `.github/workflows/ci.yml` 当前条件与运行环境运行所有适用 CI 命令（Node 24、`npm ci`、`npm run build`、`npm run test`；Rust stable、workflow 所需系统依赖、`cargo check --all-targets`、`cargo test --all-targets`，以 workflow 实际定义为准），并运行 `npx --yes @fission-ai/openspec@1.5.0 validate issue-158 --strict --no-interactive`。
+- [x] 12. Verify 阶段执行 `npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive`，并按 pipe Verify 流程对当前源码快照复跑适用 CI 命令、记录退出码与源码指纹。
