@@ -3,12 +3,37 @@
 // 左侧展示当前文件夹展平歌曲列表；选中一首 → 右栏读全量标签渲染编辑表单。
 // v1-ux-settings：SwitchDialog 挂在 App 层（§10.1 组件树预留，Editor 平级），
 // v-if 由 store.pendingAction 驱动——有未保存修改切歌/换目录时全窗口模态三选一。
+import { onMounted, onUnmounted, ref } from 'vue'
+import AboutDialog from './components/AboutDialog.vue'
 import AppBar from './components/AppBar.vue'
 import Editor from './components/Editor.vue'
 import EulaDialog from './components/EulaDialog.vue'
 import SongList from './components/SongList.vue'
 import SwitchDialog from './components/SwitchDialog.vue'
+import UpdateToast from './components/UpdateToast.vue'
+import { isEulaAccepted } from './store/eula'
 import { songStore } from './store/song'
+import { checkUpdates, initUpdates, listenUpdateMenuAction } from './store/updates'
+
+const showAbout = ref(false)
+let disposed = false
+let unlisten: (() => void) | undefined
+onMounted(() => {
+  initUpdates()
+  void checkUpdates()
+  void listenUpdateMenuAction((action) => {
+    if (disposed) return
+    if (action === 'check-for-update') void checkUpdates(undefined, 'manual')
+    if (action === 'show-about' && isEulaAccepted()) showAbout.value = true
+  }).then((stop) => {
+    if (disposed) stop()
+    else unlisten = stop
+  }).catch(() => { /* 浏览器预览环境没有 Tauri 原生菜单。 */ })
+})
+onUnmounted(() => {
+  disposed = true
+  unlisten?.()
+})
 </script>
 
 <template>
@@ -26,6 +51,9 @@ import { songStore } from './store/song'
 
     <!-- 切歌/换目录未保存三选一弹窗（pendingAction 非 null → 渲染；全窗口遮罩） -->
     <SwitchDialog v-if="songStore.pendingAction !== null" />
+
+    <UpdateToast />
+    <AboutDialog v-if="showAbout" @close="showAbout = false" />
 
     <!-- 首次启动授权门禁（pre-release-check T1.3）：无条件挂载，EulaDialog 自门禁——
          已同意自渲染空（二次启动不弹），未同意全窗口遮罩盖住主界面（同帧渲染，无启动闪烁） -->

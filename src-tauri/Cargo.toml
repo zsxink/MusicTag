@@ -36,3 +36,6 @@ rsa = "0.9"
 rand = "0.9"
 # search-sources-renewal：酷狗 complexsearch MD5 签名（纯 Rust，无 JS 引擎）
 md5 = "0.7"
+# issue-158：仅检查稳定版本并按用户操作打开 Release 页面。
+semver = "1"
+tauri-plugin-opener = "=2.5.5"

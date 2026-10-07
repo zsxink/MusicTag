@@ -8,6 +8,7 @@ import {
   acceptEula,
   EULA_ACCEPTED_VALUE,
   EULA_STORAGE_KEY,
+  eulaStore,
   isEulaAccepted,
   rejectEula,
 } from './eula'
@@ -70,6 +71,7 @@ function stubStorageUnavailable() {
 beforeEach(() => {
   // 默认环境用例会写真实 happy-dom localStorage，须逐用例清空避免串扰
   window.localStorage.clear()
+  eulaStore.acceptedInSession = false
 })
 
 describe('store/eula — isEulaAccepted（同步读，true 当且仅当持久化值为 \'1\'）', () => {
@@ -119,7 +121,9 @@ describe('store/eula — acceptEula（写 \'1\'，二次启动不弹）', () => 
     const restore = stubStorageUnavailable()
     try {
       expect(() => acceptEula()).not.toThrow()
-      // 未持久化成功 → 仍视为未同意
+      // 本会话仍视为已同意；重新启动后内存状态消失，存储未写入则重新询问。
+      expect(isEulaAccepted()).toBe(true)
+      eulaStore.acceptedInSession = false
       expect(isEulaAccepted()).toBe(false)
     } finally {
       restore()

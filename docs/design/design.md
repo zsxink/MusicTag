@@ -235,7 +235,7 @@ IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/c
 | 目录/文件 | 职责 | 允许触碰的依赖 |
 |---|---|---|
 | `commands/` | Tauri command 薄壳：`#[tauri::command]`、参数接收、对 service 委托；lofty/IO/编解码逻辑**一律不出现** | `model`、`service` |
-| `service/` | 纯业务层：`reader.rs`（标签读）、`writer.rs`（保存编排）、`meta.rs`（字段映射/格式分支）、`cover.rs`（封面 data URL 编解码）、`fs_atomic.rs`（原子写回）、`folder_watch.rs`（文件夹递归监听） | `model`、lofty、`image`、`notify` |
+| `service/` | 纯业务层：`reader.rs`（标签读）、`writer.rs`（保存编排）、`meta.rs`（字段映射/格式分支）、`cover.rs`（封面 data URL 编解码）、`fs_atomic.rs`（原子写回）、`folder_watch.rs`（文件夹递归监听）、`update.rs`（GitHub Releases 查询、版本比较与详情地址校验） | `model`、lofty、`image`、`notify`、`reqwest`、`semver` |
 | `model.rs` | 数据类型：`Song` / `SongSummary` / `LyricsSource` / `MusicSourceId`（与前端 TS 类型对齐） | 无业务依赖 |
 | `lib.rs` | `pub mod model/commands/service` + `generate_handler![...]` 注册 command；模块声明必须 `pub`，供 `src-tauri/tests/` 集成测试经 `app_lib::` 访问 | — |
 
@@ -244,7 +244,7 @@ IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/c
 | 目录 | 职责 | 允许触碰的依赖 | 禁止 |
 |---|---|---|---|
 | `api/` | Tauri IPC 类型化封装：`client.ts`（`invokeCommand` 泛型透传及 event listen/unlisten，唯一 Tauri API import 入口）、`types.ts`（TS 类型）、`songs.ts`（逐 command/event 封装） | `@tauri-apps/api/core`、`@tauri-apps/api/event` | 组件直接调 invoke/listen |
-| `store/` | 单 store（非 Pinia）：`song.ts`（reactive 状态 + 动作 + dirty getter）、`selectors.ts`（纯展示派生） | `api/`、`lib/` | 组件直接改 store 对象 |
+| `store/` | 非 Pinia：`song.ts`（reactive 状态 + 动作 + dirty getter）、`selectors.ts`（纯展示派生）、`updates.ts`（独立更新状态及稍后记忆） | `api/`、`lib/` | 组件直接改 store 对象 |
 | `lib/` | 纯工具：`path.ts`（文件名/去扩展名）；无 Vue / IPC 依赖 | 无 | Vue / Tauri 依赖 |
 | `components/` | `.vue` 组件树（见 §10.1）；**零 invoke 直呼**，IPC 一律经 `api/songs.ts` 注入 | `store/`、`api/` | `@tauri-apps/api/core` |
 
@@ -257,6 +257,7 @@ IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/c
 ```
 App.vue
 ├── AppBar.vue          # 品牌 + 路径 + 主题按钮（最右）
+├── AboutDialog.vue     # 当前版本与最近更新检查结果
 ├── SongList.vue        # 左栏：打开文件夹 + 搜索框 + 右键刷新 + 歌曲列表
 │   └── SongRow.vue     # 单行（作者 + 歌名），选中高亮
 ├── Editor.vue          # 右栏编辑表单
@@ -349,6 +350,13 @@ type MissingField = 'title' | 'artist' | 'album' | 'cover' | 'lyrics';
 interface MissingSong { path: string; missing: MissingField[]; }
 interface MissingScanError { path: string; reason: string; }
 interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; }
+
+interface UpdateCheckResult {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  release_url: string;
+}
 ```
 
 **TS ↔ Rust 类型映射**：
@@ -379,12 +387,24 @@ interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; 
 | `download_cover(url)` | `String → Result<Vec<u8>, String>` | 点选封面缩略图下载（**统一封面路径**：网络/本地都归为「获得 bytes → 封面区」，`save_song` 统一嵌入；无独立 `embed_cover`；失败 → `Err` 前端静默忽略该张） |
 | `scan_missing(dir, checks)` | `String, MissingField[] → Result<MissingScanResult, String>` | 按需只读扫描所选缺失维度；返回命中歌曲及单文件错误，不读取封面 base64/歌词全文，不写盘 |
 | `watch_folder(dir, watch_id)` | `Option<String>, u64 → Result<(), String>` | 替换当前递归监听目标；`dir=None` 停止监听；较旧 `watch_id` 不生效 |
+| `check_for_update()` | `() → Result<UpdateCheckResult, String>` | 异步分页查询 GitHub Releases、选择最高稳定语义版本并比较；失败返回中文错误 |
+| `open_release_page(url)` | `String → Result<(), String>` | 校验固定仓库 Release HTTPS URL 后用系统浏览器打开，仅响应用户查看详情操作 |
 
-文件系统失效事件 `folder-changed` 的 payload 为 `{ dir: string, watchId: number, error: string | null }`，只通知前端重读列表；目录读取仍通过 `list_songs`。前端监听通过统一 `api/client.ts` 的 Tauri event `listen`/`unlisten` 封装。`src-tauri/capabilities/default.json` 仅对 `main` 窗口授予 `core:event:allow-listen` 和 `core:event:allow-unlisten`，满足事件订阅与清理所需 ACL。
+文件系统失效事件 `folder-changed` 的 payload 为 `{ dir: string, watchId: number, error: string | null }`，只通知前端重读列表；目录读取仍通过 `list_songs`。前端监听通过统一 `api/client.ts` 的 Tauri event `listen`/`unlisten` 封装。`src-tauri/capabilities/default.json` 仅对 `main` 窗口授予 `core:event:allow-listen`、`core:event:allow-unlisten` 与 `core:app:allow-version`，满足事件订阅、清理及通过 Tauri `getVersion()` 读取当前应用版本所需 ACL。
 
 **封面传递**：`Song.cover` 用 **base64 data URL**（`data:image/jpeg;base64,...`），`<img :src="song.cover">` 直接用；一次只编辑一首、图不大，不必配置 asset 协议。写盘时 `save_song` 收到 base64，Rust 侧解码回 `Vec<u8>` 再写原文件（磁盘落盘形式仍是原始字节，见 PRD §5.3）。
 
 **惰性拉取**：`search_song` 一次返回候选（封面 URL + 歌词 id），点选封面才 `download_cover`、点选歌词行才 `fetch_lyric`。
+
+**更新检查（Issue #158）**：`service/update.rs` 复用 `reqwest`，每页请求 `https://api.github.com/repos/zsxink/MusicTag/releases?per_page=100&page=N` 直至空页；每次请求 8 秒超时，整个检查 20 秒超时，并设置 GitHub User-Agent。排除 draft/prerelease、无效 tag 及带预发布标识的 semver，接受可选 `v` 前缀；用 `semver::Version::cmp_precedence` 选择最高稳定版本及比较当前 `CARGO_PKG_VERSION`，build metadata 不影响更新判定。无有效稳定版、网络、HTTP 或 JSON 错误返回 `Err(String)`。响应 `UpdateCheckResult` 在授权的 `service/update.rs` 声明，与前端类型保持 snake_case 字段一致；选择的 Release 地址还须与其 tag 对应。
+
+`commands/update.rs` 为薄壳；检查委托 service，详情打开以回调注入系统 opener，业务地址校验在 service。地址必须为 `https://github.com/zsxink/MusicTag/releases/tag/<tag>`，禁止凭据、其他 host/path、非 HTTPS、query/fragment 或非法 tag。注册 `tauri-plugin-opener` 时关闭其 JS 链接自动打开；调用 Rust API 无需 WebView 插件权限，capability 只授予事件订阅/清理及应用版本读取权限，不授予 opener IPC 权限，前端仅经受校验的自定义 command 打开。
+
+前端 `api/updates.ts → api/client.ts` 封装检查/详情 IPC；`store/updates.ts` 持有 `idle/checking/up-to-date/update-available/error` 和最近结果，并用请求序号忽略过期结果，独立于歌词/封面搜索离线状态。`App.vue` 挂载后触发一次异步检查，工作区立即渲染；原生“检查更新…”菜单事件触发检查并展示状态，`AboutDialog.vue` 显示当前版本及最近结果。
+
+Tauri 原生应用菜单通过 `Menu`/`Submenu` 提供“帮助”→“检查更新…”和“关于”菜单项。`on_menu_event` 将稳定动作 ID 通过 `update-menu-action` 事件发给 `App.vue`；前端 API 统一监听并释放订阅，检查动作进入 updates store，关于动作打开 `AboutDialog.vue`。`AppBar.vue` 保持既有职责，不重复提供窗口内帮助菜单。
+
+新版提示非模态、不抢焦点，只在点“查看详情”后打开对应页面；“稍后”将版本记入 localStorage，仅抑制该版本提示，更高版本仍显示，手动检查结果及关于状态始终可见。没有下载、安装或文件写入路径。
 
 ### 10.4 测试放置约定与子变更落位
 
@@ -411,3 +431,4 @@ interface MissingScanResult { songs: MissingSong[]; errors: MissingScanError[]; 
 - 新 command 一律：Rust `commands/` 加薄壳 → `service/` 落业务 → `lib.rs` `generate_handler!` 注册；前端 `api/` 加封装 → store 注入 → 组件消费。
 - `searcher` 的加密（aes/cbc/rsa）与五家 HTTP 聚合是纯逻辑，无 Tauri 依赖，放 service 层（单测外置 `tests/searcher_*_tests.rs`）。
 - `api/search.ts` 只做 IPC 透传（同 `songs.ts` 模式），候选生命周期（选中即搜、切歌即弃）逻辑在 store，不在 api 层。
+- 更新检查测试在 `tests/update_tests.rs` 注入分页 HTTP 响应和 opener 回调，覆盖最高稳定版本、分页、版本语义、失败及安全 URL 拒绝；禁止测试真实 GitHub 网络或实际打开浏览器。前端 api/store/UI 测试 co-located，覆盖启动、手动、状态、并发请求、稍后持久记忆及编辑仍可交互。
