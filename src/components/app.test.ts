@@ -24,7 +24,7 @@ beforeEach(() => {
   mockListen.mockReset().mockResolvedValue(vi.fn())
   mockGetVersion.mockReset().mockResolvedValue('0.1.3')
   window.localStorage.removeItem(DISMISSED_UPDATE_STORAGE_KEY)
-  Object.assign(updatesStore, { status: 'idle', currentVersion: '', recentOutcome: null, dismissedVersion: null, noticeVisible: false, openingDetails: false, detailError: '' })
+  Object.assign(updatesStore, { status: 'idle', currentVersion: '', recentOutcome: null, recentCheckOrigin: null, dismissedVersion: null, noticeVisible: false, openingDetails: false, detailError: '' })
 })
 
 const makeSong = (over: Partial<Song> = {}): Song => ({
@@ -346,6 +346,43 @@ describe('App — 启动检查与原生更新菜单', () => {
     resolve(stop)
     await flushPromises()
     expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('同版稍后后原生菜单手动检查仍显示结果，抑制重复更新操作', async () => {
+    const w = mount(App)
+    await flushPromises()
+    const toast = w.get('[data-testid="update-toast"]')
+    await toast.findAll('button').find((button) => button.text() === '稍后')!.trigger('click')
+    expect(w.find('[data-testid="update-toast"]').exists()).toBe(false)
+    menuHandler()({ payload: 'check-for-update' })
+    await flushPromises()
+    const resultNotice = w.get('[data-testid="update-toast"]')
+    expect(resultNotice.text()).toContain('发现新版本 0.2.0')
+    expect(resultNotice.findAll('button').map((button) => button.text())).toEqual(['查看详情', '关闭'])
+    expect(updatesStore.recentCheckOrigin).toBe('manual')
+    await resultNotice.findAll('button')[0].trigger('click')
+    await flushPromises()
+    expect(mockInvoke).toHaveBeenCalledWith('open_release_page', { url: release.release_url })
+    expect(window.localStorage.getItem(DISMISSED_UPDATE_STORAGE_KEY)).toBe('0.2.0')
+  })
+
+  it('未同意 EULA 时关于菜单不挂载隐藏对话框、不移走协议焦点；同意后可打开', async () => {
+    window.localStorage.removeItem(EULA_STORAGE_KEY)
+    const w = mount(App, { attachTo: document.body })
+    await flushPromises()
+    const accept = w.get('[data-testid="eula-dialog"]').findAll('button').find((button) => button.text() === '同意并继续')!
+    expect(document.activeElement).toBe(accept.element)
+    menuHandler()({ payload: 'show-about' })
+    await nextTick()
+    expect(w.find('[data-testid="about-dialog"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(accept.element)
+    expect(w.get('.workspace').attributes('inert')).toBe('')
+    await accept.trigger('click')
+    menuHandler()({ payload: 'show-about' })
+    await nextTick()
+    expect(w.find('[data-testid="eula-dialog"]').exists()).toBe(false)
+    const about = w.get('[data-testid="about-dialog"]')
+    expect(document.activeElement).toBe(about.get('button').element)
   })
 
   it('启动失败在提示和关于界面显示错误，工作区保留', async () => {

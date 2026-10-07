@@ -7,11 +7,11 @@
 ## 边界与数据流
 
 - 后端在 `src-tauri/src/service/update.rs` 实现只读 GitHub Releases 查询：请求 `https://api.github.com/repos/zsxink/MusicTag/releases`，从响应中过滤 `draft == false` 且 `prerelease == false` 的条目，选择最高稳定语义版本；不依赖 API 返回顺序。无有效稳定版本时视为查询失败，返回可理解的错误。
-- 当前版本取 `env!("CARGO_PKG_VERSION")`，与 `src-tauri/Cargo.toml` 版本同源。版本解析使用 Rust `semver`，release tag 接受可选的 `v` 前缀；非语义版本 tag 不作为可比较版本。比较必须使用版本语义，而不是字符串或 GitHub `published_at`。
+- 当前版本由前端通过 Tauri `getVersion` 读取，与 `src-tauri/tauri.conf.json` 的应用版本同源；`src-tauri/capabilities/default.json` 仅增加 `core:app:allow-version` 权限。版本比较使用 Rust `semver`，release tag 接受可选的 `v` 前缀；非语义版本 tag 不作为可比较版本。比较必须使用版本语义，而不是字符串或 GitHub `published_at`。
 - 新增 Tauri command `check_for_update`，以薄壳委托 service，返回当前版本、最新稳定版本、是否有更新及 HTML Release URL；网络/HTTP/JSON/版本错误以 `Result<_, String>` 传回。复用现有 `reqwest` 与 Tauri async runtime，不添加 updater 插件或下载能力。
-- Vue 的 `api/updates.ts` 封装 command；`store/updates.ts` 管理 `idle/checking/up-to-date/update-available/error`、最近结果和本次检查请求序号。手动检查与启动检查共用同一动作；重复触发检查时仅最新请求更新状态，启动请求不等待、不阻塞主界面。
-- 在 `App.vue` 启动后触发一次检查；Tauri 系统原生菜单栏提供“帮助”→“检查更新…”和“关于”入口，通过应用事件把菜单动作转交 Vue；`AboutDialog.vue` 显示当前版本和最近检查状态。所有 UI 文案中文。检查中及结果在应用内可见。
-- 新版本在应用内显示非模态、不抢焦点的提示，包含版本号、“查看详情”与“稍后”。查看详情经 `api/updates.ts` 调用后端外链 command；Rust 校验 Release URL 的 HTTPS scheme 与固定仓库 host/path 后使用 Tauri opener 的 Rust API 打开，不向 WebView 授予 opener IPC 权限。稍后将该版本记入 `localStorage`，同版后续启动/手动检查不再展示提示，更高版本仍展示。该记忆只抑制提示，不抑制手动检查结果或关于页状态。不得自动打开链接、下载或安装。
+- Vue 的 `api/updates.ts` 封装 command；`store/updates.ts` 管理 `idle/checking/up-to-date/update-available/error`、最近结果和本次检查请求序号。手动检查与启动检查共用检查动作，但保留触发来源：启动检查发现已“稍后”的版本时不再弹自动提示；手动检查仍在结果区展示该版本及详情入口。重复触发检查时仅最新请求更新状态，启动请求不等待、不阻塞主界面。
+- 在 `App.vue` 启动后触发一次检查；Tauri 系统原生菜单栏提供“帮助”→“检查更新…”和“关于”入口，通过应用事件把菜单动作转交 Vue；`AboutDialog.vue` 显示当前版本和最近检查状态。EULA 尚未接受时忽略“关于”菜单动作，不展示关于对话框。所有 UI 文案中文。检查中及结果在应用内可见。
+- 新版本在应用内显示非模态、不抢焦点的提示，包含版本号、“查看详情”与“稍后”。查看详情经 `api/updates.ts` 调用后端外链 command；Rust 校验 Release URL 的 HTTPS scheme 与固定仓库 host/path 后使用 Tauri opener 的 Rust API 打开，不向 WebView 授予 opener IPC 权限。稍后将该版本记入 `localStorage`，同版后续启动检查不再展示提示；手动检查结果仍显示可用版本和详情入口，更高版本仍可作为新的自动提示。不得自动打开链接、下载或安装。
 
 ## 关键决策与风险
 

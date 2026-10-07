@@ -7,7 +7,7 @@ vi.mock('../api/updates', () => ({
   checkForUpdate: vi.fn(), getAppVersion, openReleasePage: vi.fn(), listenUpdateMenuAction: vi.fn(),
 }))
 
-import { checkUpdates, dismissUpdate, DISMISSED_UPDATE_STORAGE_KEY, initUpdates, recentUpdateText, updatesStore, viewUpdateDetails } from './updates'
+import { canViewUpdateDetails, checkUpdates, dismissUpdate, DISMISSED_UPDATE_STORAGE_KEY, initUpdates, recentUpdateText, shouldPromptUpdate, updatesStore, viewUpdateDetails } from './updates'
 
 const result = (version = '0.2.0', available = true): UpdateCheckResult => ({
   current_version: '0.1.3', latest_version: version, update_available: available,
@@ -24,7 +24,7 @@ describe('更新状态与提示记忆', () => {
   beforeEach(() => {
     window.localStorage.clear()
     getAppVersion.mockResolvedValue('0.1.3')
-    Object.assign(updatesStore, { status: 'idle', currentVersion: '', recentOutcome: null, dismissedVersion: null, noticeVisible: false, openingDetails: false, detailError: '' })
+    Object.assign(updatesStore, { status: 'idle', currentVersion: '', recentOutcome: null, recentCheckOrigin: null, dismissedVersion: null, noticeVisible: false, openingDetails: false, detailError: '' })
   })
 
   it('检查中保留最近结果，随后区分可用更新、最新和失败', async () => {
@@ -48,12 +48,13 @@ describe('更新状态与提示记忆', () => {
   it.each(['resolve', 'reject'] as const)('旧请求 %s 不覆盖后发请求结果', async (completion) => {
     const old = deferred<UpdateCheckResult>()
     const first = checkUpdates(() => old.promise)
-    await checkUpdates(async () => result('0.3.0'))
+    await checkUpdates(async () => result('0.3.0'), 'manual')
     if (completion === 'resolve') old.resolve(result('0.2.0'))
     else old.reject('旧网络错误')
     await first
     expect(updatesStore.status).toBe('update-available')
     expect(updatesStore.recentOutcome?.result?.latest_version).toBe('0.3.0')
+    expect(updatesStore.recentCheckOrigin).toBe('manual')
   })
 
   it('最新失败也不被旧成功覆盖', async () => {
@@ -88,6 +89,24 @@ describe('更新状态与提示记忆', () => {
     await checkUpdates(async () => result())
     expect(updatesStore.noticeVisible).toBe(false)
     write.mockRestore()
+  })
+
+  it('稍后同版的手动检查显示结果且不恢复操作提示，更高版恢复操作提示', async () => {
+    await checkUpdates(async () => result())
+    dismissUpdate()
+    await checkUpdates(async () => result(), 'manual')
+    expect(updatesStore.noticeVisible).toBe(true)
+    expect(recentUpdateText()).toContain('0.2.0')
+    expect(shouldPromptUpdate()).toBe(false)
+    expect(canViewUpdateDetails()).toBe(true)
+    expect(updatesStore.recentCheckOrigin).toBe('manual')
+    await checkUpdates(async () => result(), 'startup')
+    expect(updatesStore.noticeVisible).toBe(false)
+    expect(canViewUpdateDetails()).toBe(false)
+    expect(updatesStore.recentCheckOrigin).toBe('startup')
+    await checkUpdates(async () => result('0.3.0'), 'manual')
+    expect(updatesStore.noticeVisible).toBe(true)
+    expect(shouldPromptUpdate()).toBe(true)
   })
 
   it('网络失败时独立读取当前版本', async () => {

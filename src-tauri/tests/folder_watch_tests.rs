@@ -59,7 +59,7 @@ fn event_serialization_matches_the_frontend_contract() {
 }
 
 #[test]
-fn main_window_can_subscribe_and_unsubscribe_from_folder_events() {
+fn main_window_can_subscribe_to_events_and_read_the_application_version() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json");
     let capability: serde_json::Value =
         serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
@@ -70,9 +70,13 @@ fn main_window_can_subscribe_and_unsubscribe_from_folder_events() {
         .iter()
         .map(|permission| permission.as_str().unwrap())
         .collect();
-    assert_eq!(permissions.len(), 2);
+    assert_eq!(permissions.len(), 3);
     assert_eq!(
         granted,
-        std::collections::BTreeSet::from(["core:event:allow-listen", "core:event:allow-unlisten",])
+        std::collections::BTreeSet::from([
+            "core:event:allow-listen",
+            "core:event:allow-unlisten",
+            "core:app:allow-version",
+        ])
     );
 }

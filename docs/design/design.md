@@ -390,7 +390,7 @@ interface UpdateCheckResult {
 | `check_for_update()` | `() → Result<UpdateCheckResult, String>` | 异步分页查询 GitHub Releases、选择最高稳定语义版本并比较；失败返回中文错误 |
 | `open_release_page(url)` | `String → Result<(), String>` | 校验固定仓库 Release HTTPS URL 后用系统浏览器打开，仅响应用户查看详情操作 |
 
-文件系统失效事件 `folder-changed` 的 payload 为 `{ dir: string, watchId: number, error: string | null }`，只通知前端重读列表；目录读取仍通过 `list_songs`。前端监听通过统一 `api/client.ts` 的 Tauri event `listen`/`unlisten` 封装。`src-tauri/capabilities/default.json` 仅对 `main` 窗口授予 `core:event:allow-listen` 和 `core:event:allow-unlisten`，满足事件订阅与清理所需 ACL。
+文件系统失效事件 `folder-changed` 的 payload 为 `{ dir: string, watchId: number, error: string | null }`，只通知前端重读列表；目录读取仍通过 `list_songs`。前端监听通过统一 `api/client.ts` 的 Tauri event `listen`/`unlisten` 封装。`src-tauri/capabilities/default.json` 仅对 `main` 窗口授予 `core:event:allow-listen`、`core:event:allow-unlisten` 与 `core:app:allow-version`，满足事件订阅、清理及通过 Tauri `getVersion()` 读取当前应用版本所需 ACL。
 
 **封面传递**：`Song.cover` 用 **base64 data URL**（`data:image/jpeg;base64,...`），`<img :src="song.cover">` 直接用；一次只编辑一首、图不大，不必配置 asset 协议。写盘时 `save_song` 收到 base64，Rust 侧解码回 `Vec<u8>` 再写原文件（磁盘落盘形式仍是原始字节，见 PRD §5.3）。
 
@@ -398,7 +398,7 @@ interface UpdateCheckResult {
 
 **更新检查（Issue #158）**：`service/update.rs` 复用 `reqwest`，每页请求 `https://api.github.com/repos/zsxink/MusicTag/releases?per_page=100&page=N` 直至空页；每次请求 8 秒超时，整个检查 20 秒超时，并设置 GitHub User-Agent。排除 draft/prerelease、无效 tag 及带预发布标识的 semver，接受可选 `v` 前缀；用 `semver::Version::cmp_precedence` 选择最高稳定版本及比较当前 `CARGO_PKG_VERSION`，build metadata 不影响更新判定。无有效稳定版、网络、HTTP 或 JSON 错误返回 `Err(String)`。响应 `UpdateCheckResult` 在授权的 `service/update.rs` 声明，与前端类型保持 snake_case 字段一致；选择的 Release 地址还须与其 tag 对应。
 
-`commands/update.rs` 为薄壳；检查委托 service，详情打开以回调注入系统 opener，业务地址校验在 service。地址必须为 `https://github.com/zsxink/MusicTag/releases/tag/<tag>`，禁止凭据、其他 host/path、非 HTTPS、query/fragment 或非法 tag。注册 `tauri-plugin-opener` 时关闭其 JS 链接自动打开；调用 Rust API 无需 WebView 插件权限，因此 capability 只保留已有 event 权限，前端仅经受校验的自定义 command 打开。
+`commands/update.rs` 为薄壳；检查委托 service，详情打开以回调注入系统 opener，业务地址校验在 service。地址必须为 `https://github.com/zsxink/MusicTag/releases/tag/<tag>`，禁止凭据、其他 host/path、非 HTTPS、query/fragment 或非法 tag。注册 `tauri-plugin-opener` 时关闭其 JS 链接自动打开；调用 Rust API 无需 WebView 插件权限，capability 只授予事件订阅/清理及应用版本读取权限，不授予 opener IPC 权限，前端仅经受校验的自定义 command 打开。
 
 前端 `api/updates.ts → api/client.ts` 封装检查/详情 IPC；`store/updates.ts` 持有 `idle/checking/up-to-date/update-available/error` 和最近结果，并用请求序号忽略过期结果，独立于歌词/封面搜索离线状态。`App.vue` 挂载后触发一次异步检查，工作区立即渲染；原生“检查更新…”菜单事件触发检查并展示状态，`AboutDialog.vue` 显示当前版本及最近结果。
 

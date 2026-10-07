@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { dismissUpdate, recentUpdateText, updatesStore, viewUpdateDetails } from '../store/updates'
+import { canViewUpdateDetails, dismissUpdate, recentUpdateText, shouldPromptUpdate, updatesStore, viewUpdateDetails } from '../store/updates'
 </script>
 
 <template>
@@ -8,11 +8,11 @@ import { dismissUpdate, recentUpdateText, updatesStore, viewUpdateDetails } from
     <div v-if="updatesStore.noticeVisible" class="update-toast" role="status" data-testid="update-toast">
       <p>{{ updatesStore.status === 'checking' ? '正在检查更新…' : recentUpdateText() }}</p>
       <p v-if="updatesStore.detailError" class="error">{{ updatesStore.detailError }}</p>
-      <div v-if="updatesStore.status === 'update-available'" class="actions">
+      <div v-if="canViewUpdateDetails()" class="actions">
         <button type="button" :disabled="updatesStore.openingDetails" @click="viewUpdateDetails()">
           {{ updatesStore.openingDetails ? '正在打开…' : '查看详情' }}
         </button>
-        <button type="button" @click="dismissUpdate">稍后</button>
+        <button type="button" @click="dismissUpdate">{{ shouldPromptUpdate() ? '稍后' : '关闭' }}</button>
       </div>
       <button v-else-if="updatesStore.status !== 'checking'" class="close" type="button" @click="dismissUpdate">关闭</button>
     </div>

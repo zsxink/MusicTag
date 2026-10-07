@@ -7,7 +7,7 @@ vi.mock('../api/updates', () => ({ checkForUpdate: vi.fn(), getAppVersion: vi.fn
 
 import UpdateToast from './UpdateToast.vue'
 import AboutDialog from './AboutDialog.vue'
-import { checkUpdates, updatesStore } from '../store/updates'
+import { checkUpdates, dismissUpdate, updatesStore } from '../store/updates'
 import type { UpdateCheckResult } from '../api/updates'
 
 enableAutoUnmount(afterEach)
@@ -18,7 +18,7 @@ const result: UpdateCheckResult = {
 beforeEach(() => {
   window.localStorage.clear()
   openReleasePage.mockReset().mockResolvedValue(undefined)
-  Object.assign(updatesStore, { status: 'idle', currentVersion: '0.1.3', recentOutcome: null, dismissedVersion: null, noticeVisible: false, openingDetails: false, detailError: '' })
+  Object.assign(updatesStore, { status: 'idle', currentVersion: '0.1.3', recentOutcome: null, recentCheckOrigin: null, dismissedVersion: null, noticeVisible: false, openingDetails: false, detailError: '' })
 })
 
 describe('非模态更新提示', () => {
@@ -60,6 +60,27 @@ describe('非模态更新提示', () => {
     await checkUpdates(async () => { throw '网络不可用' })
     await nextTick()
     expect(w.text()).toContain('检查更新失败：网络不可用')
+  })
+
+  it('同版稍后后的手动检查展示详情与关闭，更高版仍展示更新操作', async () => {
+    await checkUpdates(async () => result)
+    dismissUpdate()
+    const w = mount(UpdateToast)
+    expect(w.find('[data-testid="update-toast"]').exists()).toBe(false)
+    await checkUpdates(async () => result, 'manual')
+    await nextTick()
+    expect(w.text()).toContain('发现新版本 0.2.0')
+    expect(w.findAll('button').map((button) => button.text())).toEqual(['查看详情', '关闭'])
+    expect(openReleasePage).not.toHaveBeenCalled()
+    await w.findAll('button')[0].trigger('click')
+    await flushPromises()
+    expect(openReleasePage).toHaveBeenCalledWith(result.release_url)
+    await w.findAll('button')[1].trigger('click')
+    expect(w.find('[data-testid="update-toast"]').exists()).toBe(false)
+    await checkUpdates(async () => ({ ...result, latest_version: '0.3.0' }), 'manual')
+    await nextTick()
+    expect(w.text()).toContain('发现新版本 0.3.0')
+    expect(w.findAll('button').map((button) => button.text())).toEqual(['查看详情', '稍后'])
   })
 
   it('打开浏览器失败保留提示并允许重试', async () => {

@@ -6,12 +6,14 @@ export { listenUpdateMenuAction } from '../api/updates'
 
 export const DISMISSED_UPDATE_STORAGE_KEY = 'music-tag-dismissed-update-version'
 export type UpdateStatus = 'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error'
+export type UpdateCheckOrigin = 'startup' | 'manual'
 export type UpdateOutcome = { result: UpdateCheckResult; error: null } | { result: null; error: string }
 
 export const updatesStore = reactive({
   status: 'idle' as UpdateStatus,
   currentVersion: '',
   recentOutcome: null as UpdateOutcome | null,
+  recentCheckOrigin: null as UpdateCheckOrigin | null,
   dismissedVersion: null as string | null,
   noticeVisible: false,
   openingDetails: false,
@@ -39,7 +41,7 @@ function errorMessage(error: unknown): string {
 }
 
 /** 仅最后发出的请求可以发布结果，旧请求成功或失败都不覆盖新状态。 */
-export async function checkUpdates(check = checkForUpdate): Promise<void> {
+export async function checkUpdates(check = checkForUpdate, origin: UpdateCheckOrigin = 'startup'): Promise<void> {
   const request = ++requestSequence
   updatesStore.status = 'checking'
   updatesStore.noticeVisible = true
@@ -49,14 +51,27 @@ export async function checkUpdates(check = checkForUpdate): Promise<void> {
     if (request !== requestSequence) return
     updatesStore.currentVersion = result.current_version
     updatesStore.recentOutcome = { result, error: null }
+    updatesStore.recentCheckOrigin = origin
     updatesStore.status = result.update_available ? 'update-available' : 'up-to-date'
-    updatesStore.noticeVisible = !result.update_available || result.latest_version !== updatesStore.dismissedVersion
+    updatesStore.noticeVisible = origin === 'manual' || !result.update_available || result.latest_version !== updatesStore.dismissedVersion
   } catch (error) {
     if (request !== requestSequence) return
     updatesStore.recentOutcome = { result: null, error: errorMessage(error) }
+    updatesStore.recentCheckOrigin = origin
     updatesStore.status = 'error'
     updatesStore.noticeVisible = true
   }
+}
+
+/** 已稍后的同版仍可展示手动检查结果，但不再次展示更新操作提示。 */
+export function shouldPromptUpdate(): boolean {
+  const result = updatesStore.recentOutcome?.result
+  return updatesStore.status === 'update-available' && !!result && result.latest_version !== updatesStore.dismissedVersion
+}
+
+/** 手动检查结果始终保留详情入口；稍后只抑制自动更新操作提示。 */
+export function canViewUpdateDetails(): boolean {
+  return shouldPromptUpdate() || (updatesStore.status === 'update-available' && updatesStore.recentCheckOrigin === 'manual')
 }
 
 /** 只抑制提示，保留最近检查结果供关于界面展示。 */

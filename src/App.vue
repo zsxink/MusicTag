@@ -11,6 +11,7 @@ import EulaDialog from './components/EulaDialog.vue'
 import SongList from './components/SongList.vue'
 import SwitchDialog from './components/SwitchDialog.vue'
 import UpdateToast from './components/UpdateToast.vue'
+import { isEulaAccepted } from './store/eula'
 import { songStore } from './store/song'
 import { checkUpdates, initUpdates, listenUpdateMenuAction } from './store/updates'
 
@@ -22,8 +23,8 @@ onMounted(() => {
   void checkUpdates()
   void listenUpdateMenuAction((action) => {
     if (disposed) return
-    if (action === 'check-for-update') void checkUpdates()
-    if (action === 'show-about') showAbout.value = true
+    if (action === 'check-for-update') void checkUpdates(undefined, 'manual')
+    if (action === 'show-about' && isEulaAccepted()) showAbout.value = true
   }).then((stop) => {
     if (disposed) stop()
     else unlisten = stop
