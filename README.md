@@ -5,13 +5,19 @@
 # MusicTag
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v0.1.3-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/版本-v0.1.4-blue.svg" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
   <img src="https://img.shields.io/badge/License-BUSL%201.1-red.svg" alt="license" />
   <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
 </p>
+
+## v0.1.4 更新
+
+- 新增稳定版更新检查，可在启动时检查，也可从“帮助”菜单手动检查；“关于 MusicTag”展示当前版本和最近检查结果。发现新版后，用户可主动打开对应的 GitHub Release 页面查看详情。
+- 推荐本地优先的跨平台音乐播放器 [Echo](https://github.com/zsxink/Echo)，其发行版可在 [Echo Releases](https://github.com/zsxink/Echo/releases) 获取。
+- 修复 PostCSS 间接依赖中的 nanoid 版本问题。
 
 ## v0.1.3 更新
 
