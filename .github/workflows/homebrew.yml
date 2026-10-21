@@ -1,0 +1,63 @@
+name: Homebrew
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Published stable release tag (for example v0.1.4)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-musictag
+  cancel-in-progress: false
+
+jobs:
+  sync-tap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+    steps:
+      # Use trusted default-branch code even when dispatching a historical release tag.
+      - name: Check out MusicTag automation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: source
+          persist-credentials: false
+
+      - name: Validate published release and render Cask
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: source/scripts/homebrew-publish.sh "$RELEASE_TAG" --output "$RUNNER_TEMP/musictag.rb"
+
+      - name: Require tap credential
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [[ -z "$HOMEBREW_TAP_TOKEN" ]]; then
+            echo '::error::HOMEBREW_TAP_TOKEN is required with Contents: read and write for zsxink/homebrew-tap only.'
+            exit 1
+          fi
+
+      - name: Check out target tap
+        uses: actions/checkout@v4
+        with:
+          repository: zsxink/homebrew-tap
+          ref: main
+          path: tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # checkout manages this local credential and removes it during post-job cleanup.
+          persist-credentials: true
+
+      - name: Synchronize MusicTag Cask
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: source/scripts/homebrew-publish.sh "$RELEASE_TAG" --publish --tap-dir "$GITHUB_WORKSPACE/tap"
