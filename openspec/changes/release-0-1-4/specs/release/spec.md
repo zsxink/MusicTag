@@ -3,7 +3,7 @@
 ## Purpose
 Define the version metadata, release notes, and verification requirements for the v0.1.4 release.
 
-## Requirements
+## ADDED Requirements
 ### Requirement: Release version metadata is consistent
 The application package metadata and README version badge MUST identify the release as `0.1.4`.
 
