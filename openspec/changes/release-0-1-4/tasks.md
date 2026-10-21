@@ -11,7 +11,7 @@
 - [ ] 4. 对确认的规格内缺陷，由主会话先明确任务和路径再实施有界修复及必要回归测试；无缺陷则记录无需生产代码修改。涉及双方时按 Rust → Vue 顺序完成，不扩大产品范围。
 - [x] 5. 将 `package.json`、`package-lock.json` 自身版本、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 的 `music-tag` 版本、`src-tauri/tauri.conf.json` 统一为 `0.1.4`；枚举并核对其他实际应用/打包版本声明，不替换第三方依赖或历史版本。对应场景：Inspect release version。
 - [x] 6. 更新 README 版本徽章与 `v0.1.4` 发布说明，准确概括 `v0.1.3` 之后更新检查、帮助/关于及用户主动查看 Release 详情；简洁覆盖其他适用变化，核对 Echo 链接，不声称自动下载安装。对应场景：Read v0.1.4 release notes。
-- [ ] 7. 主会话审计 Dev 授权路径与差异、提交并记录 SHA；Tester 核对版本/锁文件自身条目和发布说明，运行已有更新检查相关回归及有界修复的针对性测试。fixture 需外部生成时先查工具、生成命令、文件存在与 reader 可解析；无新增 fixture 时明确记录。Tester checkpoint 由主会话审计、提交并记证据。
+- [x] 7. 主会话审计 Dev 授权路径与差异、提交并记录 SHA；Tester 核对版本/锁文件自身条目和发布说明，运行已有更新检查相关回归及有界修复的针对性测试。fixture 需外部生成时先查工具、生成命令、文件存在与 reader 可解析；无新增 fixture 时明确记录。Tester checkpoint 由主会话审计、提交并记证据。
 
 ## 独立 CR 与 Verify
 
