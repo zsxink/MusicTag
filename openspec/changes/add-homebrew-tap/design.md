@@ -55,8 +55,7 @@ cask "musictag" do
   sha256 arm:   "<arm SHA-256>",
          intel: "<Intel SHA-256>"
 
-  url "https://github.com/zsxink/MusicTag/releases/download/v#{version}/MusicTag_#{version}_#{arch}.dmg",
-      verified: "github.com/zsxink/MusicTag/"
+  url "https://github.com/zsxink/MusicTag/releases/download/v#{version}/MusicTag_#{version}_#{arch}.dmg"
   name "MusicTag"
   desc "Edit metadata, cover art and lyrics for local music files"
   homepage "https://github.com/zsxink/MusicTag"
@@ -87,7 +86,7 @@ The Leader must explicitly authorize the external checkout and write paths befor
 
 README gets a macOS Homebrew section with the tap link, `brew install zsxink/tap/musictag`, and `brew update && brew upgrade --cask musictag`. State that the public tap needs no GitHub sign-in and that versions become available after the public release and tap sync. Include concise maintainer setup/retry instructions near release documentation: secret permission boundary, manual publication requirement, expected asset names, failure behavior, and dispatch by tag.
 
-Validation is infra-specific: validate OpenSpec; check shell syntax/lint and workflow event/permissions; exercise the generator/publish boundary with meaningful isolated fixtures for two architectures, missing asset, draft, invalid tag, missing credential, idempotent rerun and older-version rejection. Confirm the published `v0.1.4` asset URLs and byte hashes. Run `ruby -c`, Homebrew style/DSL checks, and architecture-specific Cask metadata/fetch checks. Perform an actual macOS install into a temporary app directory where available, then remove only the temporary installation. Do not replace an existing `/Applications/MusicTag.app` during validation. An Intel runtime launch requires an Intel environment; report it unverified if unavailable rather than treating metadata/fetch checks as execution proof.
+Validation is infra-specific: validate OpenSpec; check shell syntax/lint and workflow event/permissions; exercise the generator/publish boundary with meaningful isolated fixtures for two architectures, missing asset, draft, invalid tag, missing credential, idempotent rerun and older-version rejection. Run `node --test tests/homebrew/publish.test.mjs` in both the pull-request CI and release test jobs; these Node tests are not collected by the frontend Vitest configuration. Confirm the published `v0.1.4` asset URLs and byte hashes. Run `ruby -c`, Homebrew style/DSL checks, and architecture-specific Cask metadata/fetch checks. Perform an actual macOS install into a temporary app directory where available, then remove only the temporary installation. Do not replace an existing `/Applications/MusicTag.app` during validation. An Intel runtime launch requires an Intel environment; report it unverified if unavailable rather than treating metadata/fetch checks as execution proof.
 
 Current ad hoc signing can cause normal macOS Gatekeeper prompts. Homebrew installation does not notarize the app; do not add quarantine bypass hooks or claim notarization as part of this change.
 

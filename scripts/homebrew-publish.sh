@@ -129,6 +129,8 @@ done < "$temp_dir/assets.tsv"
 [[ ${#hashes[@]} -eq 2 ]] || fail 'Both architecture hashes are required.'
 
 cat > "$temp_dir/musictag.rb" <<EOF_CASK
+# frozen_string_literal: true
+
 cask "musictag" do
   arch arm: "aarch64", intel: "x64"
 
@@ -136,8 +138,7 @@ cask "musictag" do
   sha256 arm:   "${hashes[0]}",
          intel: "${hashes[1]}"
 
-  url "https://github.com/zsxink/MusicTag/releases/download/v#{version}/MusicTag_#{version}_#{arch}.dmg",
-      verified: "github.com/zsxink/MusicTag/"
+  url "https://github.com/zsxink/MusicTag/releases/download/v#{version}/MusicTag_#{version}_#{arch}.dmg"
   name "MusicTag"
   desc "Edit metadata, cover art and lyrics for local music files"
   homepage "https://github.com/zsxink/MusicTag"

@@ -21,6 +21,8 @@ jobs:
       # 无条件执行 + 置于 npm ci 之前：零依赖、失败快，且不被 hashFiles 门静默跳过。
       - name: Test pipe native suites
         run: node --test '.agents/tools/pipe-core/test/*.test.js' 'tests/workflow-core/*.test.cjs' '.agents/tools/pipe-native/test/*.test.js'
+      - name: Test Homebrew publisher
+        run: node --test tests/homebrew/publish.test.mjs
       - name: Run pipe self-check
         run: node .agents/tools/pipe-native/self-check.js
       - name: Install frontend dependencies
