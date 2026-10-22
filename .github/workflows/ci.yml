@@ -26,6 +26,8 @@ jobs:
       # 放在 npm ci 之前：零依赖，失败更快，且不与前端构建抢时间。
       - name: Test pipe native suites
         run: node --test '.agents/tools/pipe-core/test/*.test.js' 'tests/workflow-core/*.test.cjs' '.agents/tools/pipe-native/test/*.test.js'
+      - name: Test Homebrew publisher
+        run: node --test tests/homebrew/publish.test.mjs
       - name: Run pipe self-check
         run: node .agents/tools/pipe-native/self-check.js
       - name: Install frontend dependencies

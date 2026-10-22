@@ -43,6 +43,28 @@ MusicTag 是一个跨平台桌面工具，**逐首**为本地音乐文件补全�
 
 [Echo](https://github.com/zsxink/Echo) 是一款本地优先的跨平台音乐播放器，用于管理和聆听本地曲库；MusicTag 则用于补全本地音乐文件的元数据。可前往 [Echo 发行版页面](https://github.com/zsxink/Echo/releases) 获取版本。
 
+## macOS Homebrew 安装
+
+通过公开的 [zsxink/homebrew-tap](https://github.com/zsxink/homebrew-tap) 安装 MusicTag，无需登录 GitHub：
+
+```sh
+brew install zsxink/tap/musictag
+```
+
+发布新版本并完成 tap 同步后，可更新 Homebrew 信息并升级：
+
+```sh
+brew update && brew upgrade --cask musictag
+```
+
+新版本会在 MusicTag Release 发布且 tap 同步成功后提供。
+
+### 维护者：Homebrew 发布
+
+- 在 MusicTag 仓库配置 `HOMEBREW_TAP_TOKEN` Actions Secret。令牌只需对 `zsxink/homebrew-tap` 有 **Contents: read and write** 权限（以及 GitHub 要求的 Metadata 读取权限）；不要授予 MusicTag 仓库写权限。
+- 发布流程先生成 draft Release。确认两个 macOS DMG 已上传后，由维护者在 GitHub 上手动发布该 draft；发布事件会触发 tap 同步。资产名称必须分别为 `MusicTag_<版本>_aarch64.dmg` 和 `MusicTag_<版本>_x64.dmg`，例如 `MusicTag_0.1.4_aarch64.dmg` 与 `MusicTag_0.1.4_x64.dmg`。
+- 若同步失败，已发布的 Release 和 DMG 不受影响；检查 Secret 权限、资产是否齐全及 tap 写入策略，修复后在 Actions 中运行 **Homebrew Tap** 工作流，并将 tag（如 `v0.1.4`）作为输入重试。工作流不会把缺少资产或无权限的状态当作成功。
+
 ## 技术栈
 
 - 外壳 **Tauri 2** + **Rust**
