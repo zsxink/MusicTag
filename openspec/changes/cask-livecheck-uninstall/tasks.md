@@ -4,12 +4,12 @@
 
 ## 1. cask heredoc 模板改动（infra，Dev）
 
-- [ ] 1.1 在 `scripts/homebrew-publish.sh` 的 cask heredoc 模板（131–148 行）中，`homepage` 行之后、`app` 行之前插入 livecheck 块：`livecheck do` / `url :stable` / `strategy :github_latest` / `end`（两空格缩进，与 markflow.rb 同构）；不添加 `auto_updates`；heredoc 内既有 `#{version}`/`#{arch}` Ruby 插值与 `#` 注释保持原样，不加引号、不转义。Owner: Dev；files: `scripts/homebrew-publish.sh`。Design: D1/D2/D4。覆盖场景：Tap lags behind the latest release。
-- [ ] 1.2 同模板 `app "MusicTag.app"` 之后追加 `uninstall quit: "com.musictag.desktop"` 与 `zap trash:` 数组，数组只含三项实测路径：`~/Library/Application Support/MusicTag`、`~/Library/Caches/com.musictag.desktop`、`~/Library/WebKit/com.musictag.desktop`；不添加任何未观测目录（Preferences plist、HTTPStorages、Saved Application State、Logs 禁入）。Owner: Dev；files: 同 1.1。Depends on 1.1。Design: D3/D4。覆盖场景：Quit the app on uninstall；Zap removes confirmed app data。
+- [x] 1.1 在 `scripts/homebrew-publish.sh` 的 cask heredoc 模板（131–148 行）中，`homepage` 行之后、`app` 行之前插入 livecheck 块：`livecheck do` / `url :stable` / `strategy :github_latest` / `end`（两空格缩进，与 markflow.rb 同构）；不添加 `auto_updates`；heredoc 内既有 `#{version}`/`#{arch}` Ruby 插值与 `#` 注释保持原样，不加引号、不转义。Owner: Dev；files: `scripts/homebrew-publish.sh`。Design: D1/D2/D4。覆盖场景：Tap lags behind the latest release。
+- [x] 1.2 同模板 `app "MusicTag.app"` 之后追加 `uninstall quit: "com.musictag.desktop"` 与 `zap trash:` 数组，数组只含三项实测路径：`~/Library/Application Support/MusicTag`、`~/Library/Caches/com.musictag.desktop`、`~/Library/WebKit/com.musictag.desktop`；不添加任何未观测目录（Preferences plist、HTTPStorages、Saved Application State、Logs 禁入）。Owner: Dev；files: 同 1.1。Depends on 1.1。Design: D3/D4。覆盖场景：Quit the app on uninstall；Zap removes confirmed app data。
 
 ## 2. 渲染测试断言反转与新增（Dev，与第 1 组同一 checkpoint）
 
-- [ ] 2.1 反转 `tests/homebrew/publish.test.mjs` 198 行断言：负向收窄为 `assert.doesNotMatch(cask, /no_check|auto_updates/)`（不再含 zap/uninstall）；在既有用例「renders both architecture hashes and canonical public URLs without tap operations」内新增正向断言（清单见 design D5）：`livecheck do`、`url :stable`、`strategy :github_latest`、`uninstall quit: "com.musictag.desktop"`、zap trash 三条路径逐一存在；不新增测试文件、不改 fake gh/curl/git。Owner: Dev；files: `tests/homebrew/publish.test.mjs`。Depends on 1.1、1.2。Design: D5。
+- [x] 2.1 反转 `tests/homebrew/publish.test.mjs` 198 行断言：负向收窄为 `assert.doesNotMatch(cask, /no_check|auto_updates/)`（不再含 zap/uninstall）；在既有用例「renders both architecture hashes and canonical public URLs without tap operations」内新增正向断言（清单见 design D5）：`livecheck do`、`url :stable`、`strategy :github_latest`、`uninstall quit: "com.musictag.desktop"`、zap trash 三条路径逐一存在；不新增测试文件、不改 fake gh/curl/git。Owner: Dev；files: `tests/homebrew/publish.test.mjs`。Depends on 1.1、1.2。Design: D5。
 
 ## 3. 非业务验证（Tester）
 
