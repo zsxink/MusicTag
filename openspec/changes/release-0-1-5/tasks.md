@@ -2,8 +2,8 @@
 
 ## 规格与基线
 
-- [ ] 1. 主会话核对 Issue #173、同名分支/工作区、`v0.1.4..HEAD` 提交与 PR #169/#171/#172 基线；记录实际版本声明、README 发布说明和 CI/release/homebrew workflow 条件清单。
-- [ ] 2. Architect 交付设计与任务后，主会话执行 spec-gate preflight 和 `npx --yes @fission-ai/openspec@1.5.0 validate release-0-1-5 --strict --no-interactive`，记录成功证据后进入 Dev。
+- [x] 1. 主会话核对 Issue #173、同名分支/工作区、`v0.1.4..HEAD` 提交与 PR #169/#171/#172 基线；记录实际版本声明、README 发布说明和 CI/release/homebrew workflow 条件清单。
+- [x] 2. Architect 交付设计与任务后，主会话执行 spec-gate preflight 和 `npx --yes @fission-ai/openspec@1.5.0 validate release-0-1-5 --strict --no-interactive`，记录成功证据后进入 Dev。
 
 ## Dev 与 Tester
 
