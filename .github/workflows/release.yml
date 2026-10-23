@@ -97,3 +97,49 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # 全部 matrix 条目构建与资产上传成功后，把草稿 Release 自动转正并联动 tap 同步。
+  # 依赖 needs 的默认 success 语义：任一 matrix 条目失败或被跳过，本 job 不执行，草稿保留可人工兜底。
+  publish-release:
+    needs: publish-tauri
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write  # gh release edit 所需最小权限
+      actions: write   # gh workflow run（workflow_dispatch）所需最小权限
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Publish draft release and trigger tap sync
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 与 scripts/homebrew-publish.sh 相同的 retry 形态：3 次，2s/4s 退避。
+          retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if "$@"; then return 0; fi
+              [[ "$attempt" -eq 3 ]] || sleep "$((attempt * 2))"
+            done
+            return 1
+          }
+          # 幂等闸：已非草稿则 no-op，重跑不报错。
+          if ! release_json=$(retry gh release view "$RELEASE_TAG" --json isDraft,tagName,isPrerelease); then
+            echo "::error::Cannot read release metadata for $RELEASE_TAG after 3 attempts; draft preserved."
+            exit 1
+          fi
+          if [[ "$(jq -r '.isDraft' <<< "$release_json")" != "true" ]]; then
+            echo "Release $RELEASE_TAG already published; nothing to do."
+            exit 0
+          fi
+          # 草稿转正：重试耗尽即 job 失败，Release 保留草稿态（人工 publish 兜底）。
+          if ! retry gh release edit "$RELEASE_TAG" --draft=false; then
+            echo "::error::Cannot publish $RELEASE_TAG after 3 attempts; draft preserved."
+            exit 1
+          fi
+          # GITHUB_TOKEN 作出的 release: published 事件不会触发下游 workflow；
+          # workflow_dispatch 是该抑制规则的例外，故显式派发（gh 默认派发到仓库默认分支），不等待结果。
+          # 重试包裹：派发瞬时失败重试耗尽才失败；双重派发无害（concurrency 串行化 + tap 脚本幂等）。
+          retry gh workflow run homebrew.yml -f tag="$RELEASE_TAG"
+          echo "Published $RELEASE_TAG and dispatched homebrew.yml for tap sync."

@@ -63,8 +63,9 @@ brew update && brew upgrade --cask musictag
 ### 维护者：Homebrew 发布
 
 - 在 MusicTag 仓库配置 `HOMEBREW_TAP_TOKEN` Actions Secret。令牌只需对 `zsxink/homebrew-tap` 有 **Contents: read and write** 权限（以及 GitHub 要求的 Metadata 读取权限）；不要授予 MusicTag 仓库写权限。
-- 发布流程先生成 draft Release。确认两个 macOS DMG 已上传后，由维护者在 GitHub 上手动发布该 draft；发布事件会触发 tap 同步。资产名称必须分别为 `MusicTag_<版本>_aarch64.dmg` 和 `MusicTag_<版本>_x64.dmg`，例如 `MusicTag_0.1.4_aarch64.dmg` 与 `MusicTag_0.1.4_x64.dmg`。
-- 若同步失败，已发布的 Release 和 DMG 不受影响；检查 Secret 权限、资产是否齐全及 tap 写入策略，修复后在 Actions 中运行 **Homebrew Tap** 工作流，并将 tag（如 `v0.1.4`）作为输入重试。工作流不会把缺少资产或无权限的状态当作成功。
+- 发布 `v*` tag 后，Release 先以 draft 承载三端安装包；Windows、macOS（aarch64 / x86_64 双架构）与 Linux 构建上传全部成功后，release 工作流自动把该 draft 转为已发布，并自动触发 tap 同步——常规路径无需任何人工操作。资产名称必须分别为 `MusicTag_<版本>_aarch64.dmg` 和 `MusicTag_<版本>_x64.dmg`，例如 `MusicTag_0.1.4_aarch64.dmg` 与 `MusicTag_0.1.4_x64.dmg`。
+- 失败兜底：任一平台构建或上传失败时，自动发布不执行，Release 保留 draft；自动发布步骤自身失败（如 GitHub API 瞬时故障重试耗尽）同样保留 draft。修复后可重跑发布工作流，或由维护者在 GitHub 上手动 publish 该 draft，发布事件照常触发 tap 同步。若转正已成功而 tap 派发失败（Release 已发布），直接在 Actions 手动运行 **Homebrew Tap** 工作流并输入该 tag 重试。
+- 若 tap 同步失败，已发布的 Release 和 DMG 不受影响；检查 Secret 权限、资产是否齐全及 tap 写入策略，修复后在 Actions 中手动运行 **Homebrew Tap** 工作流，并将 tag（如 `v0.1.4`）作为输入重试。工作流不会把缺少资产或无权限的状态当作成功。
 
 ## 技术栈
 
