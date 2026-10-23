@@ -5,7 +5,7 @@
 # MusicTag
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v0.1.4-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/版本-v0.1.5-blue.svg" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
@@ -13,17 +13,18 @@
   <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
 </p>
 
+## v0.1.5 更新
+
+- 新增 macOS Homebrew 安装渠道：可通过 `brew install zsxink/tap/musictag` 安装；Release 发布且 tap 同步成功后，可使用 `brew upgrade --cask musictag` 升级。
+- 三端新增原生应用菜单（文件/编辑/视图/帮助），更新检查等操作可从「帮助」菜单使用。
+- 更新检查新增节流：启动时距上次成功检查至少 7×24 小时才会自动检查；「帮助」菜单手动检查不受限。
+- 发行前合规整改：许可统一为个人学习许可并与 EULA 一致，README 增加「外部 API 声明」数据披露，新增第三方归属清单 `THIRD-PARTY-NOTICES.md`，搜索与封面请求全部使用 HTTPS。
+
 ## v0.1.4 更新
 
 - 新增稳定版更新检查，可在启动时检查，也可从“帮助”菜单手动检查；“关于 MusicTag”展示当前版本和最近检查结果。发现新版后，用户可主动打开对应的 GitHub Release 页面查看详情。
 - 推荐本地优先的跨平台音乐播放器 [Echo](https://github.com/zsxink/Echo)，其发行版可在 [Echo Releases](https://github.com/zsxink/Echo/releases) 获取。
 - 修复 PostCSS 间接依赖中的 nanoid 版本问题。
-
-## v0.1.3 更新
-
-- 支持导出音乐文件中已嵌入的封面。
-- 文件夹内容变化后自动刷新歌曲列表。
-- 修复搜索端点与来源可用性问题，改进中英文歌曲匹配，并支持简体与繁体匹配。
 
 ## 项目简介
 
