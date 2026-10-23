@@ -15,7 +15,7 @@
 
 ## 独立 CR 与 Verify
 
-- [ ] 8. 派发独立只读 CR，覆盖最终差异与 PR #169/#171/#172 适用行为、两项规格场景和设计中的节流/离线/菜单/URL/合规边界；记录被审查快照、文件、场景及明确无 blocker/major 结论。发现问题则在授权范围修复、Tester 回归并独立复审，最多三轮，不绕过门禁。
+- [x] 8. 派发独立只读 CR，覆盖最终差异与 PR #169/#171/#172 适用行为、两项规格场景和设计中的节流/离线/菜单/URL/合规边界；记录被审查快照、文件、场景及明确无 blocker/major 结论。发现问题则在授权范围修复、Tester 回归并独立复审，最多三轮，不绕过门禁。
 - [ ] 9. Verify 在最终源码快照核对全部版本均为 `0.1.5`、README 与实际提交一致，执行当前变更和 `--all` OpenSpec strict validate、三组 pipe 原生测试、Homebrew publisher 测试、self-check、`npm ci`、前端 build/test、Rust `check --all-targets` / `test --all-targets`。记录 workflow 条件、Node/Rust/系统及 fixture 依赖、逐命令退出码和验证 HEAD，不以本机子集代替远端必需检查。
 - [ ] 10. 主会话保存 Verify 完整源码 manifest 与命令证据，确认其源码/规格指纹对应当前 HEAD；CR/Tester 后新增差异使旧 Verify 失效，重新完成受影响门禁后才集成。
 
