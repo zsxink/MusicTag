@@ -8,7 +8,7 @@
 
 ### 2.1 原生菜单与事件
 
-- 在 `src-tauri/src/lib.rs` 的 desktop 菜单构造 File/Edit/View/Help；macOS 保留应用菜单中的 About/Services/Hide/Quit，About 使用稳定 `show-about` action 以经过 EULA 门禁，Windows/Linux 不要求该首项。
+- 在 `src-tauri/src/lib.rs` 的 desktop 菜单构造 File/Edit/View/Help；Help 在三端均提供检查更新和受 EULA 门禁的 About，macOS 额外保留应用菜单中的 About/Services/Hide/Quit，两个 About 项均使用稳定 `show-about` action。
 - 菜单项使用稳定 action ID，经单一 `app-menu-action` Tauri event 发给前端。`update-menu-action` 仅作为迁移前的既有契约，不再新增调用点；是否保留兼容监听由实现测试证明，不改变批准行为。
 - 菜单只调用既有能力：打开文件夹、当前编辑保存/撤销/重做、当前目录重扫、主题切换、更新/关于、reload、关闭/退出和开发者工具。动作到达前端后仍须再次检查状态，不能依赖过期的原生 enabled 快照。
 - EULA 未同意时 About 禁用；无可编辑当前歌曲时 Save 禁用；开发者工具仅 dev 构建可见。标准编辑项优先使用 Tauri 原生 menu role，不在前端重实现系统编辑语义。

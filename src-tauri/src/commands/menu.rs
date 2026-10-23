@@ -83,7 +83,12 @@ pub fn apply_snapshot<R: tauri::Runtime>(
     let mut enabled = state.0.lock().map_err(|error| error.to_string())?;
     *enabled = effective
         .iter()
-        .map(|(id, item)| (id.clone(), item.enabled && item.visible))
+        .map(|(id, item)| {
+            (
+                id.clone(),
+                crate::menu_item_enabled(item.enabled, item.visible),
+            )
+        })
         .collect();
     Ok(())
 }
@@ -95,23 +100,16 @@ fn build_menu<R: tauri::Runtime>(
 ) -> Result<tauri::menu::Menu<R>, String> {
     use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
     let menu = Menu::new(app).map_err(|error| error.to_string())?;
-    let app_item = |id: &'static str, label: &'static str| -> Result<_, String> {
-        let state = states.get(id);
-        let enabled = state.map_or(id != "show-about", |state| state.enabled && state.visible);
-        let visible = state.map_or(true, |state| state.visible);
-        if !visible {
-            return Ok(None);
-        }
-        tauri::menu::MenuItem::with_id(app, id, label, enabled, None::<&str>)
-            .map(Some)
-            .map_err(|error| error.to_string())
-    };
     #[cfg(target_os = "macos")]
     {
         let mut app_items: Vec<Box<dyn tauri::menu::IsMenuItem<R>>> = Vec::new();
-        if let Some(about) = app_item("show-about", "关于")? {
-            app_items.push(Box::new(about));
-        }
+        let about_enabled = states.get("show-about").map_or(false, |state| {
+            crate::menu_item_enabled(state.enabled, state.visible)
+        });
+        app_items.push(Box::new(
+            tauri::menu::MenuItem::with_id(app, "macos-about", "关于", about_enabled, None::<&str>)
+                .map_err(|error| error.to_string())?,
+        ));
         app_items.push(Box::new(
             PredefinedMenuItem::services(app, Some("Services"))
                 .map_err(|error| error.to_string())?,
@@ -137,7 +135,9 @@ fn build_menu<R: tauri::Runtime>(
     }
     let menu_item = |id: &'static str, label: &'static str, default: bool| -> Result<_, String> {
         let state = states.get(id);
-        let enabled = state.map_or(default, |state| state.enabled && state.visible);
+        let enabled = state.map_or(default, |state| {
+            crate::menu_item_enabled(state.enabled, state.visible)
+        });
         let visible = state.map_or(true, |state| state.visible);
         if !visible {
             return Ok(None);
@@ -214,7 +214,6 @@ fn build_menu<R: tauri::Runtime>(
     if let Some(value) = menu_item("check-for-update", "检查更新…", true)? {
         help_items.push(value);
     }
-    #[cfg(not(target_os = "macos"))]
     if let Some(value) = menu_item("show-about", "关于", false)? {
         help_items.push(value);
     }

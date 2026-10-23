@@ -1,6 +1,7 @@
 use app_lib::{
     action_for_menu_id,
     commands::menu::{known_action, MenuStateSnapshot, ACTION_IDS},
+    help_menu_action_ids, menu_item_enabled,
 };
 
 #[test]
@@ -104,8 +105,21 @@ fn unknown_and_native_only_menu_ids_fail_closed() {
 #[test]
 fn about_uses_custom_id_and_starts_eula_gated() {
     assert_eq!(action_for_menu_id("show-about"), Some("show-about"));
+    assert_eq!(action_for_menu_id("macos-about"), Some("show-about"));
     assert_eq!(action_for_menu_id("about"), None);
     assert!(!app_lib::MenuState::default().is_enabled("show-about"));
+}
+
+#[test]
+fn menu_layout_keeps_about_in_help_and_macos_app_menu() {
+    assert_eq!(help_menu_action_ids(), ["check-for-update", "show-about"]);
+}
+
+#[test]
+fn menu_item_enabled_requires_enabled_and_visible() {
+    assert!(!menu_item_enabled(false, true));
+    assert!(!menu_item_enabled(true, false));
+    assert!(menu_item_enabled(true, true));
 }
 
 #[test]

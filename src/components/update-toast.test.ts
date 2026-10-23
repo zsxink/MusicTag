@@ -123,6 +123,25 @@ describe('toast 生命周期计时', () => {
     expect(w.find('[data-testid="update-toast"]').exists()).toBe(false)
   })
 
+  it('快速切换更新版本时旧 timer 到期不会关闭新提示', async () => {
+    await checkUpdates(async () => result)
+    const w = mount(UpdateToast)
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    await checkUpdates(async () => ({ ...result, latest_version: '0.3.0', release_url: 'https://github.com/zsxink/MusicTag/releases/tag/v0.3.0' }), 'manual')
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(5_001)
+    await nextTick()
+
+    expect(w.get('[data-testid="update-toast"]').text()).toContain('发现新版本 0.3.0')
+    await vi.advanceTimersByTimeAsync(9_998)
+    expect(w.find('[data-testid="update-toast"]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(1)
+    await nextTick()
+    expect(w.find('[data-testid="update-toast"]').exists()).toBe(false)
+  })
+
   it('错误不自动关闭，卸载时清理 timer', async () => {
     await checkUpdates(async () => { throw '网络不可用' })
     const w = mount(UpdateToast)

@@ -284,7 +284,7 @@ describe('App — 启动检查与原生更新菜单', () => {
 
   it('距上次成功检查未满七天时启动不发起网络请求', async () => {
     mockInvoke.mockImplementation(async (command: string) => {
-      if (command === 'get_last_update_check_at') return '2026-10-23T00:00:00Z'
+      if (command === 'get_last_update_check_at') return new Date(Date.now() - 60 * 60 * 1000).toISOString()
       if (command === 'list_songs') return [...songStore.songs]
       return undefined
     })
@@ -298,7 +298,7 @@ describe('App — 启动检查与原生更新菜单', () => {
 
   it('启动距上次成功检查未满七天时仍允许原生菜单手动检查', async () => {
     mockInvoke.mockImplementation(async (command: string) => {
-      if (command === 'get_last_update_check_at') return '2026-10-23T00:00:00Z'
+      if (command === 'get_last_update_check_at') return new Date(Date.now() - 60 * 60 * 1000).toISOString()
       if (command === 'check_for_update') return release
       if (command === 'list_songs') return [...songStore.songs]
       return undefined
@@ -383,6 +383,38 @@ describe('App — 启动检查与原生更新菜单', () => {
     resolve(stop)
     await flushPromises()
     expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('原生保存动作对无歌曲、只读和保存中状态均拒绝执行，并同步菜单启用状态', async () => {
+    const w = mount(App)
+    await flushPromises()
+    const snapshots = () => mockInvoke.mock.calls
+      .filter(([command]) => command === 'sync_menu_state')
+      .map(([, args]) => (args as { snapshot: { items: { id: string; enabled: boolean }[] } }).snapshot.items)
+    const saveEnabled = () => snapshots().at(-1)?.find(({ id }) => id === 'save')?.enabled
+    const handler = menuHandler()
+
+    songStore.current = null
+    await nextTick()
+    expect(saveEnabled()).toBe(false)
+    handler({ payload: 'save' })
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_song', expect.anything())
+
+    songStore.current = makeSong()
+    songStore.readonly = true
+    await nextTick()
+    expect(saveEnabled()).toBe(false)
+    handler({ payload: 'save' })
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_song', expect.anything())
+
+    songStore.readonly = false
+    songStore.pendingRename = 'renamed.flac'
+    songStore.saveState = 'saving'
+    await nextTick()
+    expect(saveEnabled()).toBe(false)
+    handler({ payload: 'save' })
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_song', expect.anything())
+    w.unmount()
   })
 
   it('同版稍后后原生菜单手动检查仍显示结果，抑制重复更新操作', async () => {

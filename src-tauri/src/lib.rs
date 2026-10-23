@@ -144,7 +144,7 @@ pub(crate) fn build_menu_with_states(
     let menu = Menu::new(app)?;
     let item = |id, label, default| {
         let (enabled, visible) = states.get(id).copied().unwrap_or((default, true));
-        menu_item(app, id, label, enabled && visible)
+        menu_item(app, id, label, menu_item_enabled(enabled, visible))
     };
     #[cfg(target_os = "macos")]
     {
@@ -154,7 +154,16 @@ pub(crate) fn build_menu_with_states(
             "MusicTag",
             true,
             &[
-                &item("show-about", "关于", false)?,
+                &menu_item(
+                    app,
+                    "macos-about",
+                    "关于",
+                    states
+                        .get("show-about")
+                        .map_or(false, |(enabled, visible)| {
+                            menu_item_enabled(*enabled, *visible)
+                        }),
+                )?,
                 &PredefinedMenuItem::services(app, Some("Services"))?,
                 &PredefinedMenuItem::hide(app, Some("Hide"))?,
                 &PredefinedMenuItem::quit(app, Some("Quit"))?,
@@ -209,7 +218,6 @@ pub(crate) fn build_menu_with_states(
         true,
         &[
             &item("check-for-update", "检查更新…", true)?,
-            #[cfg(not(target_os = "macos"))]
             &item("show-about", "关于", false)?,
         ],
     )?;
@@ -242,6 +250,15 @@ pub fn action_for_menu_id(id: &str) -> Option<&'static str> {
         "toggle-devtools" => Some("toggle-devtools"),
         "check-for-update" => Some("check-for-update"),
         "show-about" => Some("show-about"),
+        "macos-about" => Some("show-about"),
         _ => None,
     }
+}
+
+pub fn help_menu_action_ids() -> [&'static str; 2] {
+    ["check-for-update", "show-about"]
+}
+
+pub fn menu_item_enabled(enabled: bool, visible: bool) -> bool {
+    enabled && visible
 }
