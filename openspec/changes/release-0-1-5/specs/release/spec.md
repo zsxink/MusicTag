@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 ### Requirement: Release version metadata is consistent
 The application package metadata and README version badge MUST identify the release as `0.1.5`.
 
