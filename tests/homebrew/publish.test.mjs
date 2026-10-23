@@ -195,7 +195,14 @@ test('renders both architecture hashes and canonical public URLs without tap ope
   assert.ok(cask.includes(`sha256 arm:   "${digest(bytes.aarch64)}",\n         intel: "${digest(bytes.x64)}"`));
   assert.ok(cask.includes('url "https://github.com/zsxink/MusicTag/releases/download/v#{version}/MusicTag_#{version}_#{arch}.dmg"'));
   assert.match(cask, /app "MusicTag\.app"/);
-  assert.doesNotMatch(cask, /no_check|auto_updates|zap|uninstall/);
+  assert.doesNotMatch(cask, /no_check|auto_updates/);
+  assert.match(cask, /livecheck do/);
+  assert.match(cask, /url :stable/);
+  assert.match(cask, /strategy :github_latest/);
+  assert.ok(cask.includes('uninstall quit: "com.musictag.desktop"'));
+  assert.ok(cask.includes('~/Library/Application Support/MusicTag'));
+  assert.ok(cask.includes('~/Library/Caches/com.musictag.desktop'));
+  assert.ok(cask.includes('~/Library/WebKit/com.musictag.desktop'));
   for (const arch of Object.keys(bytes)) assert.ok(result.stdout.includes(`${digest(bytes[arch])}  ${assetUrl(arch)}`));
   assert.deepEqual(f.calls().filter((call) => call.command === 'curl').map((call) => call.args.at(-1)), Object.keys(bytes).map(assetUrl));
   assert.equal(f.calls().filter((call) => call.command === 'git').length, 0);
