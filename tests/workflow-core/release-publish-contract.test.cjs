@@ -127,10 +127,12 @@ test('release publish contract: the publish step gates on isDraft, publishes wit
 // Spec scenario: 自动发布触发 tap 同步（design D3，含 GITHUB_TOKEN 事件抑制注记）。
 test('release publish contract: publish-release dispatches homebrew.yml with the tag after publishing', () => {
   const job = publishReleaseJob();
-  assert.match(job, /gh workflow run homebrew\.yml -f tag="\$RELEASE_TAG"/);
+  // dispatch 与 view/edit 同享有界重试（CR 第 2 轮）：retry 前缀是完整形态的一部分，
+  // 丢掉 retry 属回归。
+  assert.match(job, /retry gh workflow run homebrew\.yml -f tag="\$RELEASE_TAG"/);
   // dispatch 必须在转正成功之后：GITHUB_TOKEN 作出的 release: published 事件不会
   // 触发下游 workflow，显式 workflow_dispatch 是唯一联动通道。
-  assertOrder(job, ['retry gh release edit "$RELEASE_TAG" --draft=false', 'gh workflow run homebrew.yml'], 'tap dispatch order');
+  assertOrder(job, ['retry gh release edit "$RELEASE_TAG" --draft=false', 'retry gh workflow run homebrew.yml'], 'tap dispatch order');
   // 省略 --ref：gh 默认派发到仓库默认分支，与 homebrew.yml 的信任模型一致（design D3）。
   assert.doesNotMatch(job, /gh workflow run homebrew\.yml[^\n]*--ref/);
   // 不等待 tap 同步结果：tap 失败有自己的可见失败与既有重试路径。

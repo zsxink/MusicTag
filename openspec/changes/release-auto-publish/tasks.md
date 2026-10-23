@@ -20,4 +20,4 @@
 
 ## 5. 集成(Leader 执行,按惯例不在此勾选)
 
-- [ ] 5.1 Leader 审计授权路径与 diff 后按 `feat(release-auto-publish): <任务>` 提交,随后 archive 变更、推送分支、创建或复用 PR(`Closes #175`)、核对 required CI、经 PR 合并回 main 并核对远端事实;发布链路的真实验证(rollout check)随下一次发版执行并补记。Owner: Leader。Depends on 4.2。
+- [ ] 5.1 Leader 审计授权路径与 diff 后按 `feat(release-auto-publish): <任务>` 提交,随后以 `npx --yes @fission-ai/openspec@1.5.0 archive release-auto-publish` 归档变更(钉住门禁版本;全局 CLI 1.13.2 对场景改名 delta 会拒绝,不得使用)、推送分支、创建或复用 PR(`Closes #175`)、核对 required CI、经 PR 合并回 main 并核对远端事实;发布链路的真实验证(rollout check)随下一次发版执行并补记。Owner: Leader。Depends on 4.2。
