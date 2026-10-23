@@ -9,8 +9,8 @@
 //      与 design.md「dep_kinds 为空数组（普通依赖边）」的意图一致。
 //   2. npm 运行时依赖闭包（随前端资源分发）——package.json `dependencies` 起在 node_modules 按
 //      Node 解析规则 BFS（只跟 dependencies，不跟 peer/optional/dev）。
-//   3. npm 构建工具链（不随应用分发）——devDependencies 同法 BFS，独立成节；已在运行时闭包出现的
-//      name@resolved 路径不重复收录。
+//   3. npm 构建工具链（不随应用分发）——devDependencies 同法 BFS，独立成节；两节均按
+//      name@version 去重、保留首次出现（运行时先收集，运行时已收录的不再重复列出）。
 //   4. 内嵌素材——静态常量数组（OpenCC 繁简字典 Apache-2.0、应用图标来源待确认）。
 // 确定性：UTF-8 码元序排序（name 升序、同 name 按 version 升序）、固定节序、无时间戳/机器路径，
 // 同一依赖树下重复运行逐字节一致（幂等）。
@@ -37,8 +37,10 @@ function readPkgJson(pkgDir) {
   return JSON.parse(readFileSync(path.join(pkgDir, 'package.json'), 'utf8'))
 }
 
-/** 依赖表对象 → BFS 收集闭包；`seenPaths` 跨调用共享（运行时/构建两节按 resolved 路径去重）。 */
-function collectNpmClosure(startDeps, seenPaths) {
+/** 依赖表对象 → BFS 收集闭包；`seenKeys`（name@version）跨调用共享——
+ * 运行时/构建两节均按 name@version 去重、保留首次出现（同名同版本在嵌套 node_modules
+ * 多路径解析时只列一行；不同版本仍各占一行），全文不出现重复的 name@version 条目。 */
+function collectNpmClosure(startDeps, seenKeys) {
   const queue = []
   for (const name of Object.keys(startDeps)) {
     const dir = resolvePkgDir(repoRoot, name)
@@ -48,9 +50,10 @@ function collectNpmClosure(startDeps, seenPaths) {
   const items = []
   while (queue.length > 0) {
     const dir = queue.shift()
-    if (seenPaths.has(dir)) continue
-    seenPaths.add(dir)
     const manifest = readPkgJson(dir)
+    const key = `${manifest.name}@${manifest.version}`
+    if (seenKeys.has(key)) continue
+    seenKeys.add(key)
     const repository = manifest.repository
     items.push({
       name: manifest.name,
@@ -146,9 +149,9 @@ const embeddedAssets = [
 
 const cargoDeps = collectCargoClosure()
 const rootManifest = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
-const seenNpmPaths = new Set()
-const runtimeDeps = collectNpmClosure(rootManifest.dependencies ?? {}, seenNpmPaths)
-const devDeps = collectNpmClosure(rootManifest.devDependencies ?? {}, seenNpmPaths)
+const seenNpmKeys = new Set() // name@version 全局去重（运行时先收集、保留首次出现）
+const runtimeDeps = collectNpmClosure(rootManifest.dependencies ?? {}, seenNpmKeys)
+const devDeps = collectNpmClosure(rootManifest.devDependencies ?? {}, seenNpmKeys)
 
 const renderItems = (items) => items.map((d) => `- ${d.name} ${d.version} — ${d.license}${d.source ? ` — ${d.source}` : ''}`).join('\n')
 

@@ -87,7 +87,7 @@ brew update && brew upgrade --cask musictag
 - 这些 API 的调用**基于公开资料**（接口文档、公开接口行为）实现，仅用于获取元数据，**不用于获取任何音频内容**。
 - 对外部 API 的使用**仅供个人学习与研究**，请遵守各平台的服务条款与当地法律法规。因使用外部 API 产生的任何问题，与本软件作者无关。
 - **发送字段**：自动搜索仅向上述服务发送歌曲标题、歌手、专辑名的文本查询词；**不发送本地音频内容**，也不发送**本地文件路径**。
-- **接收方域名**：`music.163.com`、`c.y.qq.com`、`complexsearch.kugou.com`、`lyrics.kugou.com`、`lrclib.net`、`itunes.apple.com`；点选下载封面时另会请求图片域 `y.qq.com`、`imge.kugou.com` 与 `mzstatic.com`。生产请求全部使用 HTTPS。
+- **接收方域名**：`music.163.com`、`c.y.qq.com`、`complexsearch.kugou.com`、`lyrics.kugou.com`、`lrclib.net`、`itunes.apple.com`；点选下载封面时另会请求图片域 `music.126.net`（网易云）、`y.qq.com`、`imge.kugou.com` 与 `mzstatic.com`。生产请求全部使用 HTTPS。
 - **触发时机**：选中歌曲且缺失歌词或封面时才自动搜索；歌词/封面候选只有你手动点选时才会下载，切歌即弃。
 - **失败行为**：单个来源请求失败或超时（搜索 6 秒、封面下载 5 秒）仅该源降级为空结果，不影响其他来源；全部来源失败后会话进入离线降级，不再自动联网（手动搜索按钮仍可随时主动发起）。
 

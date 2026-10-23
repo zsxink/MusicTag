@@ -20,7 +20,7 @@
 |---|---|
 | 接口域名与调用方式 | `music.163.com`。搜索：`POST https://music.163.com/api/linux/forward`（linuxapi 加密转发，payload 内目标 `https://music.163.com/api/cloudsearch/pc`）；歌词：同通道转发 `https://music.163.com/api/song/lyric`（按候选歌曲 id 取词） |
 | 发送字段 | 歌曲标题、歌手、专辑名（拼查询词）；取词仅发候选 id |
-| 返回内容用途 | 候选（歌名/歌手/专辑/封面 URL）展示；歌词点选后填入表单、保存时嵌入本地文件（可导出 `.lrc`）；封面 URL 点选后下载嵌入。响应内 `picUrl` 为 `http://` 时升级为 `https://` 使用（防御保留） |
+| 返回内容用途 | 候选（歌名/歌手/专辑/封面 URL）展示；歌词点选后填入表单、保存时嵌入本地文件（可导出 `.lrc`）；封面 URL（`al.picUrl` 仅升级 scheme，升级后指向 `p*.music.126.net` 图片域）点选后下载嵌入。响应内 `picUrl` 为 `http://` 时升级为 `https://` 使用（防御保留） |
 | 公开条款或接口文档链接 | 网易云音乐开放平台 https://d.music.163.com/open-platform ；官网服务条款见 https://music.163.com 页脚入口 |
 | 核实状态 | 公开资料整理（linuxapi 转发接口无官方公开授权文档）；链接为官方渠道 |
 | 当前处理决定 | 仅用于元数据检索；不下载音频；接口使用授权确认列入「未决事项」#3 |

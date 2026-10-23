@@ -636,7 +636,6 @@
 - csstype 3.2.3 — MIT — https://github.com/frenic/csstype
 - entities 7.0.1 — BSD-2-Clause — https://github.com/fb55/entities.git
 - estree-walker 2.0.2 — MIT — https://github.com/Rich-Harris/estree-walker
-- estree-walker 2.0.2 — MIT — https://github.com/Rich-Harris/estree-walker
 - magic-string 0.30.21 — MIT — git+https://github.com/Rich-Harris/magic-string.git
 - nanoid 3.3.18 — MIT — ai/nanoid
 - picocolors 1.1.1 — ISC — alexeyraspopov/picocolors
@@ -671,8 +670,6 @@
 - alien-signals 1.0.13 — MIT — git+https://github.com/johnsoncodehk/signals.git
 - ansi-regex 6.2.2 — MIT — chalk/ansi-regex
 - ansi-regex 5.0.1 — MIT — chalk/ansi-regex
-- ansi-regex 5.0.1 — MIT — chalk/ansi-regex
-- ansi-regex 5.0.1 — MIT — chalk/ansi-regex
 - ansi-styles 6.2.3 — MIT — chalk/ansi-styles
 - ansi-styles 4.3.0 — MIT — chalk/ansi-styles
 - assertion-error 2.0.1 — MIT — git@github.com:chaijs/assertion-error.git
@@ -693,7 +690,6 @@
 - eastasianwidth 0.2.0 — MIT — git://github.com/komagata/eastasianwidth.git
 - editorconfig 1.0.7 — MIT — git://github.com/editorconfig/editorconfig-core-js.git
 - emoji-regex 9.2.2 — MIT — https://github.com/mathiasbynens/emoji-regex.git
-- emoji-regex 8.0.0 — MIT — https://github.com/mathiasbynens/emoji-regex.git
 - emoji-regex 8.0.0 — MIT — https://github.com/mathiasbynens/emoji-regex.git
 - es-module-lexer 1.7.0 — MIT — git+https://github.com/guybedford/es-module-lexer.git
 - esbuild 0.21.5 — MIT — git+https://github.com/evanw/esbuild.git
@@ -733,10 +729,7 @@
 - std-env 3.10.0 — MIT — unjs/std-env
 - string-width 5.1.2 — MIT — sindresorhus/string-width
 - string-width 4.2.3 — MIT — sindresorhus/string-width
-- string-width 4.2.3 — MIT — sindresorhus/string-width
 - strip-ansi 7.2.0 — MIT — chalk/strip-ansi
-- strip-ansi 6.0.1 — MIT — chalk/strip-ansi
-- strip-ansi 6.0.1 — MIT — chalk/strip-ansi
 - strip-ansi 6.0.1 — MIT — chalk/strip-ansi
 - tinybench 2.9.0 — MIT — tinylibs/tinybench
 - tinyexec 0.3.2 — MIT — git+https://github.com/tinylibs/tinyexec.git
