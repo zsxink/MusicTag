@@ -140,5 +140,6 @@ jobs:
           fi
           # GITHUB_TOKEN 作出的 release: published 事件不会触发下游 workflow；
           # workflow_dispatch 是该抑制规则的例外，故显式派发（gh 默认派发到仓库默认分支），不等待结果。
-          gh workflow run homebrew.yml -f tag="$RELEASE_TAG"
+          # 重试包裹：派发瞬时失败重试耗尽才失败；双重派发无害（concurrency 串行化 + tap 脚本幂等）。
+          retry gh workflow run homebrew.yml -f tag="$RELEASE_TAG"
           echo "Published $RELEASE_TAG and dispatched homebrew.yml for tap sync."
