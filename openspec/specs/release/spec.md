@@ -29,23 +29,23 @@ README 发布说明 MUST 总结 `v0.1.2` 之后合入的用户可见变更，并
 - **THEN** 修复缺陷并以针对性回归验证覆盖
 
 ### Requirement: Release version metadata is consistent
-The application package metadata and README version badge MUST identify the release as `0.1.4`.
+The application package metadata and README version badge MUST identify the release as `0.1.5`.
 
 #### Scenario: Inspect release version
 - **WHEN** a maintainer inspects the Tauri, Cargo, npm, and README version declarations for this release
-- **THEN** each declaration reports `0.1.4`
+- **THEN** each declaration reports `0.1.5`
 
 ### Requirement: Release notes summarize user-visible changes
-The README MUST summarize user-visible changes introduced since v0.1.3 without claiming automatic update installation.
+The README MUST summarize user-visible changes introduced since v0.1.4 without claiming automatic update installation.
 
-#### Scenario: Read v0.1.4 release notes
-- **WHEN** a user reads the v0.1.4 release notes
-- **THEN** they can identify the new stable-release update check and its manual release-page flow
+#### Scenario: Read v0.1.5 release notes
+- **WHEN** a user reads the v0.1.5 release notes
+- **THEN** they can identify the macOS Homebrew installation channel, the native application menu, the update-check throttling, and the pre-release compliance changes
 
 ### Requirement: Release build is verified after merge
-The v0.1.4 tag MUST use the existing tag-triggered workflow and produce a successful draft release build after the change is merged and required CI passes.
+The v0.1.5 tag MUST use the existing tag-triggered workflow and produce a successful draft release build after the change is merged and required CI passes.
 
 #### Scenario: Verify tag-triggered release
-- **WHEN** the merged v0.1.4 commit is tagged and the release workflow completes
+- **WHEN** the merged v0.1.5 commit is tagged and the release workflow completes
 - **THEN** the draft Release and its platform build results are verified as successful
 
