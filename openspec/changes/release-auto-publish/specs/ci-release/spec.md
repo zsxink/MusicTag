@@ -22,7 +22,7 @@
 #### Scenario: 自动发布触发 tap 同步
 
 - **WHEN** `publish-release` job 自动发布完成
-- **THEN** `release: published` 事件触发 `homebrew.yml` 同步 tap,无需人工操作
+- **THEN** 无需人工操作即触发 `homebrew.yml` 同步 tap(GitHub 对 `GITHUB_TOKEN` 事件触发的抑制由 job 内显式 workflow_dispatch 兜底)
 
 ## MODIFIED Requirements
 
