@@ -1,12 +1,12 @@
 ## 1. publish-release 收尾 job(infra)
 
-- [ ] 1.1 在 `.github/workflows/release.yml` 新增 `publish-release` job:`needs: publish-tauri`(默认 success 语义,任一 matrix 条目失败或跳过即不执行)、`runs-on: ubuntu-latest`、`timeout-minutes: 10`、job 级 `permissions: contents: write` + `actions: write`(顶层与其余 job 权限不动);tag 经 `env: RELEASE_TAG: ${{ github.ref_name }}` 注入并在 run 块内引用。保留 `publish-tauri` 的 `releaseDraft: true`、4 条 matrix 与既有权限。Owner: Dev infra;files: `.github/workflows/release.yml`。Design: D1。覆盖场景:任一平台失败不发布;权限与配置正确。
-- [ ] 1.2 实现自动发布步骤:先 `gh release view "$RELEASE_TAG" --json isDraft,tagName,isPrerelease` 作幂等闸(已发布则 no-op 退出 0),再以 3 次 2s/4s 退避重试执行 `gh release edit "$RELEASE_TAG" --draft=false`;重试耗尽即 job 失败,Release 保留草稿态。Owner: Dev infra;files: 同 1.1。Depends on 1.1。Design: D2。覆盖场景:全部平台成功后自动发布;重跑幂等;Release 草稿自动转正(MODIFIED)。
-- [ ] 1.3 实现 tap 联动步骤:发布成功后 `gh workflow run homebrew.yml -f tag="$RELEASE_TAG"`(gh 默认派发到仓库默认分支);`homebrew.yml`、`scripts/homebrew-publish.sh` 与 `release: published` 触发器零改动,不等待 tap 同步结果。Owner: Dev infra;files: 同 1.1。Depends on 1.2。Design: D3。覆盖场景:自动发布触发 tap 同步。
+- [x] 1.1 在 `.github/workflows/release.yml` 新增 `publish-release` job:`needs: publish-tauri`(默认 success 语义,任一 matrix 条目失败或跳过即不执行)、`runs-on: ubuntu-latest`、`timeout-minutes: 10`、job 级 `permissions: contents: write` + `actions: write`(顶层与其余 job 权限不动);tag 经 `env: RELEASE_TAG: ${{ github.ref_name }}` 注入并在 run 块内引用。保留 `publish-tauri` 的 `releaseDraft: true`、4 条 matrix 与既有权限。Owner: Dev infra;files: `.github/workflows/release.yml`。Design: D1。覆盖场景:任一平台失败不发布;权限与配置正确。
+- [x] 1.2 实现自动发布步骤:先 `gh release view "$RELEASE_TAG" --json isDraft,tagName,isPrerelease` 作幂等闸(已发布则 no-op 退出 0),再以 3 次 2s/4s 退避重试执行 `gh release edit "$RELEASE_TAG" --draft=false`;重试耗尽即 job 失败,Release 保留草稿态。Owner: Dev infra;files: 同 1.1。Depends on 1.1。Design: D2。覆盖场景:全部平台成功后自动发布;重跑幂等;Release 草稿自动转正(MODIFIED)。
+- [x] 1.3 实现 tap 联动步骤:发布成功后 `gh workflow run homebrew.yml -f tag="$RELEASE_TAG"`(gh 默认派发到仓库默认分支);`homebrew.yml`、`scripts/homebrew-publish.sh` 与 `release: published` 触发器零改动,不等待 tap 同步结果。Owner: Dev infra;files: 同 1.1。Depends on 1.2。Design: D3。覆盖场景:自动发布触发 tap 同步。
 
 ## 2. README 维护者说明(docs)
 
-- [ ] 2.1 改写 README「维护者:Homebrew 发布」一节:常规路径改为「三端构建成功后自动 publish 并自动触发 tap 同步,无需人工操作」;人工 publish 与在 Actions 手动运行 Homebrew Tap 保留为失败兜底说明;保留 `HOMEBREW_TAP_TOKEN` 权限边界、资产命名(`MusicTag_<版本>_aarch64.dmg` / `_x64.dmg`)与「同步失败不影响已发布 Release」表述;面向用户的安装/升级章节不改。Owner: Dev docs;files: `README.md`。Depends on 1.3(措辞与实际行为一致)。Design: D4。
+- [x] 2.1 改写 README「维护者:Homebrew 发布」一节:常规路径改为「三端构建成功后自动 publish 并自动触发 tap 同步,无需人工操作」;人工 publish 与在 Actions 手动运行 Homebrew Tap 保留为失败兜底说明;保留 `HOMEBREW_TAP_TOKEN` 权限边界、资产命名(`MusicTag_<版本>_aarch64.dmg` / `_x64.dmg`)与「同步失败不影响已发布 Release」表述;面向用户的安装/升级章节不改。Owner: Dev docs;files: `README.md`。Depends on 1.3(措辞与实际行为一致)。Design: D4。
 
 ## 3. 结构断言测试与本地验证(Tester)
 
