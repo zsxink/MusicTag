@@ -73,8 +73,9 @@ function onReject() {
         <li>禁止私自销售、转卖、出租本软件（含修改后版本）</li>
         <li>禁止使用 AI 转写、重写或再创作本软件（转写/衍生作品与本软件无关）</li>
         <li>外部 API 基于公开资料调用，仅用于获取元数据；仅供个人学习与研究，请遵守各平台条款</li>
+        <li>数据披露：自动搜索仅向第三方搜索服务发送歌名、歌手、专辑文本，不发送音频内容与本地文件路径</li>
       </ul>
-      <p class="dialog-footnote">完整协议见仓库 <span class="mono">README</span> 与 <span class="mono">LICENSE</span>（Business Source License 1.1）。</p>
+      <p class="dialog-footnote">完整协议见仓库 <span class="mono">README</span> 与 <span class="mono">LICENSE</span>。</p>
       <div class="dialog-actions">
         <button ref="acceptBtnEl" class="btn btn-primary" type="button" @click="onAccept">同意并继续</button>
         <button class="btn btn-danger" type="button" @click="onReject">拒绝</button>

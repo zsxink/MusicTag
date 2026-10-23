@@ -402,6 +402,8 @@ interface UpdateCheckResult {
 
 **惰性拉取**：`search_song` 一次返回候选（封面 URL + 歌词 id），点选封面才 `download_cover`、点选歌词行才 `fetch_lyric`。
 
+**数据披露与传输加密（Issue #166）**：五源生产请求（搜索、取词、封面下载）默认端点全部 HTTPS——网易云 `https://music.163.com`（linuxapi 转发）、QQ 音乐 `https://c.y.qq.com`、酷狗 `https://complexsearch.kugou.com/v2/search/song` 与 `https://lyrics.kugou.com`（search/download）、LRCLIB `https://lrclib.net/api/search` 与 `/api/get`、iTunes `https://itunes.apple.com/search`；代码中不存在以明文 `http://` 配置的生产端点（守卫测试 `tests/searcher_https_tests.rs` 兜底）。发送字段仅为歌曲标题（title）、歌手（artist）、专辑名（album）的文本查询词（LRCLIB 按 `track_name`/`artist_name`/`album_name` 分参数）与取词/封面下载的候选 id 或派生资源 URL，不发送本地音频内容与本地文件路径。触发与降级语义不变：选中且缺失歌词/封面才自动搜索、点选才下载（惰性拉取）；单源 6 秒超时降级为空结果，五源全部失败（`all_failed`）时会话进入离线降级、不再自动联网。对远端响应内派生的资源 URL（如网易云 `picUrl`、酷狗 `Image`）保留使用前 `http://`→`https://` 的升级防御（`netease.rs` `replace`、`kugou.rs` `strip_prefix`）。
+
 **更新检查（Issue #158）**：`service/update.rs` 复用 `reqwest`，每页请求 `https://api.github.com/repos/zsxink/MusicTag/releases?per_page=100&page=N` 直至空页；每次请求 8 秒超时，整个检查 20 秒超时，并设置 GitHub User-Agent。排除 draft/prerelease、无效 tag 及带预发布标识的 semver，接受可选 `v` 前缀；用 `semver::Version::cmp_precedence` 选择最高稳定版本及比较当前 `CARGO_PKG_VERSION`，build metadata 不影响更新判定。无有效稳定版、网络、HTTP 或 JSON 错误返回 `Err(String)`。响应 `UpdateCheckResult` 在授权的 `service/update.rs` 声明，与前端类型保持 snake_case 字段一致；选择的 Release 地址还须与其 tag 对应。
 
 `commands/update.rs` 为薄壳；检查委托 service，详情打开以回调注入系统 opener，业务地址校验在 service。地址必须为 `https://github.com/zsxink/MusicTag/releases/tag/<tag>`，禁止凭据、其他 host/path、非 HTTPS、query/fragment 或非法 tag。注册 `tauri-plugin-opener` 时关闭其 JS 链接自动打开；调用 Rust API 无需 WebView 插件权限，capability 只授予事件订阅/清理及应用版本读取权限，不授予 opener IPC 权限，前端仅经受校验的自定义 command 打开。

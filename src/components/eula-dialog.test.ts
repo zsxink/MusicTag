@@ -54,6 +54,17 @@ describe('EulaDialog — 首次启动（未同意）渲染授权遮罩（spec「
     expect(texts).toContain('同意并继续')
     expect(texts).toContain('拒绝')
   })
+
+  it('数据披露要点（仅发送歌名/歌手/专辑文本，不发送音频内容与本地路径）', () => {
+    const w = mount(EulaDialog)
+    const text = w.text()
+    expect(text).toContain('数据披露')
+    expect(text).toContain('歌名、歌手、专辑')
+    expect(text).toContain('不发送音频内容')
+    expect(text).toContain('本地文件路径')
+    // LICENSE 改为自洽个人学习许可（Issue #166）后，弹窗不得再出现 BUSL 表述。
+    expect(text).not.toContain('Business Source License')
+  })
 })
 
 describe('EulaDialog — 同意 → 写持久化 + 关闭遮罩进入主界面（spec「同意后进入主界面并持久化」）', () => {
