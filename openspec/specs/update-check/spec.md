@@ -73,4 +73,3 @@ Define how MusicTag checks stable GitHub Releases, reports update status, and le
 #### Scenario: 检查失败保持显示
 - **WHEN** 更新检查失败并显示错误提示
 - **THEN** 提示不自动关闭，直至用户手动关闭
-

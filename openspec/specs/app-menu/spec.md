@@ -28,4 +28,3 @@ TBD - created by archiving change issue-170. Update Purpose after archive.
 #### Scenario: 用户触发菜单动作
 - **WHEN** 用户选择可用的原生菜单项
 - **THEN** 原生端通过通用 `app-menu-action` 事件发送稳定 action 标识，前端分发至相应既有能力
-
