@@ -52,9 +52,10 @@
 - **WHEN** 在 `ubuntu-22.04` 上完成构建
 - **THEN** 产出 `.deb`、`.rpm`、`.AppImage` 并上传 Release
 
-#### Scenario: Release 草稿
+#### Scenario: Release 草稿自动转正
+
 - **WHEN** 三端构建完成、产物上传成功
-- **THEN** GitHub Release 以草稿（Draft）状态创建，待人工核对后手动发布
+- **THEN** GitHub Release 先以草稿（Draft）状态承载资产，并在全部 matrix 条目成功后由 `publish-release` job 自动发布，无需人工核对
 
 ### Requirement: workflow 权限与配置正确
 `release.yml` SHALL 声明最小必要权限与决定性配置。
@@ -81,3 +82,23 @@
 #### Scenario: 三处门禁观察同一组用例
 - **WHEN** 任一原生测试套件因新增或删除而变化
 - **THEN** `ci.yml`、`release.yml` 与本地验证计划三者包含同一套件集合，不存在只在其中一处执行的用例
+
+### Requirement: 全平台构建成功后自动发布 Release
+`release.yml` SHALL 在 `publish-tauri` 的全部 matrix 条目构建成功后自动把对应 tag 的 draft Release 转为已发布，SHALL NOT 依赖人工 publish 才触发下游 tap 同步。
+
+#### Scenario: 全部平台成功后自动发布
+- **WHEN** `publish-tauri` 的全部 matrix 条目（Windows、macOS aarch64、macOS x86_64、Linux）构建与资产上传成功
+- **THEN** `publish-release` job 将该 tag 对应的 draft Release 转为已发布状态
+
+#### Scenario: 任一平台失败不发布
+- **WHEN** 任一 matrix 条目构建或资产上传失败
+- **THEN** `publish-release` job 不执行，Release 保留草稿态，可人工 publish 兜底
+
+#### Scenario: 重跑幂等
+- **WHEN** Release 已处于已发布状态后再次运行 `publish-release` job
+- **THEN** 发布步骤幂等成功，不产生错误
+
+#### Scenario: 自动发布触发 tap 同步
+- **WHEN** `publish-release` job 自动发布完成
+- **THEN** 无需人工操作即触发 `homebrew.yml` 同步 tap（GitHub 对 `GITHUB_TOKEN` 事件触发的抑制由 job 内显式 workflow_dispatch 兜底）
+

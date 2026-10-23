@@ -15,8 +15,8 @@
 
 ## 4. 独立审查与最终验证
 
-- [ ] 4.1 CR(只读):对照已批准 spec 的 5 个场景逐条审 release.yml diff、README 与测试断言;重点核对未扩大范围(`homebrew.yml`/`scripts/homebrew-publish.sh` 零改动、`releaseDraft: true` 保留、无新增凭据)与 design D3 的事件抑制机制注记;问题按 file + issue + specReference + suggestion 回报,修复经 Leader 重派。Owner: CR;no writes。Depends on 3.2。
-- [ ] 4.2 Verify(与 CI 门禁对齐的完整清单):`npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive`;`node --test '.agents/tools/pipe-core/test/*.test.js' 'tests/workflow-core/*.test.cjs' '.agents/tools/pipe-native/test/*.test.js'`;`node --test tests/homebrew/publish.test.mjs`;`node .agents/tools/pipe-native/self-check.js`;`npm ci && npm run build && npm run test`;`cargo check --manifest-path src-tauri/Cargo.toml --all-targets` 与 `cargo test --manifest-path src-tauri/Cargo.toml --all-targets`;两个 workflow 的 YAML 语法解析。真实 `v*` tag 的端到端链路(自动转正 → tap 自动同步)标记为 rollout check,留待下一次真实发版验证,不计入本地 Verify 结论。Owner: Verify;no product writes。Depends on 4.1。
+- [x] 4.1 CR(只读):对照已批准 spec 的 5 个场景逐条审 release.yml diff、README 与测试断言;重点核对未扩大范围(`homebrew.yml`/`scripts/homebrew-publish.sh` 零改动、`releaseDraft: true` 保留、无新增凭据)与 design D3 的事件抑制机制注记;问题按 file + issue + specReference + suggestion 回报,修复经 Leader 重派。Owner: CR;no writes。Depends on 3.2。
+- [x] 4.2 Verify(与 CI 门禁对齐的完整清单):`npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive`;`node --test '.agents/tools/pipe-core/test/*.test.js' 'tests/workflow-core/*.test.cjs' '.agents/tools/pipe-native/test/*.test.js'`;`node --test tests/homebrew/publish.test.mjs`;`node .agents/tools/pipe-native/self-check.js`;`npm ci && npm run build && npm run test`;`cargo check --manifest-path src-tauri/Cargo.toml --all-targets` 与 `cargo test --manifest-path src-tauri/Cargo.toml --all-targets`;两个 workflow 的 YAML 语法解析。真实 `v*` tag 的端到端链路(自动转正 → tap 自动同步)标记为 rollout check,留待下一次真实发版验证,不计入本地 Verify 结论。Owner: Verify;no product writes。Depends on 4.1。
 
 ## 5. 集成(Leader 执行,按惯例不在此勾选)
 
