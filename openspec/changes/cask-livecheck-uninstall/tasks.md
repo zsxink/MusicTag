@@ -13,8 +13,8 @@
 
 ## 3. 非业务验证（Tester）
 
-- [ ] 3.1 `bash -n scripts/homebrew-publish.sh`；运行 `npm run test` 确认 homebrew 套件（`tests/homebrew/publish.test.mjs`）全绿；如实记录不适用项：`node --check` 不适用（.mjs 由 vitest 运行）、无 Rust/Vue 改动故 cargo/build 不在门禁内。Owner: Tester。Depends on 2.1。Design: 验证节。
-- [ ] 3.2 `npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive` 通过（钉住 1.5.0，勿用全局 CLI 1.13.2）。Owner: Tester。Depends on 1.1–2.1。
+- [x] 3.1 `bash -n scripts/homebrew-publish.sh`；运行 `npm run test` 确认 homebrew 套件（`tests/homebrew/publish.test.mjs`）全绿；如实记录不适用项：`node --check` 不适用（.mjs 由 vitest 运行）、无 Rust/Vue 改动故 cargo/build 不在门禁内。Owner: Tester。Depends on 2.1。Design: 验证节。
+- [x] 3.2 `npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive` 通过（钉住 1.5.0，勿用全局 CLI 1.13.2）。Owner: Tester。Depends on 1.1–2.1。
 
 ## 4. 审查与最终验证
 
