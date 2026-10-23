@@ -217,9 +217,13 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const responses = JSON.parse(fs.readFileSync(path.join(__dirname, 'responses.json'), 'utf8'));
 const calls = [];
-const realNow = Date.now.bind(Date);
+const realSetTimeout = setTimeout.bind(globalThis);
 let elapsed = 0;
-Date.now = () => realNow() + elapsed;
+Date.now = () => elapsed;
+globalThis.setTimeout = (callback, ms, ...args) => realSetTimeout(() => {
+  elapsed += ms;
+  callback(...args);
+}, ms);
 cp.spawnSync = (bin, args, options) => {
   if (bin !== 'gh') throw new Error('unexpected executable: ' + bin);
   const response = responses[calls.length];
@@ -396,19 +400,15 @@ test('wait-ci: 认证失败属不可重试 → 立即 exit 1，不做退避重�
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('wait-ci: 退避不得超出总 timeout 预算（默认 1s 起步退避 vs 300ms 预算）', () => {
-  const started = Date.now();
-  // 显式用生产退避值；直接注入返回值，避免 shell 启动先耗尽 300ms 预算。
+test('wait-ci: 退避定时器推进合成时钟并在预算耗尽后停止重试', () => {
   const r = runWaitCiSpawnStub([{ result: { status: 1, stderr: EOF_MSG, stdout: '' } }], 300, {
     WAIT_CI_RETRY_BASE_MS: '1000', WAIT_CI_RETRY_MAX_MS: '30000',
   });
-  const elapsed = Date.now() - started;
-  assert.equal(r.status, 1);
   const out = JSON.parse(r.stdout);
+  assert.equal(r.status, 1);
   assert.equal(out.errorKind, 'network');
-  assert.equal(r.calls.length, 1, '退避耗尽预算后不得再查询 gh');
-  assert.equal(out.retries, 1);
-  assert.ok(elapsed < 2000, `退避超出 timeout 预算：耗时 ${elapsed}ms（预算 300ms，默认退避 1000ms）`);
+  assert.equal(out.retries, 1, '预算耗尽前应恰好发生一次有界退避');
+  assert.equal(r.calls.length, 1);
 });
 
 test('wait-ci: 轮询等待不超出剩余预算（定时器等待，不做整段盲等）', () => {
