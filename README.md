@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
-  <img src="https://img.shields.io/badge/License-BUSL%201.1-red.svg" alt="license" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-个人学习许可-red.svg" alt="license" /></a>
   <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
 </p>
 
@@ -81,11 +81,15 @@ brew update && brew upgrade --cask musictag
 - 本软件**不提供任何音频文件**，也不提供任何音频文件的**下载、抓取或存储**功能。
 - 本软件仅操作**你自己本地的音乐文件**，读取并补全其元数据标签。
 
-### 外部 API 声明
+### 外部 API 声明与数据披露
 
 - 本软件使用**外部网络 API**（网易云、QQ 音乐、酷狗、LRCLIB、iTunes）用于搜索歌词与封面元数据。
 - 这些 API 的调用**基于公开资料**（接口文档、公开接口行为）实现，仅用于获取元数据，**不用于获取任何音频内容**。
 - 对外部 API 的使用**仅供个人学习与研究**，请遵守各平台的服务条款与当地法律法规。因使用外部 API 产生的任何问题，与本软件作者无关。
+- **发送字段**：自动搜索仅向上述服务发送歌曲标题、歌手、专辑名的文本查询词；**不发送本地音频内容**，也不发送**本地文件路径**。
+- **接收方域名**：`music.163.com`、`c.y.qq.com`、`complexsearch.kugou.com`、`lyrics.kugou.com`、`lrclib.net`、`itunes.apple.com`；点选下载封面时另会请求图片域 `music.126.net`（网易云）、`y.qq.com`、`imge.kugou.com` 与 `mzstatic.com`。生产请求全部使用 HTTPS。
+- **触发时机**：选中歌曲且缺失歌词或封面时才自动搜索；歌词/封面候选只有你手动点选时才会下载，切歌即弃。
+- **失败行为**：单个来源请求失败或超时（搜索 6 秒、封面下载 5 秒）仅该源降级为空结果，不影响其他来源；全部来源失败后会话进入离线降级，不再自动联网（手动搜索按钮仍可随时主动发起）。
 
 ### 个人用途声明
 
@@ -99,13 +103,13 @@ brew update && brew upgrade --cask musictag
 
 ## 软件协议（License）
 
-- 本软件采用 **Business Source License 1.1** 结构（`LICENSE`），附加个人学习用途限制。
-- **仅授权个人学习与研究使用**；**禁止任何商业使用**。
+- 本软件采用自洽的**个人学习许可**（`LICENSE`，MusicTag Personal Learning License）。
+- **仅授权个人学习与研究用途**的复制、修改、运行；**禁止任何商业用途**。
 - **禁止私自销售、转卖、出租**本软件（含修改后版本）。
 - **禁止再分发**（未经书面许可）。
 - **禁止使用 AI 转写、重写或再创作**本软件；若有人 AI 转写，该转写/衍生作品与本软件无关。
-- Change Date：**2099-12-31**（此前长期受本协议限制）。
-- 本软件**不附带任何担保**，因使用本软件造成的任何直接或间接损失，作者不承担责任。
+- Change Date：**2099-12-31**，届时起本软件按 **GPL-2.0-or-later** 提供。
+- 本软件按「现状」提供，**不附带任何担保**，因使用本软件造成的任何直接或间接损失，作者不承担责任。
 - 完整条款见 [LICENSE](LICENSE)。
 
 ## 常用命令

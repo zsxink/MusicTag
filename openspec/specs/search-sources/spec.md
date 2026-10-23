@@ -2,9 +2,7 @@
 
 ## Purpose
 MusicTag V1 多源搜索能力（FR-8.5/8.6/8a）：网易云 + QQ 音乐 + 酷狗 + LRCLIB + iTunes 五家并发搜索、打分去重聚合、候选惰性拉取（点选才取歌词/封面）、网易云 linuxapi 加密（搜索/取词均走 `/api/linux/forward` 转发，weapi 搜索路径 2026 起被风控弃用）。后端纯能力，供 `v1-search-ui` 前端搜索联动消费。v1-search-fixes 补充：`SearchResult.all_failed`（区分全源失败与正常空结果，供离线判定）与单源 `search_source`（C2 换源逐源拿原始候选）。v1-multi-source-candidates 修订：聚合从「跨源折叠」改为「同源折叠、跨源全保留」，每源 TOP 3 + 来源分组排序。
-
 ## Requirements
-
 ### Requirement: 打分去重排序
 搜索结果 SHALL 按 title/artist/album 相等与包含打分，归一化（trim + 全角半角 + 小写折叠 + **繁→简折叠**，见「繁简归一化」requirement）**按来源分组去重**：**同一来源内**同曲（归一化 title/artist 相同）只保留该源得分最高一条；**不同来源之间不折叠**，各源候选各自保留。排序**先按来源分组**（Netease→QqMusic→Kugou→Lrclib→Itunes），组内按分降序；每源保留 TOP 3（最多 5×3=15 条）。album 参与打分时仅对非空 album 计分。聚合的输入候选 SHALL 按**固定来源顺序**展开（iTunes 源内部再按店面序 HK→US），使同分同曲的取舍与最终排序可复现。
 
@@ -108,11 +106,11 @@ MusicTag V1 多源搜索能力（FR-8.5/8.6/8a）：网易云 + QQ 音乐 + 酷�
 - **THEN** `all_failed=false`，不得标记会话离线（无结果 ≠ 全源失败）
 
 ### Requirement: 酷狗签名搜索
-酷狗源 SHALL 用 `complexsearch.kugou.com/v2/search/song` + MD5 签名（`NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt` secret 包裹参数字符串），返回候选含 `fileHash` 供后续取 KRC 歌词，并 SHALL 从响应既有 `Image` 字段派生封面 URL：`{size}` 字面占位符替换为 `480`、`http://` 升为 `https://`；host 为 `singerimg.kugou.com`（歌手头像）的条目 SHALL 视为无封面（`cover_url = None`）。签名纯 Rust 实现（`md5` 依赖），无 JS 引擎。
+酷狗源 SHALL 用 `https://complexsearch.kugou.com/v2/search/song` + MD5 签名（`NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt` secret 包裹参数字符串），返回候选含 `fileHash` 供后续取 KRC 歌词，并 SHALL 从响应既有 `Image` 字段派生封面 URL：`{size}` 字面占位符替换为 `480`、`http://` 升为 `https://`；host 为 `singerimg.kugou.com`（歌手头像）的条目 SHALL 视为无封面（`cover_url = None`）。签名纯 Rust 实现（`md5` 依赖），无 JS 引擎。酷狗歌词搜索与下载 SHALL 默认使用 `https://lyrics.kugou.com/search` 与 `https://lyrics.kugou.com/download`，不再以明文 HTTP 作为默认端点；既有「`http://` → `https://` 升级」逻辑保留为对响应内 URL 的防御性处理。
 
 #### Scenario: 签名搜索
 - **WHEN** 调用酷狗搜索
-- **THEN** 用 MD5 签名参数请求，正常返回候选列表
+- **THEN** 用 MD5 签名参数请求 HTTPS 搜索端点，正常返回候选列表
 
 #### Scenario: 签名错误降级
 - **WHEN** 签名无效被拒（`error_code:20006`）
@@ -129,6 +127,10 @@ MusicTag V1 多源搜索能力（FR-8.5/8.6/8a）：网易云 + QQ 音乐 + 酷�
 #### Scenario: 无封面字段
 - **WHEN** 候选条目 `Image` 缺失或为空
 - **THEN** `cover_url = None`（与既有缺省行为一致），歌词候选不受影响
+
+#### Scenario: 默认端点全为 HTTPS
+- **WHEN** 检查酷狗源默认配置（搜索、歌词搜索、歌词下载）
+- **THEN** 三个默认端点均为 `https://`，不存在明文 HTTP 默认端点
 
 ### Requirement: LRCLIB 歌词源
 LRCLIB SHALL 提供歌词候选与取词：`GET /api/search?track_name=&artist_name=&album_name=` 返回候选，`GET /api/get`（track_name/artist_name/album_name/duration）返回 `syncedLyrics`/`plainLyrics`。零鉴权，请求带描述性 User-Agent。
@@ -228,3 +230,15 @@ QQ 音乐源的搜索 SHALL 使用 `https://c.y.qq.com/soso/fcgi-bin/search_for_
 #### Scenario: 前后端同规则
 - **WHEN** 前端 C2 换源身份校验比较繁体点选候选与简体换源结果
 - **THEN** 使用与后端 `norm()` 同规则的归一化判定为同一首（不再误判「同名不同歌」），Live 版/翻唱仍被判为不同
+
+### Requirement: 生产请求传输加密
+五源（网易云、QQ 音乐、酷狗、LRCLIB、iTunes）的搜索、取词、封面下载生产网络请求 SHALL 使用 HTTPS；代码中 SHALL NOT 存在以明文 `http://` 配置的搜索、歌词或封面下载端点。对远端响应中派生的资源 URL（如封面地址）SHALL 在使用前将 `http://` 升级为 `https://`。
+
+#### Scenario: 全源端点加密
+- **WHEN** 审查五源代码中的默认端点配置
+- **THEN** 所有搜索、取词、封面下载默认端点均为 HTTPS，无明文 HTTP 端点
+
+#### Scenario: 响应内 URL 升级
+- **WHEN** 远端响应返回 `http://` 的资源地址（如网易云 `picUrl`、酷狗 `Image`）
+- **THEN** 使用前升级为 `https://`（既有防御逻辑保持）
+

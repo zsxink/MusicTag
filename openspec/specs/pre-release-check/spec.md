@@ -5,7 +5,7 @@ TBD - created by archiving change pre-release-check. Update Purpose after archiv
 ## Requirements
 ### Requirement: 首次打开授权确认弹窗
 
-应用首次启动时 SHALL 弹出授权确认窗口，展示协议要点（个人学习用途 / 禁止商用 / 禁止私自销售转卖 / 禁止 AI 转写 / 外部 API 免责声明），用户**同意后才能进入主界面**；拒绝则退出应用。同意状态 SHALL 本地持久化，二次启动不再弹窗。
+应用首次启动时 SHALL 弹出授权确认窗口，展示协议要点（个人学习用途 / 禁止商用 / 禁止私自销售转卖 / 禁止 AI 转写 / 外部 API 免责声明 / 数据披露要点），用户**同意后才能进入主界面**；拒绝则退出应用。同意状态 SHALL 本地持久化，二次启动不再弹窗。
 
 #### Scenario: 首次启动弹出授权窗口
 
@@ -27,21 +27,37 @@ TBD - created by archiving change pre-release-check. Update Purpose after archiv
 - **WHEN** 用户已同意过（本地有同意记录）后再次启动
 - **THEN** 直接进入主界面，不显示授权窗口
 
+#### Scenario: 弹窗含数据披露要点
+
+- **WHEN** 用户阅读授权确认窗口的协议要点
+- **THEN** 能读到自动搜索仅向第三方搜索服务发送歌名、歌手、专辑文本（不发送音频内容与本地路径）的披露要点
+
 ### Requirement: README 协议声明
 
-README SHALL 包含：个人学习用途定位（禁止商用）、不提供任何音频文件/下载、外部 API 基于公开资料免责、个人用途限制、禁止 AI 转写声明（AI 转写作品与软件无关）、软件协议章节（BUSL 1.1 + 禁转卖）、顶部软件图标。
+README SHALL 包含：个人学习用途定位（禁止商用）、不提供任何音频文件/下载、外部 API 基于公开资料免责、外部 API 数据披露（发送字段为歌曲标题、歌手、专辑名；接收方为五源服务域名；触发时机为选中歌曲且缺失歌词或封面时自动搜索、候选点选时才下载歌词或封面；不发送本地音频内容与本地文件路径；网络失败时单源降级、全源失败后会话离线降级不再自动联网）、个人用途限制、禁止 AI 转写声明（AI 转写作品与软件无关）、软件协议章节（与 LICENSE 一致的个人学习许可 + 禁转卖）、顶部软件图标。
 
 #### Scenario: README 含全部声明
 
 - **WHEN** 阅读 README
-- **THEN** 含「个人学习用途、禁止商用」「不提供音频文件/下载」「外部 API 基于公开资料」「禁止 AI 转写」「软件协议（BUSL 1.1）」「icon/musictag.png 图标」
+- **THEN** 含「个人学习用途、禁止商用」「不提供音频文件/下载」「外部 API 基于公开资料」「禁止 AI 转写」「软件协议（个人学习许可）」「icon/musictag.png 图标」
 
-### Requirement: LICENSE 基于 BUSL 1.1 结构
+#### Scenario: README 含数据披露
 
-LICENSE SHALL 采用 Business Source License 1.1 结构，含附加使用限制：禁止商用、禁止私自销售/转卖、禁止 AI 转写/再创作、Change Date 2099-12-31。
+- **WHEN** 阅读 README 外部 API 声明
+- **THEN** 能读到发送字段（歌名、歌手、专辑名）、接收方域名、触发时机（缺失才自动搜、点选才下载）、不发送音频内容与本地路径、失败/离线降级行为，且与 `docs/compliance/search-sources.md` 的记录一致
 
-#### Scenario: LICENSE 含附加限制
+### Requirement: LICENSE 自洽许可文本
+LICENSE SHALL 为单一自洽的许可文本，明确：许可方身份（MusicTag 作者，GitHub @zsxink）；授权范围（仅个人学习与研究使用的复制、修改、运行）；禁止事项（商用、私自销售/转卖、未经书面许可的再分发、AI 转写/再创作）且 SHALL NOT 与授权条款矛盾（不得既授予再分发又禁止再分发）；版权声明保留义务；无担保声明；违约终止与存续条款；适用法域（中华人民共和国法律）；Change Date（2099-12-31）与届后按 GPL-2.0-or-later 提供的转换条款。README 软件协议章节 SHALL 与 LICENSE 表述一致，SHALL NOT 再声称采用 Business Source License 1.1。
 
+#### Scenario: 无矛盾授予
+- **WHEN** 阅读 LICENSE 的授权授予与禁止事项
+- **THEN** 授权范围自授权起即限定为个人学习与研究使用，禁止事项（商用、转卖、再分发、AI 转写）与授权条款不存在相互矛盾
+
+#### Scenario: 许可要素齐全
 - **WHEN** 阅读 LICENSE
-- **THEN** 含 BUSL 1.1 结构、Change Date 2099-12-31、禁止私自销售/转卖条款、禁止 AI 转写条款
+- **THEN** 能读到许可方身份、授权范围、禁止事项、无担保声明、终止与存续、适用法域与 Change Date（2099-12-31，届后 GPL-2.0-or-later）
+
+#### Scenario: README 与 LICENSE 一致
+- **WHEN** 阅读 README 软件协议章节
+- **THEN** 表述与 LICENSE 一致（个人学习许可、禁止商用/转卖/再分发/AI 转写、Change Date 2099-12-31），无 BUSL 1.1 表述
 

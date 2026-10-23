@@ -2,14 +2,15 @@
 // search-sources-renewal D3，替代已废弃的咪咕）。
 //
 // 2026-08 实测：咪咕 scr_search_tag/getLyric 全死（301 → SPA HTML），酷狗两接口可用：
-// - 搜索：GET `complexsearch.kugou.com/v2/search/song`，query 参数字母序拼接 →
+// - 搜索：GET `https://complexsearch.kugou.com/v2/search/song`（Issue #166 起默认 HTTPS），query 参数字母序拼接 →
 //   secret `NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt` 前后包裹 → `md5` 摘要（小写 hex）做 `signature`；
 //   不传 `callback` → 服务器返回**纯 JSON**（非 JSONP 包裹），解析 `data.lists[]`；
 //   `error_code` 非 0（如 20006 签名错）→ 计为源失败；
 //   （2026-10 fix-search-sources-locale D2）响应**本就带** `Image` 封面字段 → 经 `kugou_cover_url`
 //   派生 cover_url（`{size}`→480、http→https、singerimg 歌手头像丢弃），此前误记「无封面 URL」；
-// - 取词：两步 —— `lyrics.kugou.com/search?ver=1&man=yes&client=pc&hash=<FileHash>` 拿候选
-//   `id`+`accesskey` → `lyrics.kugou.com/download?id=&accesskey=&fmt=lrc&charset=utf8` 返回 base64 LRC。
+// - 取词：两步 —— `https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&hash=<FileHash>` 拿候选
+//   `id`+`accesskey` → `lyrics.kugou.com/download?id=&accesskey=&fmt=lrc&charset=utf8` 返回 base64 LRC
+//   （取词两步默认端点同自 Issue #166 起均为 HTTPS）。
 // 签名纯 Rust 实现（`md5` 依赖，无 JS 引擎）；已知向量单测锁算法（与 crypto.rs weapi/linuxapi 同哲学）。
 // 单源失败一律降级为空列表 / None。
 // `now_millis`/`random_md5_hex`/`signature`/`search_params`/`is_error_response`/`parse_*` 与
@@ -33,9 +34,9 @@ pub struct Kugou {
 impl Default for Kugou {
     fn default() -> Self {
         Self {
-            search_url: "http://complexsearch.kugou.com/v2/search/song".to_string(),
-            lyric_search_url: "http://lyrics.kugou.com/search".to_string(),
-            lyric_download_url: "http://lyrics.kugou.com/download".to_string(),
+            search_url: "https://complexsearch.kugou.com/v2/search/song".to_string(),
+            lyric_search_url: "https://lyrics.kugou.com/search".to_string(),
+            lyric_download_url: "https://lyrics.kugou.com/download".to_string(),
         }
     }
 }
