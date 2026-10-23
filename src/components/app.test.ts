@@ -260,10 +260,11 @@ describe('App — 启动检查与原生更新菜单', () => {
     current_version: '0.1.3', latest_version: '0.2.0', update_available: true,
     release_url: 'https://github.com/zsxink/MusicTag/releases/tag/v0.2.0',
   }
-  const menuHandler = () => mockListen.mock.calls.find(([event]) => event === 'update-menu-action')![1] as (event: { payload: string }) => void
+  const menuHandler = () => mockListen.mock.calls.find(([event]) => event === 'app-menu-action')![1] as (event: { payload: string }) => void
   beforeEach(() => {
     window.localStorage.setItem(EULA_STORAGE_KEY, '1')
     mockInvoke.mockReset().mockImplementation(async (command: string) => {
+      if (command === 'get_last_update_check_at') return null
       if (command === 'check_for_update') return release
       if (command === 'list_songs') return [...songStore.songs]
       if (command === 'get_last_dir') return null
@@ -281,6 +282,40 @@ describe('App — 启动检查与原生更新菜单', () => {
     songStore.pendingAction = null
   })
 
+  it('距上次成功检查未满七天时启动不发起网络请求', async () => {
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'get_last_update_check_at') return new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      if (command === 'list_songs') return [...songStore.songs]
+      return undefined
+    })
+    const w = mount(App)
+    await flushPromises()
+    expect(mockInvoke).toHaveBeenCalledWith('get_last_update_check_at', expect.objectContaining({ now: expect.any(String) }))
+    expect(mockInvoke).not.toHaveBeenCalledWith('check_for_update', expect.anything())
+    expect(w.find('.workspace').exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('启动距上次成功检查未满七天时仍允许原生菜单手动检查', async () => {
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'get_last_update_check_at') return new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      if (command === 'check_for_update') return release
+      if (command === 'list_songs') return [...songStore.songs]
+      return undefined
+    })
+    const w = mount(App)
+    await flushPromises()
+    expect(mockInvoke.mock.calls.filter(([command]) => command === 'check_for_update')).toHaveLength(0)
+
+    menuHandler()({ payload: 'check-for-update' })
+    expect(updatesStore.status).toBe('checking')
+    await flushPromises()
+    expect(mockInvoke.mock.calls.filter(([command]) => command === 'check_for_update')).toHaveLength(1)
+    expect(updatesStore.recentCheckOrigin).toBe('manual')
+    expect(updatesStore.status).toBe('update-available')
+    w.unmount()
+  })
+
   it('启动发起一次异步检查；等待或显示更新期间仍可编辑、不自动打开浏览器', async () => {
     let resolve!: (result: UpdateCheckResult) => void
     mockInvoke.mockImplementation((command: string) => {
@@ -289,6 +324,7 @@ describe('App — 启动检查与原生更新菜单', () => {
       return Promise.resolve(undefined)
     })
     const w = mount(App, { attachTo: document.body })
+    await flushPromises()
     expect(mockInvoke.mock.calls.filter(([command]) => command === 'check_for_update')).toHaveLength(1)
     expect(w.find('.workspace').exists()).toBe(true)
     await nextTick()
@@ -309,7 +345,7 @@ describe('App — 启动检查与原生更新菜单', () => {
 
   it('原生菜单触发手动检查和关于界面；卸载释放订阅且不再处理动作', async () => {
     const stop = vi.fn()
-    mockListen.mockImplementation(async (event: string) => event === 'update-menu-action' ? stop : vi.fn())
+    mockListen.mockImplementation(async (event: string) => event === 'app-menu-action' ? stop : vi.fn())
     const w = mount(App)
     await flushPromises()
     expect(w.find('[data-testid="about-dialog"]').exists()).toBe(false)
@@ -339,7 +375,7 @@ describe('App — 启动检查与原生更新菜单', () => {
 
   it('订阅晚于卸载完成仍立即释放监听', async () => {
     let resolve!: (stop: () => void) => void
-    mockListen.mockImplementation((event: string) => event === 'update-menu-action'
+    mockListen.mockImplementation((event: string) => event === 'app-menu-action'
       ? new Promise((done) => { resolve = done }) : Promise.resolve(vi.fn()))
     const w = mount(App)
     w.unmount()
@@ -347,6 +383,38 @@ describe('App — 启动检查与原生更新菜单', () => {
     resolve(stop)
     await flushPromises()
     expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('原生保存动作对无歌曲、只读和保存中状态均拒绝执行，并同步菜单启用状态', async () => {
+    const w = mount(App)
+    await flushPromises()
+    const snapshots = () => mockInvoke.mock.calls
+      .filter(([command]) => command === 'sync_menu_state')
+      .map(([, args]) => (args as { snapshot: { items: { id: string; enabled: boolean }[] } }).snapshot.items)
+    const saveEnabled = () => snapshots().at(-1)?.find(({ id }) => id === 'save')?.enabled
+    const handler = menuHandler()
+
+    songStore.current = null
+    await nextTick()
+    expect(saveEnabled()).toBe(false)
+    handler({ payload: 'save' })
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_song', expect.anything())
+
+    songStore.current = makeSong()
+    songStore.readonly = true
+    await nextTick()
+    expect(saveEnabled()).toBe(false)
+    handler({ payload: 'save' })
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_song', expect.anything())
+
+    songStore.readonly = false
+    songStore.pendingRename = 'renamed.flac'
+    songStore.saveState = 'saving'
+    await nextTick()
+    expect(saveEnabled()).toBe(false)
+    handler({ payload: 'save' })
+    expect(mockInvoke).not.toHaveBeenCalledWith('save_song', expect.anything())
+    w.unmount()
   })
 
   it('同版稍后后原生菜单手动检查仍显示结果，抑制重复更新操作', async () => {
@@ -359,7 +427,7 @@ describe('App — 启动检查与原生更新菜单', () => {
     await flushPromises()
     const resultNotice = w.get('[data-testid="update-toast"]')
     expect(resultNotice.text()).toContain('发现新版本 0.2.0')
-    expect(resultNotice.findAll('button').map((button) => button.text())).toEqual(['查看详情', '关闭'])
+    expect(resultNotice.findAll('button').map((button) => button.text())).toEqual(['查看详情', '稍后'])
     expect(updatesStore.recentCheckOrigin).toBe('manual')
     await resultNotice.findAll('button')[0].trigger('click')
     await flushPromises()

@@ -968,7 +968,7 @@ export async function save(
   saveFn: (song: Song, exportLrc: boolean) => Promise<void> = defaultSave,
   renameFn: (path: string, newName: string) => Promise<void> = defaultRename,
 ): Promise<void> {
-  if (raw.readonly || raw.current === null) return
+  if (raw.readonly || raw.current === null || raw.saveState === 'saving') return
   raw.saveState = 'saving'
 
   // 改名联动（独立动作，D5）：pendingRename 非空才进改名分支
@@ -996,9 +996,10 @@ export async function save(
     }
   }
 
+  const snapshot = { ...raw.current } // 固定写盘输入，保存期间的新编辑不进入已保存基准
   try {
-    await saveFn(raw.current, exportLrc) // current.path = 新路径（改名成功）或原路径（被拒）
-    raw.original = { ...raw.current } // 新基准：当前已写盘，dirty 归 false
+    await saveFn(snapshot, exportLrc) // path = 新路径（改名成功）或原路径（被拒）
+    raw.original = snapshot // 仅以已写盘内容为基准，后续编辑仍保持 dirty
     raw.saveState = 'saved'
   } catch (e) {
     raw.saveError = String(e) // current 保留、original 不更新 → dirty 保持 true

@@ -12,11 +12,11 @@
 
 mod common;
 
+use app_lib::model::MusicSourceId;
 use app_lib::service::searcher::qqmusic::{
-    QqMusic, is_error_response, parse_lyric_response, parse_search_response,
+    is_error_response, parse_lyric_response, parse_search_response, QqMusic,
 };
 use app_lib::service::searcher::MusicSource;
-use app_lib::model::MusicSourceId;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use common::{mock_http_capture, mock_http_once};
 
@@ -166,13 +166,18 @@ async fn search_uses_joined_keyword_in_w_param() {
         lyric_url_base: String::new(),
     };
     let client = reqwest::Client::new();
-    qq.search(&client, "晴天", "周杰伦", "叶惠美").await.unwrap();
+    qq.search(&client, "晴天", "周杰伦", "叶惠美")
+        .await
+        .unwrap();
     let target = captured.lock().unwrap().clone();
     let full = format!("{}{}", &qq.search_url, target);
     let parsed = reqwest::Url::parse(&full).expect("捕获请求目标应为合法 URL");
     let params: std::collections::HashMap<String, String> =
         parsed.query_pairs().into_owned().collect();
-    assert_eq!(params.get("w").map(String::as_str), Some("晴天 周杰伦 叶惠美"));
+    assert_eq!(
+        params.get("w").map(String::as_str),
+        Some("晴天 周杰伦 叶惠美")
+    );
 
     // album 为空 → w 回退 title + artist
     let (url2, captured2) = mock_http_capture(

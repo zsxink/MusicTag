@@ -395,6 +395,25 @@ describe('songStore — v1-song-save 保存状态机与撤销（design.md D7/D8�
     songStore.saveError = ''
   })
 
+  it('保存进行中再次调用不会发起第二次写盘', async () => {
+    let release!: () => void
+    const saveFn = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    songStore.current!.title = '第一次编辑'
+
+    const first = save(false, saveFn)
+    await Promise.resolve()
+    songStore.current!.title = '第二次编辑'
+    const second = save(false, saveFn)
+
+    await Promise.resolve()
+    expect(saveFn).toHaveBeenCalledOnce()
+    release()
+    await first
+    await second
+    expect(songStore.original?.title).toBe('第一次编辑')
+    expect(songStore.dirty).toBe(true)
+  })
+
   it('save 默认走 invoke("save_song")：成功 → original 更新、dirty=false、saveState=saved', async () => {
     songStore.current!.title = '改过' // 制造 dirty
     expect(songStore.dirty).toBe(true)

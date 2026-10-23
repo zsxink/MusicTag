@@ -164,16 +164,18 @@ MusicTag 是一个跨平台桌面工具，给本地 FLAC / MP3 / APE / WAV / M4A
 
 ---
 
-### FR-9 应用更新检查（Issue #158）
+### FR-9 应用菜单与更新检查（Issue #158、#170）
 
 | # | 需求 |
 |---|---|
-| 1 | 启动后异步检查 `zsxink/MusicTag` 的 GitHub Releases，不阻塞歌曲列表或编辑操作；系统原生应用菜单栏的“帮助”菜单提供“检查更新…”与“关于”入口 |
+| 1 | 启动后仅在首次或距上次成功检查至少 7×24 小时时异步检查 `zsxink/MusicTag` 的 GitHub Releases；成功检查时间持久化到本地 config.json，网络失败不更新时间；系统原生应用菜单栏提供 File/Edit/View/Help 菜单，其中帮助菜单提供不受间隔限制的“检查更新…”与“关于”入口，菜单动作按 EULA、当前歌曲和 dirty 状态启用或禁用 |
 | 2 | 排除草稿、预发布及非稳定语义版本 tag；分页查询后按语义版本选择最高正式版，与当前应用版本比较，不依赖 API 返回顺序或发布时间 |
 | 3 | 检查中、发现更新、已是最新版本、检查失败均提供明确中文反馈；失败不影响编辑，也不改变歌词/封面搜索的会话离线状态 |
 | 4 | 新版提示在应用内非模态展示版本号、“查看详情”和“稍后”，不抢焦点；只有用户选择“查看详情”才打开对应 Release 页面，地址限于固定仓库的 HTTPS Release URL |
 | 5 | “稍后”持久记忆该版本，后续启动或手动检查不重复提示同一版；更高版本仍可提示。手动检查结果和关于状态继续显示 |
 | 6 | 关于界面显示当前应用版本及最近检查结果；不得自动打开浏览器、下载或安装更新 |
+| 7 | 新版本提示 15 秒自动关闭，已是最新版本提示 5 秒自动关闭，错误提示仅手动关闭；关闭不清除可用更新结果，顶栏品牌与路径之间的无障碍小红点可重新打开包含“查看详情”和“稍后”的提示 |
+| 8 | 三端提供文件（打开文件夹、保存、重扫、关闭/退出）、编辑（撤销、重做、剪切、复制、粘贴、全选）、视图（主题、重新加载、仅开发构建显示开发者工具）和帮助菜单；macOS 保留 About/Services/Hide/Quit 系统应用菜单，EULA 未同意时关于不可触发 |
 
 ## 4. 非功能需求
 
@@ -367,7 +369,7 @@ enum SearchError {
 >   - 封面导出（只读）：`pick_cover_save_path(song_path) -> Result<Option<String>, String>`（rfd 存盘框取导出目标路径，默认文件名 = 音频文件名去扩展名 + 按图片 mime 推断的扩展名；取消 → `Ok(None)`，不写任何文件）、`export_cover(song_path, dest_path) -> Result<(), String>`（把标签内第一个 front cover 的原始字节写到目标路径，无 UI）；前端跨 IPC 只传源路径与目标路径，不传图片字节
 >   - 搜索：`search_song(title, artist, album) -> SearchResult`、`search_source(source, title, artist, album) -> Vec<SongCandidate>`（单源原始候选，C2 换源用，绕过跨源聚合——逐源拿该源全部原始候选，不受每源 TOP 3 截断）、`fetch_lyric(source, id) -> Option<String>`、`download_cover(url) -> Result<Vec<u8>, String>`（封面并入 `save_song`，无独立 `embed_cover`）
 >   - 查漏：`scan_missing(dir, checks) -> MissingScanResult`（按需只读扫描歌名/歌手/专辑/封面/歌词缺失；仅返回路径和缺失维度，不批量编辑、不写盘）
->   - 更新：`check_for_update() -> Result<UpdateCheckResult, String>`（当前/最新稳定版本、更新标记及 Release 页面地址）、`open_release_page(url) -> Result<(), String>`（用户主动操作，固定仓库 HTTPS Release URL 校验后打开）
+>   - 更新：`check_for_update() -> Result<UpdateCheckResult, String>`（当前/最新稳定版本、更新标记及 Release 页面地址）、`open_release_page(url) -> Result<(), String>`（用户主动操作，固定仓库 HTTPS Release URL 校验后打开）、`get_last_update_check_at(now) -> Option<String>`、`save_last_update_check_at(value) -> Result<(), String>`、`sync_menu_state(snapshot) -> Result<(), String>`
 >   - 前端只管展示，文件 I/O 与网络请求全走 Rust command。
 > - **「无第三方依赖」说明**：指**无 JS 引擎**（不用 PyExecJS 类跑加密）；Rust 侧加密算法自实现，仅引入 `aes`/`cbc`/`rsa`/`rand` 等 crate。
 

@@ -84,7 +84,10 @@ fn overwrite_updates_last_dir() {
     save_last_dir(&cfg, dir1.to_str().unwrap()).unwrap();
     save_last_dir(&cfg, dir2.to_str().unwrap()).unwrap();
 
-    assert_eq!(load_last_dir(&cfg), Some(dir2.to_string_lossy().into_owned()));
+    assert_eq!(
+        load_last_dir(&cfg),
+        Some(dir2.to_string_lossy().into_owned())
+    );
 }
 
 #[test]

@@ -39,7 +39,7 @@ const libCommands = uniqSort([...lib.matchAll(/commands::([a-z_]+)::([a-z_]+)/g)
 // 19 个 command 中无参者包括 pick_folder / pick_cover_file / get_last_dir / check_for_update。
 // 从定义文件提取（lib.rs 只注册不定义 download_cover 等，签名不在 lib.rs）。
 const sigSource = ['folder.rs', 'song.rs', 'cover.rs', 'search.rs']
-  .concat(['missing.rs', 'update.rs'])
+  .concat(['missing.rs', 'update.rs', 'menu.rs'])
   .map((f) => read(`../../src-tauri/src/commands/${f}`))
   .join('\n')
 const libSignature = (name: string): string => {
@@ -92,18 +92,18 @@ function diffMessage(name: string, cmds: string[]): string {
 }
 
 describe('Tauri command 契约一致性守卫（真值 = lib.rs generate_handler! 注册集）', () => {
-  it('lib.rs 实际注册恰为 19 个 command（防正则退化/漏匹配）', () => {
-    expect(libCommands, `lib.rs 提取到 ${libCommands.length} 个: [${libCommands.join(', ')}]`).toHaveLength(19)
-    expect(new Set(libCommands).size).toBe(19)
+  it('lib.rs 实际注册恰为 22 个 command（防正则退化/漏匹配）', () => {
+    expect(libCommands, `lib.rs 提取到 ${libCommands.length} 个: [${libCommands.join(', ')}]`).toHaveLength(22)
+    expect(new Set(libCommands).size).toBe(22)
   })
 
   it.each(sources)('%s 与 lib.rs 注册集一致', (_name, cmds) => {
     expect(cmds, diffMessage(_name, cmds)).toEqual(libCommands)
   })
 
-  it.each(sources)('%s 契约清单去重后恰为 19 个（防正则漏匹配）', (_name, cmds) => {
-    expect(cmds, `${_name} 提取到 ${cmds.length} 个: [${cmds.join(', ')}]`).toHaveLength(19)
-    expect(new Set(cmds).size).toBe(19)
+  it.each(sources)('%s 契约清单去重后恰为 22 个（防正则漏匹配）', (_name, cmds) => {
+    expect(cmds, `${_name} 提取到 ${cmds.length} 个: [${cmds.join(', ')}]`).toHaveLength(22)
+    expect(new Set(cmds).size).toBe(22)
   })
 
   // 签名层 spot-check：lib.rs 无参 command 在三源契约表中必须写成 `name()`（无参）。
@@ -126,12 +126,14 @@ describe('Tauri command 契约一致性守卫（真值 = lib.rs generate_handler
     const api = read('../../src/api/updates.ts')
     const vueActions = api.match(/export type UpdateMenuAction = ([^\n]+)/)?.[1]
 
-    expect(lib).toContain('MenuItem::with_id(app, "check-for-update"')
-    expect(lib).toContain('MenuItem::with_id(app, "show-about"')
-    expect(rustMenu).toContain('"check-for-update" => "check-for-update"')
-    expect(rustMenu).toContain('"show-about" => "show-about"')
-    expect(rustMenu).toContain('app.emit("update-menu-action", action)')
-    expect(vueActions).toBe("'check-for-update' | 'show-about'")
-    expect(api).toContain("listenEvent<UpdateMenuAction>('update-menu-action'")
+    expect(lib).toContain('"check-for-update", "检查更新…"')
+    expect(lib).toContain('"show-about", "关于"')
+    expect(lib).toContain('"check-for-update" => Some("check-for-update")')
+    expect(lib).toContain('"show-about" => Some("show-about")')
+    expect(rustMenu).toContain('action_for_menu_id(event.id().as_ref())')
+    expect(lib).toContain('app.emit("app-menu-action", action)')
+    expect(vueActions).toContain("'check-for-update'")
+    expect(vueActions).toContain("'show-about'")
+    expect(api).toContain("listenEvent<UpdateMenuAction>('app-menu-action'")
   })
 })

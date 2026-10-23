@@ -11,12 +11,12 @@ mod common;
 
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecrypt, KeyInit};
-use app_lib::service::searcher::netease::{
-    CLOUDSEARCH_URL, Netease, is_error_response, lyric_payload, parse_lyric_response,
-    parse_search_response, search_payload,
-};
-use app_lib::service::searcher::{MusicSource, crypto};
 use app_lib::model::MusicSourceId;
+use app_lib::service::searcher::netease::{
+    is_error_response, lyric_payload, parse_lyric_response, parse_search_response, search_payload,
+    Netease, CLOUDSEARCH_URL,
+};
+use app_lib::service::searcher::{crypto, MusicSource};
 use common::mock_http_once;
 use std::sync::{Arc, Mutex};
 
@@ -53,7 +53,10 @@ fn mock_http_capture_full(response: Vec<u8>) -> (String, Arc<Mutex<String>>) {
                     let head = String::from_utf8_lossy(&request[..he]);
                     head.lines()
                         .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
-                        .and_then(|l| l.split_once(':').map(|(_, v)| v.trim().parse::<usize>().ok()))
+                        .and_then(|l| {
+                            l.split_once(':')
+                                .map(|(_, v)| v.trim().parse::<usize>().ok())
+                        })
                         .flatten()
                         .map(|cl| he + cl)
                 });
@@ -298,7 +301,10 @@ async fn http_error_status_returns_err() {
     let url = mock_http_once(response);
     let netease = Netease { forward_url: url };
     let client = reqwest::Client::new();
-    let err = netease.search(&client, "晴天", "周杰伦", "").await.unwrap_err();
+    let err = netease
+        .search(&client, "晴天", "周杰伦", "")
+        .await
+        .unwrap_err();
     assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
 }
 
@@ -317,7 +323,10 @@ async fn http_200_business_rejection_returns_err() {
     let url = mock_http_once(response);
     let netease = Netease { forward_url: url };
     let client = reqwest::Client::new();
-    let err = netease.search(&client, "晴天", "周杰伦", "").await.unwrap_err();
+    let err = netease
+        .search(&client, "晴天", "周杰伦", "")
+        .await
+        .unwrap_err();
     assert!(
         err.contains("50000005"),
         "业务拒绝（code≠200）应报 code 而非当成功空，实际: {err}"
@@ -359,8 +368,7 @@ async fn search_encrypts_joined_keyword_into_eparams() {
     let json: serde_json::Value =
         serde_json::from_str(&decrypted).expect("eparams 解密后应为 JSON payload");
     assert_eq!(
-        json["params"]["s"],
-        "晴天 周杰伦 叶惠美",
+        json["params"]["s"], "晴天 周杰伦 叶惠美",
         "三字段查询关键词应加密进 eparams（params.s）"
     );
     assert_eq!(json["url"], CLOUDSEARCH_URL);

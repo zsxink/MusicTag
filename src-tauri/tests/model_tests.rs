@@ -7,7 +7,9 @@
 
 mod common;
 
-use app_lib::model::{CoverInput, LyricsSource, MusicSourceId, SearchResult, Song, SongCandidate, SongSummary};
+use app_lib::model::{
+    CoverInput, LyricsSource, MusicSourceId, SearchResult, Song, SongCandidate, SongSummary,
+};
 
 #[test]
 fn summary_serializes_to_contract_shape() {

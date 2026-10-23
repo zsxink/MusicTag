@@ -1,21 +1,4 @@
 // MusicTag — Tauri 2 应用壳入口。
-//
-// 壳内注册业务 command：
-// - `pick_folder` / `list_songs`（v1-folder-list）
-// - `watch_folder`（issue-123-auto-refresh，当前目录及后代变动通知）
-// - `open_song` / `save_song`（v1-song-read / v1-song-save）
-// - `pick_cover_file` / `read_cover_path`（v1-cover-embed）
-// - `pick_cover_save_path` / `export_cover`（export-embedded-cover，内嵌封面原图只读导出）
-// - `rename_song`（v1-rename-sync，音频 + `.lrc` 改名）
-// - `search_song` / `fetch_lyric` / `download_cover`（v1-search-backend，五源并发搜索）
-// - `search_source`（v1-search-fixes，单源搜索：C2 换源绕过聚合去重）
-// - `get_last_dir` / `save_last_dir`（dir-memory，config.json 记住上次打开目录）
-// - `scan_missing`（missing-fields-filter，按需只读扫描缺失维度）
-// - `check_for_update` / `open_release_page`（issue-158，正式版检查与详情链接）
-// 后续子变更在此逐个追加 `tauri::generate_handler![...]`。
-//
-// 模块声明必须 `pub`：`src-tauri/tests/` 集成测试经 `app_lib::` 访问
-// commands/service（design.md §10 分层规范）。
 
 pub mod commands;
 pub mod model;
@@ -34,6 +17,7 @@ pub fn run() {
                 .build(),
         )
         .manage(service::folder_watch::FolderWatch::default())
+        .manage(MenuState::default())
         .invoke_handler(tauri::generate_handler![
             commands::folder::pick_folder,
             commands::folder::list_songs,
@@ -54,34 +38,44 @@ pub fn run() {
             commands::search::download_cover,
             commands::update::check_for_update,
             commands::update::open_release_page,
+            commands::update::get_last_update_check_at,
+            commands::update::save_last_update_check_at,
+            commands::menu::sync_menu_state,
         ]);
 
     #[cfg(desktop)]
-    let builder = builder
-        .menu(|app| {
-            use tauri::menu::{Menu, MenuItem, Submenu, HELP_SUBMENU_ID};
-
-            // 保留系统编辑/窗口菜单（macOS 还需要首个应用菜单），替换帮助入口。
-            let menu = Menu::default(app)?;
-            if let Some(help) = menu.get(HELP_SUBMENU_ID) {
-                menu.remove(&help)?;
+    let builder = builder.menu(build_menu).on_menu_event(|app, event| {
+        let Some(action) = action_for_menu_id(event.id().as_ref()) else {
+            return;
+        };
+        if !app.state::<MenuState>().is_enabled(action) {
+            return;
+        }
+        match action {
+            "close-window" => {
+                if let Some(window) = app.webview_windows().values().next() {
+                    let _ = window.close();
+                }
             }
-            let check =
-                MenuItem::with_id(app, "check-for-update", "检查更新…", true, None::<&str>)?;
-            let about = MenuItem::with_id(app, "show-about", "关于", true, None::<&str>)?;
-            let help =
-                Submenu::with_id_and_items(app, HELP_SUBMENU_ID, "帮助", true, &[&check, &about])?;
-            menu.append(&help)?;
-            Ok(menu)
-        })
-        .on_menu_event(|app, event| {
-            let action = match event.id().as_ref() {
-                "check-for-update" => "check-for-update",
-                "show-about" => "show-about",
-                _ => return,
-            };
-            let _ = app.emit("update-menu-action", action);
-        });
+            "quit" => app.exit(0),
+            "show-about" => {
+                let _ = app.emit("app-menu-action", action);
+            }
+            #[cfg(debug_assertions)]
+            "toggle-devtools" => {
+                if let Some(window) = app.webview_windows().values().next() {
+                    if window.is_devtools_open() {
+                        let _ = window.close_devtools();
+                    } else {
+                        let _ = window.open_devtools();
+                    }
+                }
+            }
+            _ => {
+                let _ = app.emit("app-menu-action", action);
+            }
+        }
+    });
 
     builder
         .build(tauri::generate_context!())
@@ -91,4 +85,180 @@ pub fn run() {
                 app.state::<service::folder_watch::FolderWatch>().shutdown();
             }
         });
+}
+
+pub struct MenuState(std::sync::Mutex<std::collections::HashMap<String, bool>>);
+
+impl Default for MenuState {
+    fn default() -> Self {
+        let mut enabled = std::collections::HashMap::new();
+        for id in [
+            "open-folder",
+            "close-window",
+            "quit",
+            "undo",
+            "redo",
+            "cut",
+            "copy",
+            "paste",
+            "select-all",
+            "toggle-theme",
+            "reload",
+            "toggle-devtools",
+            "check-for-update",
+        ] {
+            enabled.insert(id.to_string(), true);
+        }
+        enabled.insert("save".to_string(), false);
+        enabled.insert("rescan-folder".to_string(), false);
+        enabled.insert("show-about".to_string(), false);
+        Self(std::sync::Mutex::new(enabled))
+    }
+}
+
+impl MenuState {
+    pub fn is_enabled(&self, id: &str) -> bool {
+        self.0
+            .lock()
+            .ok()
+            .and_then(|state| state.get(id).copied())
+            .unwrap_or(false)
+    }
+
+    pub fn snapshot(&self) -> std::collections::HashMap<String, bool> {
+        self.0.lock().map(|state| state.clone()).unwrap_or_default()
+    }
+}
+
+#[cfg(desktop)]
+pub(crate) fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    build_menu_with_states(app, &std::collections::HashMap::new())
+}
+
+#[cfg(desktop)]
+pub(crate) fn build_menu_with_states(
+    app: &tauri::AppHandle,
+    states: &std::collections::HashMap<String, (bool, bool)>,
+) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
+    let menu = Menu::new(app)?;
+    let item = |id, label, default| {
+        let (enabled, visible) = states.get(id).copied().unwrap_or((default, true));
+        menu_item(app, id, label, menu_item_enabled(enabled, visible))
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let app_menu = Submenu::with_id_and_items(
+            app,
+            "application",
+            "MusicTag",
+            true,
+            &[
+                &menu_item(
+                    app,
+                    "macos-about",
+                    "关于",
+                    states
+                        .get("show-about")
+                        .map_or(false, |(enabled, visible)| {
+                            menu_item_enabled(*enabled, *visible)
+                        }),
+                )?,
+                &PredefinedMenuItem::services(app, Some("Services"))?,
+                &PredefinedMenuItem::hide(app, Some("Hide"))?,
+                &PredefinedMenuItem::quit(app, Some("Quit"))?,
+            ],
+        )?;
+        menu.append(&app_menu)?;
+    }
+    let file = Submenu::with_id_and_items(
+        app,
+        "file",
+        "文件",
+        true,
+        &[
+            &item("open-folder", "打开文件夹…", true)?,
+            &item("save", "保存", false)?,
+            &item("rescan-folder", "重新扫描当前文件夹", false)?,
+            &item("close-window", "关闭窗口", true)?,
+            &item("quit", "退出", true)?,
+        ],
+    )?;
+    let edit = Submenu::with_id_and_items(
+        app,
+        "edit",
+        "编辑",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, Some("撤销"))?,
+            &PredefinedMenuItem::redo(app, Some("重做"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, Some("剪切"))?,
+            &PredefinedMenuItem::copy(app, Some("复制"))?,
+            &PredefinedMenuItem::paste(app, Some("粘贴"))?,
+            &PredefinedMenuItem::select_all(app, Some("全选"))?,
+        ],
+    )?;
+    let view = Submenu::with_id_and_items(
+        app,
+        "view",
+        "视图",
+        true,
+        &[
+            &item("toggle-theme", "切换主题", true)?,
+            &item("reload", "重新加载", true)?,
+            #[cfg(debug_assertions)]
+            &item("toggle-devtools", "开发者工具", true)?,
+        ],
+    )?;
+    let help = Submenu::with_id_and_items(
+        app,
+        "help",
+        "帮助",
+        true,
+        &[
+            &item("check-for-update", "检查更新…", true)?,
+            &item("show-about", "关于", false)?,
+        ],
+    )?;
+    menu.append(&file)?;
+    menu.append(&edit)?;
+    menu.append(&view)?;
+    menu.append(&help)?;
+    Ok(menu)
+}
+
+#[cfg(desktop)]
+fn menu_item(
+    app: &tauri::AppHandle,
+    id: &'static str,
+    label: &'static str,
+    enabled: bool,
+) -> tauri::Result<tauri::menu::MenuItem<tauri::Wry>> {
+    tauri::menu::MenuItem::with_id(app, id, label, enabled, None::<&str>)
+}
+
+pub fn action_for_menu_id(id: &str) -> Option<&'static str> {
+    match id {
+        "open-folder" => Some("open-folder"),
+        "save" => Some("save"),
+        "rescan-folder" => Some("rescan-folder"),
+        "close-window" => Some("close-window"),
+        "quit" => Some("quit"),
+        "toggle-theme" => Some("toggle-theme"),
+        "reload" => Some("reload"),
+        "toggle-devtools" => Some("toggle-devtools"),
+        "check-for-update" => Some("check-for-update"),
+        "show-about" => Some("show-about"),
+        "macos-about" => Some("show-about"),
+        _ => None,
+    }
+}
+
+pub fn help_menu_action_ids() -> [&'static str; 2] {
+    ["check-for-update", "show-about"]
+}
+
+pub fn menu_item_enabled(enabled: bool, visible: bool) -> bool {
+    enabled && visible
 }

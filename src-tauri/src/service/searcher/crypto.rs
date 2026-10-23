@@ -125,4 +125,3 @@ pub fn hex_encode_upper(bytes: &[u8]) -> String {
     }
     s
 }
-

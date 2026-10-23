@@ -390,6 +390,12 @@ interface UpdateCheckResult {
 | `check_for_update()` | `() → Result<UpdateCheckResult, String>` | 异步分页查询 GitHub Releases、选择最高稳定语义版本并比较；失败返回中文错误 |
 | `open_release_page(url)` | `String → Result<(), String>` | 校验固定仓库 Release HTTPS URL 后用系统浏览器打开，仅响应用户查看详情操作 |
 
+| `get_last_update_check_at(now)` | `String → Option<String>` | 读取最近成功检查时间（UTC RFC3339）；无效、缺失或未来时间返回 `None` |
+| `save_last_update_check_at(value)` | `String → Result<(), String>` | 校验 UTC RFC3339 并原子写入 config.json 的 `last_update_check_at`，保留 `last_dir` |
+| `sync_menu_state(snapshot)` | `MenuStateSnapshot → Result<(), String>` | 同步原生菜单 enabled/visible 快照；未知 action ID 返回错误 |
+
+`MenuStateSnapshot` 的 IPC 形状为 `{ items: [{ id: string, enabled: boolean, visible: boolean }] }`。WebView action 稳定 ID 为 `open-folder`、`save`、`rescan-folder`、`close-window`、`quit`、`undo`、`redo`、`cut`、`copy`、`paste`、`select-all`、`toggle-theme`、`reload`、`toggle-devtools`、`check-for-update`、`show-about`；只有这些 ID 可由同步快照接收，重复 ID 也返回错误且不改变已有状态。前端可消费动作由 `app-menu-action` 事件以字符串 action ID 为 payload，WebView 必须在分发时重新检查 EULA/歌曲/dirty 等当前状态。菜单初始启用状态在首次同步前即有效：`open-folder`、`close-window`、`quit`、全部编辑项、主题切换、reload、开发者工具（仅 debug 构建存在）和检查更新启用；`save`、`rescan-folder`、`show-about` 禁用。快照省略项沿用上一次有效状态；可见性为 false 的同步项同样视作不可触发。`undo`、`redo`、`cut`、`copy`、`paste`、`select-all` 使用 Tauri `PredefinedMenuItem`，不经 WebView action 事件分发。macOS 的 About 使用稳定 `show-about` 自定义菜单项并经 EULA guard 发射 `app-menu-action`；Help 菜单三端均提供检查更新和 About，macOS 另在系统应用菜单保留 About/Services/Hide/Quit；About 不使用会绕过 guard 的系统 About role。Windows/Linux 的 `close-window` 关闭当前窗口，`quit` 调用 AppHandle exit。
+
 文件系统失效事件 `folder-changed` 的 payload 为 `{ dir: string, watchId: number, error: string | null }`，只通知前端重读列表；目录读取仍通过 `list_songs`。前端监听通过统一 `api/client.ts` 的 Tauri event `listen`/`unlisten` 封装。`src-tauri/capabilities/default.json` 仅对 `main` 窗口授予 `core:event:allow-listen`、`core:event:allow-unlisten` 与 `core:app:allow-version`，满足事件订阅、清理及通过 Tauri `getVersion()` 读取当前应用版本所需 ACL。
 
 **封面传递**：`Song.cover` 用 **base64 data URL**（`data:image/jpeg;base64,...`），`<img :src="song.cover">` 直接用；一次只编辑一首、图不大，不必配置 asset 协议。写盘时 `save_song` 收到 base64，Rust 侧解码回 `Vec<u8>` 再写原文件（磁盘落盘形式仍是原始字节，见 PRD §5.3）。
@@ -400,9 +406,9 @@ interface UpdateCheckResult {
 
 `commands/update.rs` 为薄壳；检查委托 service，详情打开以回调注入系统 opener，业务地址校验在 service。地址必须为 `https://github.com/zsxink/MusicTag/releases/tag/<tag>`，禁止凭据、其他 host/path、非 HTTPS、query/fragment 或非法 tag。注册 `tauri-plugin-opener` 时关闭其 JS 链接自动打开；调用 Rust API 无需 WebView 插件权限，capability 只授予事件订阅/清理及应用版本读取权限，不授予 opener IPC 权限，前端仅经受校验的自定义 command 打开。
 
-前端 `api/updates.ts → api/client.ts` 封装检查/详情 IPC；`store/updates.ts` 持有 `idle/checking/up-to-date/update-available/error` 和最近结果，并用请求序号忽略过期结果，独立于歌词/封面搜索离线状态。`App.vue` 挂载后触发一次异步检查，工作区立即渲染；原生“检查更新…”菜单事件触发检查并展示状态，`AboutDialog.vue` 显示当前版本及最近结果。
+前端 `api/updates.ts → api/client.ts` 封装检查/详情 IPC、最近成功检查时间和菜单状态同步；`store/updates.ts` 持有 `idle/checking/up-to-date/update-available/error` 和最近结果，并用请求序号忽略过期结果，独立于歌词/封面搜索离线状态。启动时仅在无成功时间或距成功时间至少 7×24 小时时异步检查；手动菜单检查始终执行，成功结果写入时间，失败不写。`App.vue` 集中监听 `app-menu-action` 并分发动作，同时按当前 EULA、歌曲和 dirty 状态复核；`AboutDialog.vue` 显示当前版本及最近结果。
 
-Tauri 原生应用菜单通过 `Menu`/`Submenu` 提供“帮助”→“检查更新…”和“关于”菜单项。`on_menu_event` 将稳定动作 ID 通过 `update-menu-action` 事件发给 `App.vue`；前端 API 统一监听并释放订阅，检查动作进入 updates store，关于动作打开 `AboutDialog.vue`。`AppBar.vue` 保持既有职责，不重复提供窗口内帮助菜单。
+Tauri 原生应用菜单通过 `Menu`/`Submenu` 提供 File/Edit/View/Help 菜单。WebView 可消费的稳定动作 ID 通过 `app-menu-action` 事件发给 `App.vue`；原生编辑 role、窗口关闭/退出及开发者工具由 Rust 直接处理。前端 API 统一监听并释放订阅，菜单 enabled/visible 快照经 `sync_menu_state` 同步，`AppBar.vue` 在品牌与路径之间提供可恢复更新提示的无障碍标记。
 
 新版提示非模态、不抢焦点，只在点“查看详情”后打开对应页面；“稍后”将版本记入 localStorage，仅抑制该版本提示，更高版本仍显示，手动检查结果及关于状态始终可见。没有下载、安装或文件写入路径。
 
