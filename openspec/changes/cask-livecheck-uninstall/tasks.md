@@ -19,7 +19,7 @@
 ## 4. 审查与最终验证
 
 - [x] 4.1 CR（只读）：对照 delta spec 的 6 个场景逐条审 diff；重点核对——只改两个授权文件、模板之外的脚本逻辑与发布护栏零改动、zap 数组恰为三项且无未观测路径、无 `auto_updates`、`#{version}`/`#{arch}` 未被转义、测试负向断言不再含 zap/uninstall 且新增断言齐全。Owner: CR；no writes。Depends on 3.2。
-- [ ] 4.2 Verify：按 design「验证」节完整执行并记录每条命令与退出码（bash -n、npm run test 的 homebrew 套件、openspec validate --all --strict；node --check 不适用如实记录）；确认无越权写入（仅 `scripts/homebrew-publish.sh` 与 `tests/homebrew/publish.test.mjs` 两个产品文件变更）。Owner: Verify；no product writes。Depends on 4.1。
+- [x] 4.2 Verify：按 design「验证」节完整执行并记录每条命令与退出码（bash -n、npm run test 的 homebrew 套件、openspec validate --all --strict；node --check 不适用如实记录）；确认无越权写入（仅 `scripts/homebrew-publish.sh` 与 `tests/homebrew/publish.test.mjs` 两个产品文件变更）。Owner: Verify；no product writes。Depends on 4.1。
 
 ## 5. 集成与集成后验收（Leader / 维护者，按惯例不在此勾选）
 
