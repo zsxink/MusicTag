@@ -83,13 +83,13 @@
 
 ## 5. 验证（tester / leader）
 
-- [ ] 5.1 Rust 验证（tester）：`cargo check --all-targets`、`cargo test --all-targets` 全绿；附加 `curl -sI` 实测酷狗三 https 端点连通（失败如实记录——单源降级兜底，不算业务回归）；（可选）grep 复核五源无明文 HTTP 端点（2.2 已自动化覆盖）
+- [x] 5.1 Rust 验证（tester）：`cargo check --all-targets`、`cargo test --all-targets` 全绿；附加 `curl -sI` 实测酷狗三 https 端点连通（失败如实记录——单源降级兜底，不算业务回归）；（可选）grep 复核五源无明文 HTTP 端点（2.2 已自动化覆盖）
   - **依赖**：2.1、2.2
-- [ ] 5.2 前端验证（tester）：`npm run build`、`npm run test` 全绿（含 protocol-content 守卫与 eula-dialog 用例）
+- [x] 5.2 前端验证（tester）：`npm run build`、`npm run test` 全绿（含 protocol-content 守卫与 eula-dialog 用例）
   - **依赖**：1.1、1.2、1.3
-- [ ] 5.3 notices 脚本幂等（tester）：连续两次运行 `node scripts/generate-third-party-notices.mjs` → `git diff --exit-code THIRD-PARTY-NOTICES.md`
+- [x] 5.3 notices 脚本幂等（tester）：连续两次运行 `node scripts/generate-third-party-notices.mjs` → `git diff --exit-code THIRD-PARTY-NOTICES.md`
   - **依赖**：3.2
-- [ ] 5.4 bundle 校验（tester）：`npx tauri build --bundles app`，确认 `THIRD-PARTY-NOTICES.md` 进入 .app Resources（记录实际落点）；时间受限才降级 `npx tauri build --no-bundle`（仅编译 + 配置 schema 校验，resources 复制不覆盖）并把局限记入 progress
+- [x] 5.4 bundle 校验（tester）：`npx tauri build --bundles app`，确认 `THIRD-PARTY-NOTICES.md` 进入 .app Resources（记录实际落点）；时间受限才降级 `npx tauri build --no-bundle`（仅编译 + 配置 schema 校验，resources 复制不覆盖）并把局限记入 progress
   - **依赖**：3.3
-- [ ] 5.5 规格验证（leader/spec-gate）：`npx --yes @fission-ai/openspec@1.5.0 validate issue-166 --strict --no-interactive`
+- [x] 5.5 规格验证（leader/spec-gate）：`npx --yes @fission-ai/openspec@1.5.0 validate issue-166 --strict --no-interactive`
   - **依赖**：以上全部完成后

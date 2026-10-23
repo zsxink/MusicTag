@@ -74,7 +74,7 @@
 第三方依赖与内嵌素材的归属清单由 `scripts/generate-third-party-notices.mjs` 生成于仓库根
 `THIRD-PARTY-NOTICES.md`（覆盖 Cargo 依赖闭包、npm 运行时依赖闭包、npm 构建工具链与内嵌素材），
 经 `src-tauri/tauri.conf.json` 的 `bundle.resources` 随应用安装包分发；清单在 .app 包内的实际落点
-（`../` 相对路径可能带 `_up_/` 前缀）以打包验证（5.4）实测记录为准。
+（5.4 打包实测）为 `MusicTag.app/Contents/Resources/_up_/THIRD-PARTY-NOTICES.md`（`../` 相对路径带 `_up_/` 前缀）。
 
 ## 未决事项（待完成，未决 ≠ 已完成）
 
