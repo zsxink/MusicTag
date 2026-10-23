@@ -9,9 +9,9 @@
 
 mod common;
 
-use app_lib::service::searcher::lrclib::{Lrclib, parse_lyric_response, parse_search_response};
-use app_lib::service::searcher::MusicSource;
 use app_lib::model::MusicSourceId;
+use app_lib::service::searcher::lrclib::{parse_lyric_response, parse_search_response, Lrclib};
+use app_lib::service::searcher::MusicSource;
 use common::{mock_http_capture, mock_http_once};
 
 #[test]
@@ -87,35 +87,32 @@ async fn search_adds_album_name_param_when_album_non_empty() {
     // search-cover-album：LRCLIB API 原生分参数——`track_name`/`artist_name` 恒传，
     // album 非空追加 `album_name`（空则省略，回退现行为）。
     // mock 服务器捕获请求目标，`Url::query_pairs()` 解码断言。
-    let response =
-        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n[]".to_vec();
+    let response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n[]".to_vec();
     let (url, captured) = mock_http_capture(response);
     let lrclib = Lrclib {
         search_url: url,
         lyric_url_base: String::new(),
     };
     let client = reqwest::Client::new();
-    lrclib.search(&client, "晴天", "周杰伦", "叶惠美").await.unwrap();
+    lrclib
+        .search(&client, "晴天", "周杰伦", "叶惠美")
+        .await
+        .unwrap();
     let target = captured.lock().unwrap().clone();
     let full = format!("{}{}", &lrclib.search_url, target);
     let parsed = reqwest::Url::parse(&full).expect("捕获请求目标应为合法 URL");
     let params: std::collections::HashMap<String, String> =
         parsed.query_pairs().into_owned().collect();
-    assert_eq!(
-        params.get("track_name").map(String::as_str),
-        Some("晴天")
-    );
+    assert_eq!(params.get("track_name").map(String::as_str), Some("晴天"));
     assert_eq!(
         params.get("artist_name").map(String::as_str),
         Some("周杰伦")
     );
-    assert_eq!(
-        params.get("album_name").map(String::as_str),
-        Some("叶惠美")
-    );
+    assert_eq!(params.get("album_name").map(String::as_str), Some("叶惠美"));
 
     // album 为空 → 省略 `album_name`（保持旧请求形状）
-    let (url2, captured2) = mock_http_capture(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n[]".to_vec());
+    let (url2, captured2) =
+        mock_http_capture(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n[]".to_vec());
     let lrclib2 = Lrclib {
         search_url: url2,
         lyric_url_base: String::new(),
@@ -126,10 +123,7 @@ async fn search_adds_album_name_param_when_album_non_empty() {
     let parsed2 = reqwest::Url::parse(&full2).expect("捕获请求目标应为合法 URL");
     let params2: std::collections::HashMap<String, String> =
         parsed2.query_pairs().into_owned().collect();
-    assert_eq!(
-        params2.get("track_name").map(String::as_str),
-        Some("晴天")
-    );
+    assert_eq!(params2.get("track_name").map(String::as_str), Some("晴天"));
     assert_eq!(
         params2.get("artist_name").map(String::as_str),
         Some("周杰伦")
@@ -152,6 +146,9 @@ async fn http_error_status_returns_err() {
         lyric_url_base: String::new(),
     };
     let client = reqwest::Client::new();
-    let err = lrclib.search(&client, "晴天", "周杰伦", "").await.unwrap_err();
+    let err = lrclib
+        .search(&client, "晴天", "周杰伦", "")
+        .await
+        .unwrap_err();
     assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
 }

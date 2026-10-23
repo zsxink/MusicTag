@@ -206,8 +206,8 @@ fn open_song_wav_bad_fixture_fails_early_and_returns_error() {
     let path = tmp.path().join("broken.wav");
     fs::write(&path, b"RIFF\x00\x00\x00\x00WAVE").unwrap();
     assert_bad_wav_fixture(&path);
-    let err = app_lib::service::reader::read_song_meta(&path)
-        .expect_err("坏 WAV 不应进入可编辑表单");
+    let err =
+        app_lib::service::reader::read_song_meta(&path).expect_err("坏 WAV 不应进入可编辑表单");
     assert!(!err.is_empty());
     let summary = app_lib::service::reader::read_summary(&path);
     assert_eq!(summary.title, "");

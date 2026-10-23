@@ -128,13 +128,21 @@ fn save_song_wav_riff_info_only_writes_complete_id3_and_mirrors_info() {
         "riff-only.wav",
         &[("INAM", "旧标题"), ("IART", "旧艺术家"), ("IGNR", "旧流派")],
     );
-    let path = tmp.path().join("riff-only.wav").to_string_lossy().into_owned();
+    let path = tmp
+        .path()
+        .join("riff-only.wav")
+        .to_string_lossy()
+        .into_owned();
     app_lib::service::writer::save_song(full_song(path.clone()), false)
         .expect("RIFF INFO-only WAV 保存应成功");
 
-    let tagged = Probe::open(&path).and_then(|p| p.read()).expect("保存后 WAV 应可读");
+    let tagged = Probe::open(&path)
+        .and_then(|p| p.read())
+        .expect("保存后 WAV 应可读");
     assert_wav_fixture_tags(Path::new(&path), true, true);
-    let id3 = tagged.tag(lofty::tag::TagType::Id3v2).expect("应写入 ID3v2");
+    let id3 = tagged
+        .tag(lofty::tag::TagType::Id3v2)
+        .expect("应写入 ID3v2");
     for (key, value) in [
         (lofty::tag::ItemKey::TrackTitle, "保存标题"),
         (lofty::tag::ItemKey::TrackArtist, "保存艺术家"),
@@ -175,7 +183,12 @@ fn save_song_wav_riff_info_empty_values_are_removed() {
     write_riff_info_only_wav(
         tmp.path(),
         "clear.wav",
-        &[("INAM", "旧标题"), ("IART", "旧艺术家"), ("IPRD", "旧专辑"), ("IGNR", "旧流派")],
+        &[
+            ("INAM", "旧标题"),
+            ("IART", "旧艺术家"),
+            ("IPRD", "旧专辑"),
+            ("IGNR", "旧流派"),
+        ],
     );
     let path = tmp.path().join("clear.wav").to_string_lossy().into_owned();
     let mut song = full_song(path.clone());
@@ -185,15 +198,23 @@ fn save_song_wav_riff_info_empty_values_are_removed() {
     song.genre.clear();
     app_lib::service::writer::save_song(song, false).expect("清空 RIFF 字段应保存成功");
 
-    let tagged = Probe::open(&path).and_then(|p| p.read()).expect("保存后 WAV 应可读");
-    let riff = tagged.tag(lofty::tag::TagType::RiffInfo).expect("RIFF INFO 应保留");
+    let tagged = Probe::open(&path)
+        .and_then(|p| p.read())
+        .expect("保存后 WAV 应可读");
+    let riff = tagged
+        .tag(lofty::tag::TagType::RiffInfo)
+        .expect("RIFF INFO 应保留");
     for key in [
         lofty::tag::ItemKey::TrackTitle,
         lofty::tag::ItemKey::TrackArtist,
         lofty::tag::ItemKey::AlbumTitle,
         lofty::tag::ItemKey::Genre,
     ] {
-        assert_eq!(riff.get_string(key), None, "空字段 {key:?} 应从 RIFF INFO 删除");
+        assert_eq!(
+            riff.get_string(key),
+            None,
+            "空字段 {key:?} 应从 RIFF INFO 删除"
+        );
     }
 }
 
@@ -201,10 +222,16 @@ fn save_song_wav_riff_info_empty_values_are_removed() {
 fn save_song_wav_id3_only_does_not_create_riff_info() {
     let tmp = TempDir::new().unwrap();
     write_tagged_wav(tmp.path(), "id3-only.wav", "旧标题", "旧艺术家");
-    let path = tmp.path().join("id3-only.wav").to_string_lossy().into_owned();
+    let path = tmp
+        .path()
+        .join("id3-only.wav")
+        .to_string_lossy()
+        .into_owned();
     app_lib::service::writer::save_song(full_song(path.clone()), false)
         .expect("ID3v2-only WAV 保存应成功");
-    let tagged = Probe::open(&path).and_then(|p| p.read()).expect("保存后 WAV 应可读");
+    let tagged = Probe::open(&path)
+        .and_then(|p| p.read())
+        .expect("保存后 WAV 应可读");
     assert_wav_fixture_tags(Path::new(&path), true, false);
     assert!(tagged.tag(lofty::tag::TagType::RiffInfo).is_none());
 }
@@ -222,9 +249,13 @@ fn save_song_wav_dual_tags_mirror_both_sides() {
     let path = tmp.path().join("dual.wav").to_string_lossy().into_owned();
     app_lib::service::writer::save_song(full_song(path.clone()), false)
         .expect("双标签 WAV 保存应成功");
-    let tagged = Probe::open(&path).and_then(|p| p.read()).expect("保存后 WAV 应可读");
+    let tagged = Probe::open(&path)
+        .and_then(|p| p.read())
+        .expect("保存后 WAV 应可读");
     let id3 = tagged.tag(lofty::tag::TagType::Id3v2).expect("应有 ID3v2");
-    let riff = tagged.tag(lofty::tag::TagType::RiffInfo).expect("应有 RIFF INFO");
+    let riff = tagged
+        .tag(lofty::tag::TagType::RiffInfo)
+        .expect("应有 RIFF INFO");
     for key in [
         lofty::tag::ItemKey::TrackTitle,
         lofty::tag::ItemKey::TrackArtist,
@@ -234,7 +265,11 @@ fn save_song_wav_dual_tags_mirror_both_sides() {
         lofty::tag::ItemKey::RecordingDate,
         lofty::tag::ItemKey::Genre,
     ] {
-        assert_eq!(id3.get_string(key), riff.get_string(key), "双标签字段 {key:?} 应一致");
+        assert_eq!(
+            id3.get_string(key),
+            riff.get_string(key),
+            "双标签字段 {key:?} 应一致"
+        );
     }
 }
 

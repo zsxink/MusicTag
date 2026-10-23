@@ -3,7 +3,11 @@
 // 左侧展示当前文件夹展平歌曲列表；选中一首 → 右栏读全量标签渲染编辑表单。
 // v1-ux-settings：SwitchDialog 挂在 App 层（§10.1 组件树预留，Editor 平级），
 // v-if 由 store.pendingAction 驱动——有未保存修改切歌/换目录时全窗口模态三选一。
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { syncMenuState } from './api/updates'
+import { pickFolder, listSongs } from './api/songs'
+import { refreshFolder, save, requestFolder } from './store/song'
+import { setTheme, themeStore } from './store/theme'
 import AboutDialog from './components/AboutDialog.vue'
 import AppBar from './components/AppBar.vue'
 import Editor from './components/Editor.vue'
@@ -13,26 +17,64 @@ import SwitchDialog from './components/SwitchDialog.vue'
 import UpdateToast from './components/UpdateToast.vue'
 import { isEulaAccepted } from './store/eula'
 import { songStore } from './store/song'
-import { checkUpdates, initUpdates, listenUpdateMenuAction } from './store/updates'
+import { checkUpdates, initUpdates, listenUpdateMenuAction, shouldAutoCheck } from './store/updates'
 
 const showAbout = ref(false)
 let disposed = false
 let unlisten: (() => void) | undefined
+let menuStateStop: (() => void) | undefined
+
+function syncMenu(): void {
+  void syncMenuState([
+    { id: 'save', enabled: !!songStore.current && songStore.saveState !== 'saving' && !songStore.readonly && (songStore.dirty || songStore.renamePending || (songStore.exportLrc && !!songStore.current.lyrics)), visible: true },
+    { id: 'rescan-folder', enabled: !!songStore.folderPath, visible: true },
+    { id: 'show-about', enabled: isEulaAccepted(), visible: true },
+  ]).catch(() => {})
+}
+
+async function dispatchMenuAction(action: Parameters<Parameters<typeof listenUpdateMenuAction>[0]>[0]): Promise<void> {
+  if (disposed) return
+  if (action === 'check-for-update') return void checkUpdates(undefined, 'manual')
+  if (action === 'show-about') {
+    if (isEulaAccepted()) showAbout.value = true
+    return
+  }
+  if (action === 'open-folder') {
+    if (!isEulaAccepted()) return
+    const picked = await pickFolder()
+    if (!disposed && isEulaAccepted() && picked) await requestFolder(picked, listSongs)
+    return
+  }
+  if (action === 'save') {
+    if (!isEulaAccepted() || !songStore.current || songStore.readonly || (!songStore.dirty && !songStore.renamePending && !(songStore.exportLrc && !!songStore.current.lyrics))) return
+    await save(songStore.exportLrc)
+    return
+  }
+  if (action === 'rescan-folder') {
+    if (isEulaAccepted() && songStore.folderPath) await refreshFolder()
+    return
+  }
+  if (action === 'toggle-theme') {
+    if (isEulaAccepted()) setTheme(themeStore.effective === 'dark' ? 'light' : 'dark')
+    return
+  }
+  if (action === 'reload' && isEulaAccepted()) window.location.reload()
+}
 onMounted(() => {
   initUpdates()
-  void checkUpdates()
-  void listenUpdateMenuAction((action) => {
-    if (disposed) return
-    if (action === 'check-for-update') void checkUpdates(undefined, 'manual')
-    if (action === 'show-about' && isEulaAccepted()) showAbout.value = true
-  }).then((stop) => {
+  void shouldAutoCheck().then((eligible) => { if (eligible && !disposed) void checkUpdates() })
+  syncMenu()
+  void listenUpdateMenuAction((action) => { void dispatchMenuAction(action) }).then((stop) => {
     if (disposed) stop()
     else unlisten = stop
   }).catch(() => { /* 浏览器预览环境没有 Tauri 原生菜单。 */ })
+  const stopSync = watch([() => songStore.current, () => songStore.dirty, () => songStore.saveState, () => songStore.readonly, () => songStore.folderPath, () => songStore.renamePending, () => songStore.exportLrc, () => isEulaAccepted()], syncMenu, { deep: true })
+  menuStateStop = stopSync
 })
 onUnmounted(() => {
   disposed = true
   unlisten?.()
+  menuStateStop?.()
 })
 </script>
 

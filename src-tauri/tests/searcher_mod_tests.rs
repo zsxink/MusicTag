@@ -14,9 +14,9 @@ mod common;
 
 use app_lib::model::{MusicSourceId, SongCandidate};
 use app_lib::service::searcher::{
-    MusicSource, PER_SOURCE_TOP, TOP_N, aggregate, album_match, artist_match, download_cover,
-    download_cover_with_timeout, join_query_terms, norm, search_song_with_sources,
-    search_source_with, title_match,
+    aggregate, album_match, artist_match, download_cover, download_cover_with_timeout,
+    join_query_terms, norm, search_song_with_sources, search_source_with, title_match, MusicSource,
+    PER_SOURCE_TOP, TOP_N,
 };
 use async_trait::async_trait;
 use common::mock_http_once;
@@ -128,7 +128,11 @@ fn aggregate_keeps_traditional_and_simplified_on_same_song_across_sources() {
         ],
     );
     assert_eq!(songs.len(), 2, "跨源不折叠：繁/简两条各自保留");
-    assert_eq!(songs[0].source, MusicSourceId::Netease, "按来源分组：Netease 在前");
+    assert_eq!(
+        songs[0].source,
+        MusicSourceId::Netease,
+        "按来源分组：Netease 在前"
+    );
     assert_eq!(songs[0].id, "n");
     assert_eq!(songs[1].source, MusicSourceId::Itunes);
     assert_eq!(songs[1].id, "i-hk");
@@ -260,7 +264,7 @@ fn aggregate_scores_and_sorts_desc() {
             cand(MusicSourceId::Netease, "1", "晴天", "周杰伦"), // 0.5 + 0.4 = 0.9
             cand(MusicSourceId::Netease, "2", "晴天娃娃", "周杰伦"), // 0.2 + 0.4 = 0.6
             cand(MusicSourceId::Netease, "3", "晴天", "周杰伦/李健"), // 0.5 + 分段 max 0.4 = 0.9
-            cand(MusicSourceId::Netease, "4", "雨天", "周杰伦"),      // 0.0 → 过滤
+            cand(MusicSourceId::Netease, "4", "雨天", "周杰伦"), // 0.0 → 过滤
         ],
     );
     assert_eq!(songs.len(), 3);
@@ -368,9 +372,16 @@ fn aggregate_per_source_top_three_is_by_score_not_arrival() {
             cand(MusicSourceId::Netease, "mid2", "晴天B", "周杰伦"), // 0.2 + 0.4 = 0.6
         ],
     );
-    assert_eq!(songs.len(), PER_SOURCE_TOP, "低分先到的候选被高分 TOP 3 挤掉");
+    assert_eq!(
+        songs.len(),
+        PER_SOURCE_TOP,
+        "低分先到的候选被高分 TOP 3 挤掉"
+    );
     assert_eq!(songs[0].id, "top", "0.9 最高分居首");
-    assert_eq!(songs[1].id, "mid", "0.6 组内按归一化 title 稳定（晴天A < 晴天B）");
+    assert_eq!(
+        songs[1].id, "mid",
+        "0.6 组内按归一化 title 稳定（晴天A < 晴天B）"
+    );
     assert_eq!(songs[2].id, "mid2");
     assert!(
         !songs.iter().any(|s| s.id == "low1" || s.id == "low2"),
@@ -402,7 +413,7 @@ fn aggregate_dedups_same_source_keeps_highest_score() {
         vec![
             cand_album(MusicSourceId::Netease, "1", "晴天", "周杰伦", "依然范特西"), // 0.9
             cand_album(MusicSourceId::Netease, "2", "晴天", "周杰伦", "叶惠美"), // 1.2（album 匹配）
-            cand(MusicSourceId::QqMusic, "q", "晴天", "周杰伦"), // 0.9，跨源保留
+            cand(MusicSourceId::QqMusic, "q", "晴天", "周杰伦"),                 // 0.9，跨源保留
         ],
     );
     assert_eq!(songs.len(), 2, "同源折叠为 1 条 + 跨源 QQ 1 条 = 2 条");
@@ -468,7 +479,14 @@ fn aggregate_caps_total_at_fifteen_across_five_sources() {
     ]
     .into_iter()
     .flat_map(|(source, prefix)| {
-        (1..=5).map(move |i| cand(source, &format!("{prefix}{i}"), &format!("晴天{i}"), "周杰伦"))
+        (1..=5).map(move |i| {
+            cand(
+                source,
+                &format!("{prefix}{i}"),
+                &format!("晴天{i}"),
+                "周杰伦",
+            )
+        })
     })
     .collect();
     let songs = aggregate("晴天", "周杰伦", "", all);
@@ -493,7 +511,7 @@ fn aggregate_dedups_same_source_on_normalized_equal_title_artist() {
         "",
         vec![
             cand(MusicSourceId::Netease, "1", "ＡＢＣ", "JAY"), // 归一化 (abc, jay)
-            cand(MusicSourceId::Netease, "2", "abc", "jay"),   // 归一化 (abc, jay) 同 key
+            cand(MusicSourceId::Netease, "2", "abc", "jay"),    // 归一化 (abc, jay) 同 key
             cand(MusicSourceId::Netease, "3", "  abc  ", "  jay  "), // trim 后同 key
         ],
     );
@@ -512,7 +530,7 @@ fn aggregate_dedups_normalized_equal_keeps_highest_score() {
         "叶惠美",
         vec![
             cand_album(MusicSourceId::Netease, "1", "abc", "jay", "依然范特西"), // 0.5+0.4+0=0.9
-            cand_album(MusicSourceId::Netease, "2", "ＡＢＣ", "jay", "叶惠美"), // 0.5+0.4+0.3=1.2
+            cand_album(MusicSourceId::Netease, "2", "ＡＢＣ", "jay", "叶惠美"),  // 0.5+0.4+0.3=1.2
         ],
     );
     assert_eq!(songs.len(), 1, "同源归一化相等 → 折叠为一条");
@@ -536,9 +554,9 @@ fn aggregate_groups_by_source_then_score_desc() {
         "",
         vec![
             cand(MusicSourceId::QqMusic, "q2", "晴天娃娃", "周杰伦"), // 0.6
-            cand(MusicSourceId::Netease, "n1", "晴天", "周杰伦"), // 0.9
-            cand(MusicSourceId::QqMusic, "q1", "晴天", "周杰伦"), // 0.9
-            cand(MusicSourceId::Itunes, "i1", "晴天", "周杰伦"), // 0.9
+            cand(MusicSourceId::Netease, "n1", "晴天", "周杰伦"),     // 0.9
+            cand(MusicSourceId::QqMusic, "q1", "晴天", "周杰伦"),     // 0.9
+            cand(MusicSourceId::Itunes, "i1", "晴天", "周杰伦"),      // 0.9
         ],
     );
     assert_eq!(songs.len(), 4);
@@ -558,13 +576,16 @@ fn aggregate_stable_within_group_by_norm_title_artist() {
         "",
         vec![
             cand(MusicSourceId::QqMusic, "q3", "晴天娃娃", "周杰伦"), // 0.2+0.4=0.6
-            cand(MusicSourceId::QqMusic, "q1", "晴天", "周杰伦"), // 0.5+0.4=0.9
-            cand(MusicSourceId::QqMusic, "q2", "晴天mv", "周杰伦"), // 0.2+0.4=0.6
+            cand(MusicSourceId::QqMusic, "q1", "晴天", "周杰伦"),     // 0.5+0.4=0.9
+            cand(MusicSourceId::QqMusic, "q2", "晴天mv", "周杰伦"),   // 0.2+0.4=0.6
         ],
     );
     assert_eq!(songs.len(), 3);
     assert_eq!(songs[0].id, "q1", "组内分降序 0.9 在最前");
-    assert_eq!(songs[1].id, "q2", "同分按归一化 title 稳定序（晴天mv < 晴天娃娃）");
+    assert_eq!(
+        songs[1].id, "q2",
+        "同分按归一化 title 稳定序（晴天mv < 晴天娃娃）"
+    );
     assert_eq!(songs[2].id, "q3");
 }
 
@@ -613,7 +634,10 @@ fn album_match_weights() {
     assert_eq!(album_match("", ""), 0.0);
     // 归一化由 norm 完成（album_match 收已归一化值，与 title/artist 同套语义）：
     // 全角转半角 + 小写后相等 → 0.3
-    assert_eq!(album_match(&norm("ＹＥＨＵＩＭＥＩ"), &norm("yehuimei")), 0.3);
+    assert_eq!(
+        album_match(&norm("ＹＥＨＵＩＭＥＩ"), &norm("yehuimei")),
+        0.3
+    );
 }
 
 #[test]
@@ -646,7 +670,10 @@ fn aggregate_album_not_scored_when_query_or_candidate_album_empty() {
         ],
     );
     assert_eq!(songs.len(), 1, "同曲同分去重折叠（album 不计分）");
-    assert_eq!(songs[0].id, "1", "同分保留先到（HashMap 首插），album 不参与仲裁");
+    assert_eq!(
+        songs[0].id, "1",
+        "同分保留先到（HashMap 首插），album 不参与仲裁"
+    );
 
     // 候选 album 空但查询 album 非空 → 候选不因 album 空被拉低（album_match=0，title/artist 主导）
     let songs = aggregate(
@@ -697,9 +724,11 @@ impl MusicSource for FakeSource {
             }
             FakeBehavior::Fail => Err("fake 源失败".into()),
             FakeBehavior::Record(seen) => {
-                seen.lock()
-                    .unwrap()
-                    .push((title.to_string(), artist.to_string(), album.to_string()));
+                seen.lock().unwrap().push((
+                    title.to_string(),
+                    artist.to_string(),
+                    album.to_string(),
+                ));
                 Ok(Vec::new())
             }
         }
@@ -787,7 +816,11 @@ async fn search_song_result_is_reproducible_across_join_completion_order() {
         match &first {
             None => {
                 // 早检 + 关键事实：跨源不折叠（五源各 1 条 = 5 条；Itunes 的 2 条繁简同曲折叠为 1 条）。
-                assert_eq!(got.len(), 5, "五源各 1 条（Itunes 繁简折叠后为 1 条）= 5 条");
+                assert_eq!(
+                    got.len(),
+                    5,
+                    "五源各 1 条（Itunes 繁简折叠后为 1 条）= 5 条"
+                );
                 assert_eq!(got[4].0, MusicSourceId::Itunes, "Itunes 组垫底");
                 assert_eq!(got[4].1, "i-hk", "Itunes 组内保留 HK 繁体条目");
                 assert_eq!(got[4].2, "周杰倫", "展示文本为远端原文（未折叠）");
@@ -823,12 +856,7 @@ async fn search_aggregates_five_sources_and_stats() {
         }),
         Box::new(FakeSource {
             id: MusicSourceId::Kugou,
-            behavior: FakeBehavior::Return(vec![cand(
-                MusicSourceId::Kugou,
-                "4",
-                "晴天",
-                "周杰伦",
-            )]),
+            behavior: FakeBehavior::Return(vec![cand(MusicSourceId::Kugou, "4", "晴天", "周杰伦")]),
         }),
         Box::new(FakeSource {
             id: MusicSourceId::Lrclib,
@@ -871,7 +899,11 @@ async fn search_aggregates_five_sources_and_stats() {
     );
     // 跨源保留：「晴天/周杰伦」五家各一条全部保留（不再折叠成 Netease 一条），
     // 按来源分组 Netease → QqMusic → Kugou → Lrclib → Itunes；QQ 的「晴天娃娃」0.6 在其组内次位。
-    assert_eq!(result.songs.len(), 6, "五家「晴天」各保留 + QQ「晴天娃娃」= 6 条");
+    assert_eq!(
+        result.songs.len(),
+        6,
+        "五家「晴天」各保留 + QQ「晴天娃娃」= 6 条"
+    );
     assert_eq!(result.songs[0].id, "1");
     assert_eq!(result.songs[1].id, "2");
     assert_eq!(result.songs[2].id, "3");
@@ -1103,8 +1135,16 @@ async fn search_song_passes_album_to_sources() {
     assert_eq!(
         recorded,
         vec![
-            ("晴天".to_string(), "周杰伦".to_string(), "叶惠美".to_string()),
-            ("晴天".to_string(), "周杰伦".to_string(), "叶惠美".to_string()),
+            (
+                "晴天".to_string(),
+                "周杰伦".to_string(),
+                "叶惠美".to_string()
+            ),
+            (
+                "晴天".to_string(),
+                "周杰伦".to_string(),
+                "叶惠美".to_string()
+            ),
         ],
         "album 应原样透传给各源 search"
     );
@@ -1164,13 +1204,23 @@ async fn search_source_passes_album_to_source() {
         id: MusicSourceId::QqMusic,
         behavior: FakeBehavior::Record(seen.clone()),
     });
-    let got =
-        search_source_with(&client, source, "晴天", "周杰伦", "叶惠美", Duration::from_millis(50))
-            .await;
+    let got = search_source_with(
+        &client,
+        source,
+        "晴天",
+        "周杰伦",
+        "叶惠美",
+        Duration::from_millis(50),
+    )
+    .await;
     assert!(got.is_empty(), "Record 源返回空列表");
     assert_eq!(
         seen.lock().unwrap().clone(),
-        vec![("晴天".to_string(), "周杰伦".to_string(), "叶惠美".to_string())],
+        vec![(
+            "晴天".to_string(),
+            "周杰伦".to_string(),
+            "叶惠美".to_string()
+        )],
         "单源 search_source 应把 album 原样透传给源 search"
     );
 }

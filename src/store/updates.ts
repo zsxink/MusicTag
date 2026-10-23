@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { checkForUpdate, getAppVersion, openReleasePage } from '../api/updates'
+import { checkForUpdate, getAppVersion, getLastUpdateCheckAt, openReleasePage, saveLastUpdateCheckAt } from '../api/updates'
 import type { UpdateCheckResult } from '../api/updates'
 
 export { listenUpdateMenuAction } from '../api/updates'
@@ -8,6 +8,7 @@ export const DISMISSED_UPDATE_STORAGE_KEY = 'music-tag-dismissed-update-version'
 export type UpdateStatus = 'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error'
 export type UpdateCheckOrigin = 'startup' | 'manual'
 export type UpdateOutcome = { result: UpdateCheckResult; error: null } | { result: null; error: string }
+export const UPDATE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
 
 export const updatesStore = reactive({
   status: 'idle' as UpdateStatus,
@@ -22,6 +23,19 @@ export const updatesStore = reactive({
 
 let requestSequence = 0
 let initializationSequence = 0
+let lastUpdateCheckSave = Promise.resolve()
+
+export async function shouldAutoCheck(now = new Date()): Promise<boolean> {
+  const current = now.toISOString()
+  try {
+    const saved = await getLastUpdateCheckAt(current)
+    if (!saved) return true
+    const timestamp = Date.parse(saved)
+    return !Number.isFinite(timestamp) || timestamp > now.getTime() || now.getTime() - timestamp >= UPDATE_INTERVAL_MS
+  } catch {
+    return true
+  }
+}
 
 /** 同步读取提示记忆，版本查询与网络检查均不阻塞工作区挂载。 */
 export function initUpdates(): void {
@@ -54,6 +68,13 @@ export async function checkUpdates(check = checkForUpdate, origin: UpdateCheckOr
     updatesStore.recentCheckOrigin = origin
     updatesStore.status = result.update_available ? 'update-available' : 'up-to-date'
     updatesStore.noticeVisible = origin === 'manual' || !result.update_available || result.latest_version !== updatesStore.dismissedVersion
+    const save = lastUpdateCheckSave.then(() => {
+      if (request === requestSequence) return saveLastUpdateCheckAt(new Date().toISOString())
+    })
+    lastUpdateCheckSave = save.catch(() => { /* Keep the queue usable after a failed save. */ })
+    try {
+      await save
+    } catch { /* 成功结果仍可展示；下次启动重新检查。 */ }
   } catch (error) {
     if (request !== requestSequence) return
     updatesStore.recentOutcome = { result: null, error: errorMessage(error) }
@@ -67,6 +88,16 @@ export async function checkUpdates(check = checkForUpdate, origin: UpdateCheckOr
 export function shouldPromptUpdate(): boolean {
   const result = updatesStore.recentOutcome?.result
   return updatesStore.status === 'update-available' && !!result && result.latest_version !== updatesStore.dismissedVersion
+}
+
+export function hasAvailableUpdate(): boolean {
+  return updatesStore.status === 'update-available' && updatesStore.recentOutcome?.result?.update_available === true
+}
+
+export function restoreUpdateNotice(): void {
+  if (!hasAvailableUpdate() && updatesStore.status !== 'up-to-date' && updatesStore.status !== 'error') return
+  updatesStore.noticeVisible = true
+  if (hasAvailableUpdate() && !shouldPromptUpdate()) updatesStore.recentCheckOrigin = 'manual'
 }
 
 /** 手动检查结果始终保留详情入口；稍后只抑制自动更新操作提示。 */

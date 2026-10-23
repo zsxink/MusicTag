@@ -55,7 +55,12 @@ impl MusicSource for QqMusic {
         let kw = join_query_terms(title, artist, album);
         let url = reqwest::Url::parse_with_params(
             &self.search_url,
-            &[("p", "1"), ("n", "10"), ("w", kw.as_str()), ("format", "json")],
+            &[
+                ("p", "1"),
+                ("n", "10"),
+                ("w", kw.as_str()),
+                ("format", "json"),
+            ],
         )
         .expect("构造 QQ 搜索 URL 失败");
         let resp = match client
@@ -168,4 +173,3 @@ pub fn parse_lyric_response(json: &serde_json::Value) -> Option<String> {
         Some(lyric)
     }
 }
-

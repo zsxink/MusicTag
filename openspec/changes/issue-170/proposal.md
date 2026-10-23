@@ -25,4 +25,4 @@ GitHub Issue: #170
 - Rust/Tauri 原生菜单构建、菜单事件与窗口/app 生命周期。
 - 前端菜单事件封装与分发、主题和歌曲状态、AboutDialog、更新状态提示及 AppBar。
 - 更新检查时间戳持久化与启动触发逻辑；相关前后端测试。
-- `docs/V1-PRD.md`、`docs/design/design.md` 与 OpenSpec 权威规格；不新增依赖或 Tauri command。
+- `docs/V1-PRD.md`、`docs/design/design.md` 与 OpenSpec 权威规格；不新增依赖；经用户确认允许新增最小配置读写与菜单状态同步 Tauri command，不新增业务能力。

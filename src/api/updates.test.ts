@@ -5,7 +5,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke }))
 vi.mock('@tauri-apps/api/event', () => ({ listen }))
 vi.mock('@tauri-apps/api/app', () => ({ getVersion }))
 
-import { checkForUpdate, getAppVersion, listenUpdateMenuAction, openReleasePage } from './updates'
+import { checkForUpdate, getAppVersion, getLastUpdateCheckAt, listenUpdateMenuAction, openReleasePage, saveLastUpdateCheckAt, syncMenuState } from './updates'
 
 describe('更新 API 契约', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -19,6 +19,13 @@ describe('更新 API 契约', () => {
     await openReleasePage(result.release_url)
     expect(invoke).toHaveBeenNthCalledWith(2, 'open_release_page', { url: result.release_url })
     await expect(getAppVersion()).resolves.toBe('0.1.3')
+    invoke.mockResolvedValueOnce(null).mockResolvedValueOnce(undefined)
+    await expect(getLastUpdateCheckAt('2026-10-23T00:00:00.000Z')).resolves.toBeNull()
+    expect(invoke).toHaveBeenNthCalledWith(3, 'get_last_update_check_at', { now: '2026-10-23T00:00:00.000Z' })
+    await saveLastUpdateCheckAt('2026-10-23T00:00:00.000Z')
+    expect(invoke).toHaveBeenNthCalledWith(4, 'save_last_update_check_at', { value: '2026-10-23T00:00:00.000Z' })
+    await syncMenuState([{ id: 'save', enabled: true, visible: true }])
+    expect(invoke).toHaveBeenNthCalledWith(5, 'sync_menu_state', { snapshot: { items: [{ id: 'save', enabled: true, visible: true }] } })
   })
 
   it('菜单事件解包 payload，返回原有释放函数', async () => {
@@ -26,7 +33,7 @@ describe('更新 API 契约', () => {
     const handler = vi.fn()
     listen.mockResolvedValue(stop)
     const unlisten = await listenUpdateMenuAction(handler)
-    expect(listen.mock.calls[0][0]).toBe('update-menu-action')
+    expect(listen.mock.calls[0][0]).toBe('app-menu-action')
     const callback = listen.mock.calls[0][1]
     callback({ payload: 'check-for-update' })
     callback({ payload: 'show-about' })

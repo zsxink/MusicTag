@@ -3,6 +3,7 @@
 // v1-ux-settings：主题按钮接 theme store——图标 = 目标主题（D8：effective 深色显示 ☀️，
 // 浅色显示 🌙），点击 setTheme 在深浅之间切换（写/删 localStorage 持久记忆）。
 import { setTheme, themeStore } from '../store/theme'
+import { hasAvailableUpdate, restoreUpdateNotice } from '../store/updates'
 import { songStore } from '../store/song'
 </script>
 
@@ -12,6 +13,14 @@ import { songStore } from '../store/song'
       <span class="brand-mark" aria-hidden="true">♪</span>
       <span class="brand-name">MusicTag</span>
     </div>
+    <button
+      v-if="hasAvailableUpdate()"
+      class="update-indicator"
+      type="button"
+      aria-label="有可用更新，重新显示更新提示"
+      title="重新显示更新提示"
+      @click="restoreUpdateNotice"
+    ><span aria-hidden="true">•</span></button>
     <div
       class="appbar-path"
       :title="songStore.folderPath ?? '未打开文件夹'"
@@ -65,6 +74,26 @@ import { songStore } from '../store/song'
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.update-indicator {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: #d33;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.update-indicator:hover,
+.update-indicator:focus-visible {
+  background: #b22;
 }
 
 .theme-btn {

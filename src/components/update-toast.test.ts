@@ -62,7 +62,7 @@ describe('非模态更新提示', () => {
     expect(w.text()).toContain('检查更新失败：网络不可用')
   })
 
-  it('同版稍后后的手动检查展示详情与关闭，更高版仍展示更新操作', async () => {
+  it('同版稍后后的手动检查展示详情与稍后，更高版仍展示更新操作', async () => {
     await checkUpdates(async () => result)
     dismissUpdate()
     const w = mount(UpdateToast)
@@ -70,7 +70,7 @@ describe('非模态更新提示', () => {
     await checkUpdates(async () => result, 'manual')
     await nextTick()
     expect(w.text()).toContain('发现新版本 0.2.0')
-    expect(w.findAll('button').map((button) => button.text())).toEqual(['查看详情', '关闭'])
+    expect(w.findAll('button').map((button) => button.text())).toEqual(['查看详情', '稍后'])
     expect(openReleasePage).not.toHaveBeenCalled()
     await w.findAll('button')[0].trigger('click')
     await flushPromises()
@@ -91,6 +91,46 @@ describe('非模态更新提示', () => {
     await flushPromises()
     expect(w.text()).toContain('打开详情失败：浏览器不可用')
     expect(w.findAll('button')[0].attributes('disabled')).toBeUndefined()
+  })
+})
+
+describe('toast 生命周期计时', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('有更新 15 秒关闭、无更新 5 秒关闭，结果切换清理旧 timer', async () => {
+    await checkUpdates(async () => result())
+    const w = mount(UpdateToast)
+    await nextTick()
+    updatesStore.noticeVisible = false
+    await nextTick()
+    updatesStore.noticeVisible = true
+    updatesStore.status = 'update-available'
+    await nextTick()
+    await nextTick()
+    expect(vi.getTimerCount()).toBeGreaterThan(0)
+    await vi.advanceTimersByTimeAsync(14_999)
+    expect(w.find('[data-testid="update-toast"]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(1)
+    await nextTick()
+    expect(w.find('[data-testid="update-toast"]').exists()).toBe(false)
+    await checkUpdates(async () => ({ ...result, update_available: false }))
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(4_999)
+    expect(w.find('[data-testid="update-toast"]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(1)
+    await nextTick()
+    expect(w.find('[data-testid="update-toast"]').exists()).toBe(false)
+  })
+
+  it('错误不自动关闭，卸载时清理 timer', async () => {
+    await checkUpdates(async () => { throw '网络不可用' })
+    const w = mount(UpdateToast)
+    await nextTick()
+    vi.advanceTimersByTime(60_000)
+    expect(w.find('[data-testid="update-toast"]').exists()).toBe(true)
+    w.unmount()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
 

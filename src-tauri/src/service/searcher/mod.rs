@@ -454,7 +454,11 @@ pub fn aggregate(
     // D5 之后繁简同曲自然折叠（如 iTunes 的 HK 繁体条目与 US 简体条目折叠为一条，同分即 HK）。
     let mut best: HashMap<(MusicSourceId, String, String), ScoredCandidate> = HashMap::new();
     for item in scored {
-        let key = (item.candidate.source, item.n_title.clone(), item.n_artist.clone());
+        let key = (
+            item.candidate.source,
+            item.n_title.clone(),
+            item.n_artist.clone(),
+        );
         match best.get_mut(&key) {
             Some(entry) => {
                 if item.score > entry.score {
@@ -470,7 +474,10 @@ pub fn aggregate(
     // 按源分组 → 组内 score 降序（同分按归一化 title/artist 稳定，可复现）→ 每源截 PER_SOURCE_TOP。
     let mut by_source: HashMap<MusicSourceId, Vec<ScoredCandidate>> = HashMap::new();
     for item in best.into_values() {
-        by_source.entry(item.candidate.source).or_default().push(item);
+        by_source
+            .entry(item.candidate.source)
+            .or_default()
+            .push(item);
     }
 
     // 按来源分组拼接：source_rank 升序（Netease→QqMusic→Kugou→Lrclib→Itunes），组内已分降序。

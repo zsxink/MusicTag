@@ -13,9 +13,9 @@
 
 mod common;
 
-use app_lib::service::searcher::itunes::{Itunes, parse_search_response};
-use app_lib::service::searcher::{MusicSource, aggregate, search_song_with_sources};
 use app_lib::model::MusicSourceId;
+use app_lib::service::searcher::itunes::{parse_search_response, Itunes};
+use app_lib::service::searcher::{aggregate, search_song_with_sources, MusicSource};
 use common::mock_http_router;
 use std::time::Duration;
 
@@ -170,7 +170,6 @@ async fn search_song_both_storefronts_hanging_reaches_deadline_as_failure() {
     assert!(result.all_failed);
     assert!(result.songs.is_empty());
 }
-
 
 /// HTTP 200 + JSON 响应字节（`body` 已是 JSON 文本）。
 fn http_json(body: &str) -> Vec<u8> {
@@ -341,8 +340,7 @@ async fn search_uses_joined_keyword_in_term_param() {
     }
 
     // album 为空 → term 回退 title + artist（与现行为一致）
-    let (url2, captured2) =
-        mock_http_router(|_| http_json(r#"{"resultCount":0,"results":[]}"#), 2);
+    let (url2, captured2) = mock_http_router(|_| http_json(r#"{"resultCount":0,"results":[]}"#), 2);
     let itunes2 = Itunes {
         search_url: url2,
         ..Default::default()
@@ -390,7 +388,10 @@ async fn search_queries_hk_and_us_storefronts_and_concatenates_in_storefront_ord
         ..Default::default()
     };
     let client = reqwest::Client::new();
-    let songs = itunes.search(&client, "稻香", "周杰伦", "叶惠美").await.unwrap();
+    let songs = itunes
+        .search(&client, "稻香", "周杰伦", "叶惠美")
+        .await
+        .unwrap();
 
     // 早检：两店面各 1 条，合计 2 条（未折叠——折叠发生在 `aggregate`，不在本方法内）
     assert_eq!(songs.len(), 2, "两店面各 1 条应原样拼接返回");
@@ -404,7 +405,11 @@ async fn search_queries_hk_and_us_storefronts_and_concatenates_in_storefront_ord
         .iter()
         .filter_map(|t| query_param(t, "country"))
         .collect();
-    assert_eq!(countries.len(), 2, "每次请求都应带 country 参数: {targets:?}");
+    assert_eq!(
+        countries.len(),
+        2,
+        "每次请求都应带 country 参数: {targets:?}"
+    );
     assert!(
         countries.iter().any(|c| c == "HK"),
         "应发一次 country=HK: {countries:?}"
@@ -446,7 +451,10 @@ async fn search_partial_storefront_success_returns_ok_with_successful_candidates
         ..Default::default()
     };
     let client = reqwest::Client::new();
-    let songs = itunes.search(&client, "晴天", "周杰伦", "叶惠美").await.unwrap();
+    let songs = itunes
+        .search(&client, "晴天", "周杰伦", "叶惠美")
+        .await
+        .unwrap();
     // 早检：只含成功店面的候选，失败店面不贡献任何条目
     assert_eq!(songs.len(), 1, "只应含成功店面的候选");
     assert_eq!(songs[0].id, "2");
@@ -595,8 +603,15 @@ async fn search_merge_dedups_same_song_across_storefronts_in_aggregate() {
         ..Default::default()
     };
     let client = reqwest::Client::new();
-    let merged = itunes.search(&client, "稻香", "周杰伦", "叶惠美").await.unwrap();
-    assert_eq!(merged.len(), 2, "合并阶段不折叠（繁简折叠在 aggregate 的同源去重里）");
+    let merged = itunes
+        .search(&client, "稻香", "周杰伦", "叶惠美")
+        .await
+        .unwrap();
+    assert_eq!(
+        merged.len(),
+        2,
+        "合并阶段不折叠（繁简折叠在 aggregate 的同源去重里）"
+    );
 
     let songs = aggregate("稻香", "周杰伦", "叶惠美", merged);
     assert_eq!(songs.len(), 1, "iTunes 组内同曲（繁/简）折叠为一条");

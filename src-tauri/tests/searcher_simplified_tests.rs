@@ -20,7 +20,7 @@
 // **不要**用 `乾隆` 证明「查了词表」：词表有恒等条目 `乾隆 → 乾隆`，纯逐字与先词后字**同结果**，
 // 区分不出（能区分的只有纯逐字实现得 `干隆`）。本文件只把它当「词表恒等条目」的行为断言。
 
-use app_lib::service::searcher::simplified::{TS_CHARACTERS, TS_PHRASES, to_simplified};
+use app_lib::service::searcher::simplified::{to_simplified, TS_CHARACTERS, TS_PHRASES};
 
 /// 两张表都被 `include_str!` 成功载入（非空、含注释行与正文行）——防表文件缺失/路径失效时
 /// `to_simplified` 静默退化为「原样返回」而所有折叠断言假通过。
@@ -91,8 +91,16 @@ fn phrase_table_wins_over_per_character_folding() {
 fn unmapped_text_is_preserved() {
     // 表内无映射的字保持原样（spec「无映射保持原样」/ 过度折叠守卫）。
     // `杰`/`座`/`著` 在两表中**均无任何条目**（含作为词表 key），任何多余替换都会改坏它们。
-    assert_eq!(to_simplified("魔杰座"), "魔杰座", "`杰`/`座` 两表皆无映射，须原样");
-    assert_eq!(to_simplified("著作"), "著作", "`著` 两表皆无映射，是「无映射原样」的干净用例");
+    assert_eq!(
+        to_simplified("魔杰座"),
+        "魔杰座",
+        "`杰`/`座` 两表皆无映射，须原样"
+    );
+    assert_eq!(
+        to_simplified("著作"),
+        "著作",
+        "`著` 两表皆无映射，是「无映射原样」的干净用例"
+    );
     assert_eq!(to_simplified("稻香"), "稻香");
     assert_eq!(to_simplified("晴天"), "晴天");
 }
@@ -100,7 +108,10 @@ fn unmapped_text_is_preserved() {
 #[test]
 fn ascii_and_empty_are_idempotent() {
     // 两表均无 ASCII key（design §2.5 实测）→ 纯 ASCII 恒原样、幂等。
-    assert_eq!(to_simplified("Red Hot Chili Peppers"), "Red Hot Chili Peppers");
+    assert_eq!(
+        to_simplified("Red Hot Chili Peppers"),
+        "Red Hot Chili Peppers"
+    );
     assert_eq!(to_simplified("abc"), "abc");
     assert_eq!(to_simplified("Hello World"), "Hello World");
     // 空串边界：不 panic、不产生新字符
@@ -147,7 +158,10 @@ fn phrase_identity_entry_is_preserved() {
 #[test]
 fn mixed_text_folds_only_mapped_chars() {
     // 混合文本：逐字折叠不误伤未映射部分，且一次调用内多处命中
-    assert_eq!(to_simplified("周杰倫 - 葉惠美 (Live)"), "周杰伦 - 叶惠美 (Live)");
+    assert_eq!(
+        to_simplified("周杰倫 - 葉惠美 (Live)"),
+        "周杰伦 - 叶惠美 (Live)"
+    );
     assert_eq!(
         to_simplified("稻香(周杰倫)"),
         "稻香(周杰伦)",

@@ -11,12 +11,12 @@
 
 mod common;
 
+use app_lib::model::MusicSourceId;
 use app_lib::service::searcher::kugou::{
-    Kugou, is_error_response, kugou_cover_url, parse_lyric_download, parse_lyric_search,
-    parse_search_response, search_params, signature,
+    is_error_response, kugou_cover_url, parse_lyric_download, parse_lyric_search,
+    parse_search_response, search_params, signature, Kugou,
 };
 use app_lib::service::searcher::MusicSource;
-use app_lib::model::MusicSourceId;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use common::{mock_http_capture, mock_http_once};
 
@@ -187,7 +187,8 @@ fn parses_search_response_maps_image_field_to_cover_url() {
         }]}
     });
     assert_eq!(
-        parse_search_response(&json_singer)[0].cover_url, None,
+        parse_search_response(&json_singer)[0].cover_url,
+        None,
         "歌手头像不入封面候选"
     );
 
@@ -196,7 +197,8 @@ fn parses_search_response_maps_image_field_to_cover_url() {
         "data": {"lists": [{"FileHash": "E1", "SongName": "晴天", "Image": ""}]}
     });
     assert_eq!(
-        parse_search_response(&json_empty)[0].cover_url, None,
+        parse_search_response(&json_empty)[0].cover_url,
+        None,
         "空 Image → None"
     );
 }
@@ -253,9 +255,7 @@ fn parses_search_response_missing_lists_returns_empty() {
 fn is_error_response_detects_signature_rejection() {
     // CR v1-search-fixes：签名错 20006 等业务拒绝是 HTTP 200 + error_code≠0，必须判「源失败」
     assert!(
-        is_error_response(
-            &serde_json::json!({"error_code": 20006, "error_msg": "err signature"})
-        ),
+        is_error_response(&serde_json::json!({"error_code": 20006, "error_msg": "err signature"})),
         "20006 签名错应判失败"
     );
     assert!(is_error_response(&serde_json::json!({"error_code": -1})));
@@ -344,7 +344,10 @@ async fn search_uses_joined_keyword_in_http_request() {
         lyric_download_url: String::new(),
     };
     let client = reqwest::Client::new();
-    kugou.search(&client, "晴天", "周杰伦", "叶惠美").await.unwrap();
+    kugou
+        .search(&client, "晴天", "周杰伦", "叶惠美")
+        .await
+        .unwrap();
     let target = captured.lock().unwrap().clone();
     let full = format!("{}{}", &kugou.search_url, target);
     let parsed = reqwest::Url::parse(&full).expect("捕获请求目标应为合法 URL");
@@ -390,6 +393,9 @@ async fn http_error_status_returns_err() {
         lyric_download_url: String::new(),
     };
     let client = reqwest::Client::new();
-    let err = kugou.search(&client, "晴天", "周杰伦", "").await.unwrap_err();
+    let err = kugou
+        .search(&client, "晴天", "周杰伦", "")
+        .await
+        .unwrap_err();
     assert!(err.contains("404"), "非 2xx 应报 HTTP 状态，实际: {err}");
 }

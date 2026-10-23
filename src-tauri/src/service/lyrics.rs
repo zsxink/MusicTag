@@ -58,4 +58,3 @@ pub fn export_lrc(audio_path: &Path, lyrics: &str) -> Result<(), String> {
         .map_err(|e| format!("rename 替换失败: {e}"))?;
     Ok(())
 }
-

@@ -72,4 +72,3 @@ pub fn rename_song(old_path: &Path, new_name: &str) -> Result<(), String> {
 pub fn is_illegal_name(new_name: &str) -> bool {
     new_name.contains('/') || new_name.contains('\\') || new_name.contains("..")
 }
-

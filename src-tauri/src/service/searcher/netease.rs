@@ -182,7 +182,9 @@ pub fn parse_search_response(json: &serde_json::Value) -> Vec<SongCandidate> {
                 })
                 .unwrap_or_default(),
             album: s["al"]["name"].as_str().unwrap_or_default().to_string(),
-            cover_url: s["al"]["picUrl"].as_str().map(|u| u.replace("http://", "https://")),
+            cover_url: s["al"]["picUrl"]
+                .as_str()
+                .map(|u| u.replace("http://", "https://")),
         })
         .collect()
 }
@@ -196,4 +198,3 @@ pub fn parse_lyric_response(json: &serde_json::Value) -> Option<String> {
         Some(lyric.to_string())
     }
 }
-

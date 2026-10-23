@@ -302,4 +302,3 @@ pub fn parse_lyric_download(json: &serde_json::Value) -> Option<String> {
         Some(lyric)
     }
 }
-

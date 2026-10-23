@@ -1,5 +1,25 @@
 <script setup lang="ts">
-import { canViewUpdateDetails, dismissUpdate, recentUpdateText, shouldPromptUpdate, updatesStore, viewUpdateDetails } from '../store/updates'
+import { onBeforeUnmount, watch } from 'vue'
+import { canViewUpdateDetails, dismissUpdate, hasAvailableUpdate, recentUpdateText, updatesStore, viewUpdateDetails } from '../store/updates'
+
+let timer: ReturnType<typeof setTimeout> | undefined
+function clearTimer(): void {
+  if (timer !== undefined) {
+    clearTimeout(timer)
+    timer = undefined
+  }
+}
+function scheduleTimer(): void {
+  clearTimer()
+  if (!updatesStore.noticeVisible || updatesStore.status === 'checking' || updatesStore.status === 'error') return
+  const delay = updatesStore.status === 'update-available' ? 15_000 : 5_000
+  timer = setTimeout(() => {
+    timer = undefined
+    updatesStore.noticeVisible = false
+  }, delay)
+}
+watch(() => [updatesStore.noticeVisible, updatesStore.status, updatesStore.recentOutcome], scheduleTimer, { deep: true, immediate: true })
+onBeforeUnmount(clearTimer)
 </script>
 
 <template>
@@ -12,7 +32,7 @@ import { canViewUpdateDetails, dismissUpdate, recentUpdateText, shouldPromptUpda
         <button type="button" :disabled="updatesStore.openingDetails" @click="viewUpdateDetails()">
           {{ updatesStore.openingDetails ? '正在打开…' : '查看详情' }}
         </button>
-        <button type="button" @click="dismissUpdate">{{ shouldPromptUpdate() ? '稍后' : '关闭' }}</button>
+        <button type="button" @click="dismissUpdate">{{ hasAvailableUpdate() ? '稍后' : '关闭' }}</button>
       </div>
       <button v-else-if="updatesStore.status !== 'checking'" class="close" type="button" @click="dismissUpdate">关闭</button>
     </div>

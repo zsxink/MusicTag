@@ -111,4 +111,3 @@ pub fn parse_lyric_response(json: &serde_json::Value) -> Option<String> {
         .or_else(|| plain.filter(|s| !s.trim().is_empty()))?;
     Some(lyric.to_string())
 }
-
