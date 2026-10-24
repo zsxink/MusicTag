@@ -197,7 +197,7 @@ test('renders both architecture hashes and canonical public URLs without tap ope
   assert.match(cask, /app "MusicTag\.app"/);
   assert.doesNotMatch(cask, /no_check|auto_updates/);
   assert.match(cask, /livecheck do/);
-  assert.match(cask, /url :stable/);
+  assert.ok(cask.includes('url "https://github.com/zsxink/MusicTag/releases/latest"'));
   assert.match(cask, /strategy :github_latest/);
   assert.ok(cask.includes('uninstall quit: "com.musictag.desktop"'));
   assert.ok(cask.includes('~/Library/Application Support/MusicTag'));

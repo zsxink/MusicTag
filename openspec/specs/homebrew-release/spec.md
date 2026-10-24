@@ -17,7 +17,7 @@ The project SHALL provide a Homebrew Cask named `musictag` in the public `zsxink
 - **AND** validates it against the x64 SHA-256 checksum before installing `MusicTag.app`
 
 ### Requirement: Synchronize the Cask after a release is published
-The release automation SHALL update the tap only after the GitHub Release is published, and SHALL update the Cask version, architecture-specific artifact URLs, and checksums from that release. The generated Cask SHALL include a `livecheck` block that uses the stable URL with the `github_latest` strategy, so `brew livecheck` can detect when the tap lags behind the latest published release. The generated Cask SHALL NOT declare `auto_updates`. It SHALL NOT publish an entry pointing to a draft or unavailable release.
+The release automation SHALL update the tap only after the GitHub Release is published, and SHALL update the Cask version, architecture-specific artifact URLs, and checksums from that release. The generated Cask SHALL include a `livecheck` block that uses the explicit GitHub latest-releases URL (`https://github.com/zsxink/MusicTag/releases/latest`) with the `github_latest` strategy, so `brew livecheck` can detect when the tap lags behind the latest published release. The generated Cask SHALL NOT declare `auto_updates`. It SHALL NOT publish an entry pointing to a draft or unavailable release.
 
 #### Scenario: Draft release
 - **WHEN** the release workflow creates a draft GitHub Release
