@@ -4,12 +4,12 @@
 
 ## 1. 模板与断言同步改动（infra，Dev）
 
-- [ ] 1.1 在 `scripts/homebrew-publish.sh` cask heredoc 模板的 livecheck 块（146–149 行）中，把 147 行 `url :stable` 改为 `url "https://github.com/zsxink/MusicTag/releases/latest"`；`strategy :github_latest` 与块内缩进保持不变；URL 字面量不加转义（无 `$`/反引号/插值，无展开面变化，design D2）；stable URL 行、uninstall/zap 段、其余脚本逻辑与发布护栏零改动。Owner: Dev；files: `scripts/homebrew-publish.sh`。Design: D1/D2。覆盖场景：Tap lags behind the latest release。
-- [ ] 1.2 把 `tests/homebrew/publish.test.mjs` 200 行 `assert.match(cask, /url :stable/)` 同步改为显式 URL 正向断言（形态见 design D3）；其余断言一律不动，不新增测试文件、不改 fake gh/curl/git。Owner: Dev；files: `tests/homebrew/publish.test.mjs`。Depends on 1.1（同一 checkpoint）。Design: D3。
+- [x] 1.1 在 `scripts/homebrew-publish.sh` cask heredoc 模板的 livecheck 块（146–149 行）中，把 147 行 `url :stable` 改为 `url "https://github.com/zsxink/MusicTag/releases/latest"`；`strategy :github_latest` 与块内缩进保持不变；URL 字面量不加转义（无 `$`/反引号/插值，无展开面变化，design D2）；stable URL 行、uninstall/zap 段、其余脚本逻辑与发布护栏零改动。Owner: Dev；files: `scripts/homebrew-publish.sh`。Design: D1/D2。覆盖场景：Tap lags behind the latest release。
+- [x] 1.2 把 `tests/homebrew/publish.test.mjs` 200 行 `assert.match(cask, /url :stable/)` 同步改为显式 URL 正向断言（形态见 design D3）；其余断言一律不动，不新增测试文件、不改 fake gh/curl/git。Owner: Dev；files: `tests/homebrew/publish.test.mjs`。Depends on 1.1（同一 checkpoint）。Design: D3。
 
 ## 2. 非业务验证（Tester）
 
-- [ ] 2.1 执行并如实记录每条命令与退出码：`bash -n scripts/homebrew-publish.sh`；`node --test tests/homebrew/publish.test.mjs`（homebrew 套件的真实命令，vitest include 仅 `src/**` 不会覆盖它）；`npm run test`（与上一条并记，确认无其他回归）；`npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive`（钉住 1.5.0，勿用全局 CLI）。无 Rust/Vue 改动，cargo check / npm run build 不在门禁内，如实记录不适用。Owner: Tester。Depends on 1.1–1.2。Design: 验证节。
+- [x] 2.1 执行并如实记录每条命令与退出码：`bash -n scripts/homebrew-publish.sh`；`node --test tests/homebrew/publish.test.mjs`（homebrew 套件的真实命令，vitest include 仅 `src/**` 不会覆盖它）；`npm run test`（与上一条并记，确认无其他回归）；`npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive`（钉住 1.5.0，勿用全局 CLI）。无 Rust/Vue 改动，cargo check / npm run build 不在门禁内，如实记录不适用。Owner: Tester。Depends on 1.1–1.2。Design: 验证节。
 
 ## 3. 审查与最终验证
 
