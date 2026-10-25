@@ -15,7 +15,7 @@
 
 ## v0.2.0 更新
 
-- 改进 Homebrew Cask 维护：增加基于 GitHub 最新正式版的 `livecheck` 检查，并在卸载时退出应用、清理已确认的应用数据目录。
+- 改进 Homebrew Cask 维护：增加基于 GitHub 最新正式版的 `livecheck` 检查；普通卸载会先退出 MusicTag，用户可选择运行 `brew uninstall --zap --cask musictag` 清理应用数据目录。
 - 将「打开文件夹」入口调整为全局顶栏文件夹图标；保留无障碍名称、悬停提示和 ⌘O/Ctrl+O 快捷键。
 
 ## v0.1.5 更新

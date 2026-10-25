@@ -2,9 +2,9 @@
 
 ## 范围与领域
 
-领域为 `docs` + `infra`。本变更复核 `v0.1.5..HEAD` 的已合并内容，统一应用版本声明为 `0.2.0`，更新 README 当前版本和发布说明，并在版本提交合并后使用现有 tag-triggered workflow 发布。范围依据 Issue #186 与本 change 的 proposal/spec；不新增产品能力、不改变发布工作流实现、不调整无关行为。
+领域为 `docs` + `infra`。本变更复核 `v0.1.5..HEAD` 的已合并内容，修复现有 `publish-release` job 的 GitHub CLI 仓库上下文，增加对应契约断言，统一应用版本声明为 `0.2.0`，更新 README 当前版本和发布说明，并在版本提交合并后使用现有 tag-triggered workflow 发布。范围依据 Issue #186 与本 change 的 proposal/spec；不新增产品能力，不改变触发、构建矩阵、发布顺序或 Homebrew 同步机制。
 
-基线提交为 `8babefd`，发布基线是 `v0.1.5`。审查提交包括：PR #177 的 Release 构建成功后自动发布及显式派发 Homebrew Tap workflow；PR #178 的 Cask `livecheck` 与卸载清理段；PR #180 的显式 `releases/latest` livecheck URL；PR #183 将打开文件夹入口移至全局顶栏紧凑图标并保留无障碍名称、提示和快捷键；PR #185 仅补强文件夹图标测试断言。只复核用户可见行为、发布说明和发布链路，不把测试补强描述为用户功能。
+发布基线是 `v0.1.5`。审查提交包括：PR #177 的 Release 构建成功后自动发布及显式派发 Homebrew Tap workflow；PR #178 的 Cask `livecheck` 与卸载清理段；PR #180 的显式 `releases/latest` livecheck URL；PR #183 将打开文件夹入口移至全局顶栏紧凑图标并保留无障碍名称、提示和快捷键；PR #185 仅补强文件夹图标测试断言。主会话记录的 CR major 发现是 `.github/workflows/release.yml` 的 `publish-release` 在不 checkout 的新 runner 上执行 `gh release view/edit` 与 `gh workflow run`，但 job 环境仅设置 tag，没有显式 `GH_REPO`；该路径不能依赖本地 Git remote 提供仓库上下文。修复限定为在该 job 级 `env` 增加 `GH_REPO: ${{ github.repository }}`，并仅在 `tests/workflow-core/release-publish-contract.test.cjs` 增加对应 context 契约断言。不得改变触发、matrix、发布顺序、权限或 Homebrew workflow。PR #185 仍仅是测试补强，不描述为用户功能。
 
 如独立复核发现已批准规格内的确定缺陷，由主会话先明确授权路径与回归任务，再进行有界修复和复审；涉及产品范围或规格歧义时停止并交主会话决策，不自行扩展。
 
@@ -13,9 +13,10 @@
 对照当前实现、README、OpenSpec 归档和相关 workflow，逐项记录文件、规格场景、现有测试和结论：
 
 - **PR #177 自动发布**：复核 `.github/workflows/release.yml` 的 `test → publish-tauri → publish-release` 依赖、四平台 matrix、只有所有构建成功才将 draft 转正式发布的门槛、失败保留 draft 的行为，以及成功后通过 `workflow_dispatch` 派发 tap 同步。复核说明与当前发布流程一致，重复运行的幂等保护不被移除。
-- **PR #178/#180 Cask 维护**：复核 `scripts/homebrew-publish.sh` 生成的 Cask `livecheck` 显式指向 `releases/latest`，并包含卸载清理段；对照 `.github/workflows/homebrew.yml` 和 `tests/homebrew/publish.test.mjs`，确认自动/手动触发及 Release/tag 校验与描述相符。README 只概括维护改进，不承诺额外安装或升级能力。
+- **PR #178/#180 Cask 维护**：复核 `scripts/homebrew-publish.sh` 生成的 Cask `livecheck` 显式指向 `releases/latest`；普通 `uninstall` 只退出应用，用户选择 Homebrew `zap` 时才清理列出的应用数据目录。对照 `.github/workflows/homebrew.yml` 和 `tests/homebrew/publish.test.mjs`，确认自动/手动触发及 Release/tag 校验与描述相符。README 必须区分普通卸载和 `zap`，不得暗示普通卸载会删除用户数据，也不承诺额外安装或升级能力。
 - **PR #183 文件夹入口**：对照 `docs/V1-PRD.md`、`docs/design/design.md`、`src/components/AppBar.vue`、`SongList.vue` 及相关组件测试，确认入口在顶栏显示为紧凑图标，具有“打开文件夹”无障碍名称和提示，快捷键及既有目录切换拦截仍适用；不再显示路径或在侧栏显示入口。
 - **PR #185 测试补强**：检查相关验证确实断言 SVG 图标存在；发布说明不将其列为用户可见功能。
+- **CR major 有界修复**：确认 `publish-release` job 在 fresh runner 上没有 checkout，`gh` 操作仓库时不能假设 local remote 可用；检查 job-level `GH_REPO` 明确取自 `${{ github.repository }}`，并由 `tests/workflow-core/release-publish-contract.test.cjs` 契约断言保护。该修复不改变工作流控制流及发布行为。
 
 本复核不预设结论。Tester/CR 应报告实际核查的提交、文件、场景及任何发现；无 blocker/major 时明确记录结论。
 
@@ -32,7 +33,7 @@
 
 Dev 应枚举实际应用/打包版本声明并核实一致性；不得全局替换第三方依赖版本、历史版本记录、维护者段落中的示例 tag/资产名或其他无关文案。运行时版本来源应保持与 Tauri `getVersion()` 和 Rust `CARGO_PKG_VERSION` 对应。
 
-README 当前发布说明应准确概括 `v0.1.5` 后的用户可见变化：Cask 的版本检查与卸载清理维护改进，以及全局顶栏文件夹图标入口调整。若提及更新入口，准确说明无障碍名称/提示及快捷键仍可用；不把 PR #177/#185 的自动化和测试变化写成应用功能。保留适用的旧版本说明和项目现有 README 结构。正式 GitHub Release 使用自动生成的通用说明时，Integrate 应在发布后核对并将 Release 正文补为与 README 对齐的简短版本说明；不得为此改动 `.github/workflows/release.yml`。
+README 当前发布说明应准确概括 `v0.1.5` 后的用户可见变化：Cask 的版本检查与卸载维护改进，以及全局顶栏文件夹图标入口调整。准确表述 Homebrew 普通卸载仅退出应用、`zap` 才清理所列应用数据目录；不得暗示普通卸载会删除数据。若提及文件夹入口，说明无障碍名称/提示及快捷键仍可用；不把 PR #177/#185 的自动化和测试变化写成应用功能。保留适用的旧版本说明和项目现有 README 结构。正式 GitHub Release 使用自动生成的通用说明时，Integrate 应在发布后核对并将 Release 正文补为与 README 对齐的简短版本说明。
 
 ## 验证矩阵
 
@@ -41,6 +42,7 @@ README 当前发布说明应准确概括 `v0.1.5` 后的用户可见变化：Cas
 | Inspect release version | 检查 npm、Cargo、Tauri、lockfile 中应用自身条目和 README 徽章均为 `0.2.0`，第三方依赖版本未被改动 | Dev / Tester / CR / Verify |
 | Read v0.2.0 release notes | 对照 `v0.1.5..HEAD` 提交、README、PRD 和 Cask/UI 实现，核实表述范围及准确性 | Dev / Tester / CR / Verify |
 | Review shipped changes | 对 PR #177/#178/#180/#183/#185 的相关实现、归档规格、workflow 与已有回归进行独立复核 | Tester / CR |
+| Publish job repository context | 确认 `publish-release` job-level `GH_REPO` 等于 `${{ github.repository }}`，且 `tests/workflow-core/release-publish-contract.test.cjs` 对该契约有断言；复核不影响其他 job env、权限或发布顺序 | Dev / Tester / round 2 CR / Verify |
 | Verify public release | 合并后 tag 指向已合并版本提交；Release workflow 四个平台成功；公开 Release 正式发布并含四平台资产；Homebrew Tap workflow 同步成功 | Integrate |
 
 ## CI 与验证门禁
@@ -49,11 +51,12 @@ Verify 读取当时的 `.github/workflows/ci.yml`、受影响 workflow，并按 
 
 - `npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive`（另运行当前 change strict validate）。
 - `node --test '.agents/tools/pipe-core/test/*.test.js' 'tests/workflow-core/*.test.cjs' '.agents/tools/pipe-native/test/*.test.js'`。
+- 上述 workflow-core suites 必须包含 `tests/workflow-core/release-publish-contract.test.cjs`，并直接验证 `publish-release` job 使用 `${{ github.repository }}` 设置 `GH_REPO`。
 - `node --test tests/homebrew/publish.test.mjs` 与 `node .agents/tools/pipe-native/self-check.js`。
 - `npm ci`、`npm run build`、`npm run test`。
 - Linux workflow 安装所需 Tauri 系统依赖（包括 `ffmpeg`），Rust stable 下运行 `cargo check --all-targets` 与 `cargo test --all-targets`，工作目录为 `src-tauri`。
 
-CI 使用 Node 24；具体命令和条件以验证时 workflow 为准。release workflow 的 tag 触发 `test` 使用同一组相关命令，后续 `publish-tauri` 构建 Windows、macOS aarch64、macOS x86_64、Ubuntu Linux。Verify 对代码快照的命令记录退出码、HEAD、源码指纹和规格指纹；所有适用检查失败即停止集成，不以未运行的命令或排队中的 CI 声称通过。版本文案本身采用结构化读取和人工对照验证，不为纯版本字段镜像实现增加无关测试。
+CI 使用 Node 24；具体命令和条件以验证时 workflow 为准。release workflow 的 tag 触发 `test` 使用相同的 pipe/workflow-core suites，因此新增契约测试同时受 PR CI 与 Release workflow test job 覆盖；之后 `publish-tauri` 构建 Windows、macOS aarch64、macOS x86_64、Ubuntu Linux。Verify 对代码快照的命令记录退出码、HEAD、源码指纹和规格指纹；CR 与 Verify 均需检查新增测试及 job-level `GH_REPO` 的变量名和值，并核查 workflow 所有现有门禁，不能只跑单个新测试。所有适用检查失败即停止集成，不以未运行的命令或排队中的 CI 声称通过。版本文案本身采用结构化读取和人工对照验证，不为纯版本字段镜像实现增加无关测试。
 
 本 change 不引入 fixture。若复核到的既有测试使用外部生成 fixture，遵循 pipe 的 fixture 早检要求，并记录生成命令、所需工具、目标文件存在性与目标 reader 可解析证据；具体是否适用由 Tester 核实。
 
@@ -73,6 +76,6 @@ CI 使用 Node 24；具体命令和条件以验证时 workflow 为准。release 
 
 ## 权限与风险
 
-Architect 仅写本 change 的 `design.md` 与 `tasks.md`；Dev 的版本/README 写入范围限于上表中的应用元数据、锁文件自身版本和 README。发布后 Release 编辑仅由主会话在 Integrate 阶段操作。Tester、CR、Verify 不得写入实现；CR 与 Verify 只读。主会话唯一维护 tasks 勾选、progress、Git 与远端发布状态。
+Architect 仅写本 change 的 `design.md` 与 `tasks.md`；Dev 仅可写 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`、`README.md`、`.github/workflows/release.yml` 和 `tests/workflow-core/release-publish-contract.test.cjs`。工作流修复只在 `publish-release` job-level `env` 增加 `GH_REPO: ${{ github.repository }}`；测试只增加对此上下文的契约断言。不得改 `.github/workflows/homebrew.yml`、触发、matrix、权限、step 控制流、重试策略、发布顺序或其他测试契约。Tester 可按授权路径修复发现的范围内问题；round 2 CR 与 Verify 只读且覆盖新增断言与所有 workflow 门禁。发布后 Release 编辑仅由主会话在 Integrate 阶段操作。主会话唯一维护 tasks 勾选、progress、Git 与远端发布状态。
 
-主要风险是误改第三方锁版本、漏掉实际应用版本源、README 与应用行为不一致、错误 tag 指向、将 draft 或构建完成误判为公开发布，以及将 Homebrew workflow 派发误判为同步成功。通过精确版本字段核对、已有 workflow 条件审查、tag SHA 和各远端状态核验控制风险。
+主要风险是误改第三方锁版本、漏掉实际应用版本源、README 将普通卸载与 zap 混淆、`GH_REPO` 与 workflow repository context 不一致、修改超出最小变量补充、错误 tag 指向，以及将 draft/构建完成/派发成功误判为公开发布或 tap 同步成功。通过精确版本字段核对、job-level context 契约、现有 workflow 门禁、tag SHA 和各远端状态核验控制风险。

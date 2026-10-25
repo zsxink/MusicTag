@@ -52,6 +52,13 @@ function assertOrder(haystack, needles, label) {
 const publishReleaseJob = () => blockOf(releaseYml, /^ {2}publish-release:\s*$/);
 const publishTauriJob = () => blockOf(releaseYml, /^ {2}publish-tauri:\s*$/);
 
+test('release publish contract: publish-release sets the gh repository context at job level', () => {
+  const job = publishReleaseJob();
+  const jobEnv = blockOf(job, /^ {4}env:\s*$/);
+  assert.match(jobEnv, /^ {6}GH_REPO: \$\{\{ github\.repository \}\}[ \t]*$/m);
+  assert.equal([...jobEnv.matchAll(/^ {6}GH_REPO:/gm)].length, 1);
+});
+
 // Spec scenarios: 全部平台成功后自动发布 / 任一平台失败不发布（design D1）。
 test('release publish contract: publish-release job exists with needs, timeout, and default success semantics', () => {
   const job = publishReleaseJob();

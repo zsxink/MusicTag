@@ -109,6 +109,7 @@ jobs:
       actions: write   # gh workflow run（workflow_dispatch）所需最小权限
     env:
       RELEASE_TAG: ${{ github.ref_name }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Publish draft release and trigger tap sync
         env:
