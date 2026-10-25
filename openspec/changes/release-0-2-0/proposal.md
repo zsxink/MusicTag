@@ -9,6 +9,7 @@ GitHub Issue：#186
 ## 范围
 
 - 复核 `v0.1.5..HEAD` 已合入的用户可见变更及发布流程改动，检查实现、文档和现有验证是否一致。
+- 修复现有 `publish-release` job 在无 checkout 的 runner 上缺少 GitHub CLI 仓库上下文的问题，并增加对应契约回归；不改变 tag 触发、构建矩阵、发布顺序或 Homebrew 同步机制。
 - 将应用自身版本元数据和 README 版本徽章统一更新为 `0.2.0`。
 - 汇总 `v0.1.5` 之后的用户可见变化，更新 README 发布说明。
 - 合并后在版本提交上推送 `v0.2.0` 标签，核对四平台构建、正式 Release 发布和 Homebrew tap 同步。
@@ -16,7 +17,7 @@ GitHub Issue：#186
 ## 非目标
 
 - 不增加新的产品功能。
-- 不改变标签触发的 Release 构建、发布和 tap 同步机制。
+- 不改变标签触发条件、Release 构建矩阵、发布顺序或 tap 同步机制；仅显式传递现有仓库上下文以使发布命令能在新 runner 执行。
 - 不调整与本次发布无关的产品行为或开发流程。
 
 ## 验收
@@ -25,4 +26,5 @@ GitHub Issue：#186
 - README 准确概括 `v0.1.5` 之后实际合入的用户可见变化。
 - 对近期变更完成独立复核，无未解决 blocker/major；确认的规格内缺陷须有回归证据并复审。
 - OpenSpec 全量校验和当前 CI workflow 适用的验证通过。
+- `publish-release` 在无本地 Git checkout 的 runner 中为 `gh` 命令显式提供当前仓库，且契约回归覆盖该条件。
 - 合并后 `v0.2.0` 标签的 Release workflow 全部成功，公开 Release 含四平台产物，Homebrew 同步 workflow 成功。

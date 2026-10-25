@@ -14,7 +14,11 @@ The README MUST summarize user-visible changes introduced since v0.1.5 without c
 - **THEN** they can identify the Homebrew Cask maintenance improvements and the adjusted folder entry, with wording consistent with the shipped application and tap configuration
 
 ### Requirement: Release build is verified after merge
-The v0.2.0 tag MUST use the existing tag-triggered workflow and produce a successful public Release after the change is merged and required CI passes.
+The v0.2.0 tag MUST use the existing tag-triggered workflow and produce a successful public Release after the change is merged and required CI passes. The publish job MUST explicitly provide GitHub CLI with the repository context because it runs without a local checkout.
+
+#### Scenario: Publish job resolves repository without checkout
+- **WHEN** the publish job runs on its fresh runner after all platform builds succeed
+- **THEN** its `gh release` and `gh workflow` commands target the repository identified by the workflow context without relying on a local Git remote
 
 #### Scenario: Verify tag-triggered release
 - **WHEN** the merged v0.2.0 commit is tagged and the release workflow completes
