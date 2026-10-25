@@ -1,5 +1,7 @@
 # UI folder button
 
+GitHub Issue: #182
+
 Move the folder picker entry point into the global app bar and remove the current folder path display. Keep folder selection, dirty-state interception, keyboard shortcut, and song loading behavior unchanged.
 
 ## Motivation
