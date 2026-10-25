@@ -1,6 +1,6 @@
 # App shell folder entry
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Open folder from the app bar
 The application SHALL expose a single “打开文件夹” action in the global app bar. Activating it SHALL use the existing native folder picker, route the selected directory through the existing unsaved-change guard, and load the selected folder's songs. Cancelling the picker SHALL leave the current folder unchanged.
