@@ -52,10 +52,14 @@ describe('AppBar — 主题按钮（spec: 顶栏最右主题按钮手动切换 �
 
   const themeBtn = (w: ReturnType<typeof mount>) => w.get('button.theme-btn')
 
-  it('提供唯一的文件夹入口，不展示当前路径', () => {
+  it('提供带无障碍名称和悬停提示的紧凑文件夹图标入口，不展示当前路径', () => {
     const w = mount(AppBar)
+    const folderButton = w.get('button.open-folder-btn')
     expect(w.findAll('button.open-folder-btn')).toHaveLength(1)
-    expect(w.text()).toContain('打开文件夹')
+    expect(folderButton.attributes('aria-label')).toBe('打开文件夹')
+    expect(folderButton.attributes('title')).toBe('打开文件夹')
+    expect(folderButton.find('svg[aria-hidden="true"]')).toBeTruthy()
+    expect(folderButton.text()).toBe('')
     expect(w.text()).not.toContain('路径:')
     expect(w.text()).not.toContain('/Users/')
   })

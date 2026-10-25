@@ -42,7 +42,18 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       title="重新显示更新提示"
       @click="restoreUpdateNotice"
     ><span aria-hidden="true">•</span></button>
-    <button class="open-folder-btn" type="button" @click="openFolder">打开文件夹</button>
+    <button
+      class="open-folder-btn"
+      type="button"
+      aria-label="打开文件夹"
+      title="打开文件夹"
+      @click="openFolder"
+    >
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+        <path d="M3.75 6.75h6l1.8 2h8.7v8.5a2 2 0 0 1-2 2h-12.5a2 2 0 0 1-2-2v-10.5Z" />
+        <path d="M3.75 9h16.5" />
+      </svg>
+    </button>
     <!-- 主题按钮：图标 = 目标主题（深色 → ☀️ 去浅色；浅色 → 🌙 去深色） -->
     <button
       class="theme-btn"
@@ -82,18 +93,31 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 }
 
 .open-folder-btn {
-  flex: 1;
-  max-width: 180px;
-  padding: 6px 12px;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text);
   background: transparent;
-  font-size: 13px;
-  font-weight: 600;
+  transition: background 0.12s, border-color 0.12s;
 }
 
-.open-folder-btn:hover {
+.open-folder-btn svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.open-folder-btn:hover,
+.open-folder-btn:focus-visible {
   background: var(--hover);
   border-color: var(--accent);
 }

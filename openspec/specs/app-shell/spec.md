@@ -33,7 +33,7 @@ TBD - created by archiving change v1-skeleton-tauri. Update Purpose after archiv
 - **THEN** 界面使用浅色 token（`--bg:#F4F4F1` 等）
 
 ### Requirement: Open folder from the app bar
-The application SHALL expose a single “打开文件夹” action in the global app bar. Activating it SHALL use the existing native folder picker, route the selected directory through the existing unsaved-change guard, and load the selected folder's songs. Cancelling the picker SHALL leave the current folder unchanged.
+The application SHALL expose a single compact folder-icon button in the global app bar for “打开文件夹”. The button SHALL provide “打开文件夹” as its accessible name and hover title. Activating it SHALL use the existing native folder picker, route the selected directory through the existing unsaved-change guard, and load the selected folder's songs. Cancelling the picker SHALL leave the current folder unchanged.
 
 #### Scenario: Choose a folder
 - **WHEN** the user activates the app-bar folder button and chooses a directory
