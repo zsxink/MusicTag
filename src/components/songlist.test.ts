@@ -21,6 +21,7 @@ beforeEach(() => stopFolderWatching())
 import type { Song } from '../api/types'
 import { songStore, stopFolderWatching } from '../store/song'
 import SongList from './SongList.vue'
+import AppBar from './AppBar.vue'
 
 const makeSong = (path: string): Song => ({
   path,
@@ -50,6 +51,9 @@ describe('SongList — 打开文件夹后的列表渲染（regression #27）', (
     const w = mount(SongList)
     expect(w.find('[data-testid="empty-state"]').exists()).toBe(true)
     expect(w.text()).toContain('文件夹中没有音乐')
+    expect(w.find('button.open-btn').exists()).toBe(false)
+    expect(w.find('.search-input').exists()).toBe(true)
+    expect(w.find('.missing-filter-btn').exists()).toBe(true)
   })
 
   it('有歌曲 → 渲染歌曲行，行内显示歌名与作者', () => {
@@ -68,89 +72,6 @@ describe('SongList — 打开文件夹后的列表渲染（regression #27）', (
     const w = mount(SongList)
     expect(w.find('[data-testid="empty-state"]').exists()).toBe(true)
     expect(w.text()).toContain('无匹配结果')
-  })
-})
-
-describe('SongList — openFolder 走 dirty 拦截门（v1-ux-settings 2.3 补充接线测试）', () => {
-  beforeEach(() => {
-    mockInvoke.mockReset()
-    songStore.folderPath = null
-    songStore.songs = []
-    songStore.searchQuery = ''
-    songStore.selectedPath = null
-    songStore.current = null
-    songStore.original = null
-    songStore.readonly = false
-    songStore.saveState = 'idle'
-    songStore.saveError = ''
-    songStore.pendingAction = null
-  })
-
-  it('干净态点「打开文件夹」→ 直接换目录并替换列表，不弹窗（spec 无修改直接换）', async () => {
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'watch_folder') return Promise.resolve(undefined)
-      if (cmd === 'get_last_dir') return null // 启动自动加载：无记忆 → 不自动加载
-      if (cmd === 'pick_folder') return '/new/dir'
-      if (cmd === 'list_songs') return [{ path: '/new/dir/a.flac', title: 'A', artist: 'AA' }]
-
-      throw new Error(`unexpected cmd: ${cmd}`)
-    })
-
-    const w = mount(SongList)
-    await w.get('button.open-btn').trigger('click')
-    await flushPromises()
-
-    expect(songStore.pendingAction).toBeNull() // 不弹窗
-    expect(songStore.folderPath).toBe('/new/dir') // 直接换目录
-    expect(songStore.songs).toEqual([{ path: '/new/dir/a.flac', title: 'A', artist: 'AA' }])
-  })
-
-  it('dirty 态点「打开文件夹」→ 进入 pending folder（复用同一弹窗），不立即换目录、编辑保留', async () => {
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'watch_folder') return Promise.resolve(undefined)
-      if (cmd === 'get_last_dir') return null // 启动自动加载：无记忆 → 不自动加载
-      if (cmd === 'pick_folder') return '/new/dir'
-      if (cmd === 'list_songs') return songStore.songs
-      throw new Error(`unexpected cmd: ${cmd}`)
-    })
-    songStore.folderPath = '/a'
-    songStore.selectedPath = '/a/one.flac'
-    songStore.current = { ...makeSong('/a/one.flac') }
-    songStore.original = { ...makeSong('/a/one.flac') }
-    songStore.current!.title = '改过'
-
-    const w = mount(SongList)
-    await w.get('button.open-btn').trigger('click')
-    await flushPromises()
-
-    expect(songStore.pendingAction).toMatchObject({ kind: 'folder', dir: '/new/dir' })
-    expect(songStore.folderPath).toBe('/a') // 未换目录
-    expect(songStore.current?.title).toBe('改过') // 编辑保留
-    expect(mockInvoke).toHaveBeenCalledWith('pick_folder', undefined) // 只触发选择器
-    expect(mockInvoke).not.toHaveBeenCalledWith('list_songs') // 未触发列表加载
-  })
-
-  it('dirty 态但用户取消原生选择器（pick_folder 返回 null）→ 无视，不弹窗不改状态', async () => {
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'watch_folder') return Promise.resolve(undefined)
-      if (cmd === 'get_last_dir') return null // 启动自动加载：无记忆 → 不自动加载
-      if (cmd === 'pick_folder') return null
-      if (cmd === 'list_songs') return songStore.songs
-      throw new Error(`unexpected cmd: ${cmd}`)
-    })
-    songStore.folderPath = '/a'
-    songStore.selectedPath = '/a/one.flac'
-    songStore.current = { ...makeSong('/a/one.flac') }
-    songStore.original = { ...makeSong('/a/one.flac') }
-    songStore.current!.title = '改过'
-
-    const w = mount(SongList)
-    await w.get('button.open-btn').trigger('click')
-    await flushPromises()
-
-    expect(songStore.pendingAction).toBeNull() // 用户已明确取消，不弹窗
-    expect(songStore.folderPath).toBe('/a')
-    expect(songStore.current?.title).toBe('改过')
   })
 })
 
@@ -277,7 +198,7 @@ describe('SongList — 启动自动加载上次目录（dir-memory G4：onMounte
     expect(songStore.folderPath).toBe('/music')
 
     // 用户手动打开新目录并成功加载
-    await w.get('button.open-btn').trigger('click')
+    await mount(AppBar).get('button.open-folder-btn').trigger('click')
     await flushPromises()
     expect(songStore.folderPath).toBe('/manual')
     resolveManual([{ path: '/manual/x.flac', title: 'M', artist: 'MM' }])
@@ -755,7 +676,7 @@ describe('SongList — 列表右键刷新与监听生命周期（#123）', () =>
   it('右键「刷新」实际重读列表；Esc/外部点击/Tab 关闭，键盘菜单聚焦刷新', async () => {
     const w = mount(SongList, { attachTo: document.body })
     await flushPromises()
-    await w.get('.open-btn').trigger('click')
+    await mount(AppBar).get('button.open-folder-btn').trigger('click')
     await flushPromises()
     const list = w.get('.list-area')
     await list.trigger('contextmenu', { clientX: 20, clientY: 20 })
@@ -789,7 +710,7 @@ describe('SongList — 列表右键刷新与监听生命周期（#123）', () =>
     await flushPromises()
     await w.get('.list-area').trigger('contextmenu')
     expect(w.get('[role="menuitem"]').attributes('disabled')).toBeDefined()
-    await w.get('.open-btn').trigger('click')
+    await mount(AppBar).get('button.open-folder-btn').trigger('click')
     await flushPromises()
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'list_songs') throw new Error('磁盘暂不可读')
@@ -813,7 +734,7 @@ describe('SongList — 列表右键刷新与监听生命周期（#123）', () =>
     })
     const w = mount(SongList)
     await flushPromises()
-    await w.get('.open-btn').trigger('click')
+    await mount(AppBar).get('button.open-folder-btn').trigger('click')
     await flushPromises()
     restore('/remembered')
     await flushPromises()

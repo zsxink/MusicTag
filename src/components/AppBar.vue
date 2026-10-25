@@ -1,10 +1,32 @@
 <script setup lang="ts">
-// 全局顶栏（v1-folder-list）：品牌 + 当前目录绝对路径（mono）+ 主题按钮。
+// 全局顶栏：品牌 + 文件夹操作 + 主题按钮。
 // v1-ux-settings：主题按钮接 theme store——图标 = 目标主题（D8：effective 深色显示 ☀️，
 // 浅色显示 🌙），点击 setTheme 在深浅之间切换（写/删 localStorage 持久记忆）。
 import { setTheme, themeStore } from '../store/theme'
 import { hasAvailableUpdate, restoreUpdateNotice } from '../store/updates'
 import { songStore } from '../store/song'
+import { listSongs, pickFolder } from '../api/songs'
+import { requestFolder } from '../store/song'
+import { onMounted, onUnmounted } from 'vue'
+
+async function openFolder() {
+  try {
+    const picked = await pickFolder()
+    if (picked === null) return
+    await requestFolder(picked, listSongs)
+  } catch (error) {
+    songStore.folderRefreshError = `打开文件夹失败：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') {
+    event.preventDefault()
+    void openFolder()
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
@@ -21,13 +43,7 @@ import { songStore } from '../store/song'
       title="重新显示更新提示"
       @click="restoreUpdateNotice"
     ><span aria-hidden="true">•</span></button>
-    <div
-      class="appbar-path"
-      :title="songStore.folderPath ?? '未打开文件夹'"
-    >
-      <template v-if="songStore.folderPath">路径: {{ songStore.folderPath }}</template>
-      <template v-else>路径: —</template>
-    </div>
+    <button class="open-folder-btn" type="button" @click="openFolder">打开文件夹</button>
     <!-- 主题按钮：图标 = 目标主题（深色 → ☀️ 去浅色；浅色 → 🌙 去深色） -->
     <button
       class="theme-btn"
@@ -66,14 +82,21 @@ import { songStore } from '../store/song'
   letter-spacing: 0.02em;
 }
 
-.appbar-path {
+.open-folder-btn {
   flex: 1;
-  color: var(--text-dim);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: 180px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.open-folder-btn:hover {
+  background: var(--hover);
+  border-color: var(--accent);
 }
 
 .update-indicator {
