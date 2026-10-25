@@ -11,7 +11,7 @@
 - [x] 4. 对确认的规格内缺陷，由主会话先限定授权文件和回归任务，再实施有界修复；无缺陷则记录无需产品代码修改。范围歧义或超规格问题交主会话决定。
 - [x] 5. 将 `package.json`、`package-lock.json` 的根版本和 `packages[""].version`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 中 `music-tag` 自身版本、`src-tauri/tauri.conf.json` 统一为 `0.2.0`；枚举其他实际应用/打包版本声明，避免更改第三方依赖与历史版本。对应场景：Inspect release version。
 - [x] 6. 更新 README 版本徽章和 `v0.2.0` 发布说明，准确描述 Cask livecheck/卸载维护改进及全局顶栏文件夹图标入口调整；核对不夸大能力且符合产品实现。对应场景：Read v0.2.0 release notes。
-- [ ] 7. 主会话审计 Dev 差异与授权路径并记录提交；Tester 核对版本及说明，完成三批变更复核所需的相关既有回归与有界修复测试。存在外部 fixture 时先确认生成工具、命令、产物和 reader 解析；无 fixture 时记录不适用。主会话审计 Tester checkpoint 并保存证据。
+- [x] 7. 主会话审计 Dev 差异与授权路径并记录提交；Tester 核对版本及说明，完成三批变更复核所需的相关既有回归与有界修复测试。存在外部 fixture 时先确认生成工具、命令、产物和 reader 解析；无 fixture 时记录不适用。主会话审计 Tester checkpoint 并保存证据。
 
 ## 独立 CR 与 Verify
 
