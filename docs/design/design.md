@@ -256,9 +256,9 @@ IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/c
 
 ```
 App.vue
-├── AppBar.vue          # 品牌 + 路径 + 主题按钮（最右）
+├── AppBar.vue          # 品牌 + 打开文件夹按钮 + 主题按钮（最右）
 ├── AboutDialog.vue     # 当前版本与最近更新检查结果
-├── SongList.vue        # 左栏：打开文件夹 + 搜索框 + 右键刷新 + 歌曲列表
+├── SongList.vue        # 左栏：搜索框 + 右键刷新 + 歌曲列表
 │   └── SongRow.vue     # 单行（作者 + 歌名），选中高亮
 ├── Editor.vue          # 右栏编辑表单
 │   ├── EditorBar.vue   # 正在编辑 + 保存状态 + 撤销/保存
