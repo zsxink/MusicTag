@@ -58,7 +58,7 @@ describe('AppBar — 主题按钮（spec: 顶栏最右主题按钮手动切换 �
     expect(w.findAll('button.open-folder-btn')).toHaveLength(1)
     expect(folderButton.attributes('aria-label')).toBe('打开文件夹')
     expect(folderButton.attributes('title')).toBe('打开文件夹')
-    expect(folderButton.find('svg[aria-hidden="true"]')).toBeTruthy()
+    expect(folderButton.find('svg[aria-hidden="true"]').exists()).toBe(true)
     expect(folderButton.text()).toBe('')
     expect(w.text()).not.toContain('路径:')
     expect(w.text()).not.toContain('/Users/')
