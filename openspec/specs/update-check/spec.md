@@ -38,7 +38,7 @@ Define how MusicTag checks stable GitHub Releases, reports update status, and le
 - **THEN** 应用不更新成功检查时间戳，以便后续启动重试
 
 ### Requirement: 以非阻塞方式提示新版本
-发现新版本时，应用 MUST 以不抢焦点的应用内提示展示版本号，并提供“查看详情”和“稍后”操作；提示 MUST 在 15 秒后自动关闭但保留可用更新状态，允许用户从顶栏提示标记重新打开提示。不得自动打开浏览器、下载或安装。
+发现新版本时，应用 MUST 以不抢焦点的应用内提示展示版本号，并提供“查看详情”和“稍后”操作；提示 MUST 在 15 秒后自动关闭但保留可用更新状态，允许用户从顶栏提示标记重新打开提示。顶栏更新标记 MUST 显示为直径约 8px 的红色小圆点，且 MUST 保留无障碍说明和原有恢复提示操作。不得自动打开浏览器、下载或安装。
 
 #### Scenario: 查看 Release 详情
 - **WHEN** 用户选择“查看详情”
@@ -50,11 +50,15 @@ Define how MusicTag checks stable GitHub Releases, reports update status, and le
 
 #### Scenario: 更新提示自动关闭
 - **WHEN** 新版本提示显示后经过 15 秒
-- **THEN** 提示关闭且顶栏品牌与路径之间显示带有无障碍说明的可用更新标记
+- **THEN** 提示关闭且顶栏品牌与路径之间显示直径约 8px、带有无障碍说明的红色可用更新标记
 
 #### Scenario: 重新打开更新提示
 - **WHEN** 用户激活顶栏可用更新标记
 - **THEN** 应用重新显示包含“查看详情”和“稍后”操作的该版本提示
+
+#### Scenario: 没有可用更新
+- **WHEN** 更新检查显示当前版本已是最新版本
+- **THEN** 顶栏不显示可用更新标记
 
 ### Requirement: 展示当前版本和最近检查结果
 关于或设置界面 MUST 展示当前应用版本和最近一次更新检查结果。

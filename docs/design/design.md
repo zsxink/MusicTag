@@ -409,7 +409,7 @@ interface UpdateCheckResult {
 
 前端 `api/updates.ts → api/client.ts` 封装检查/详情 IPC、最近成功检查时间和菜单状态同步；`store/updates.ts` 持有 `idle/checking/up-to-date/update-available/error` 和最近结果，并用请求序号忽略过期结果，独立于歌词/封面搜索离线状态。启动时仅在无成功时间或距成功时间至少 7×24 小时时异步检查；手动菜单检查始终执行，成功结果写入时间，失败不写。`App.vue` 集中监听 `app-menu-action` 并分发动作，同时按当前 EULA、歌曲和 dirty 状态复核；`AboutDialog.vue` 显示当前版本及最近结果。
 
-Tauri 原生应用菜单通过 `Menu`/`Submenu` 提供 File/Edit/View/Help 菜单。WebView 可消费的稳定动作 ID 通过 `app-menu-action` 事件发给 `App.vue`；原生编辑 role、窗口关闭/退出及开发者工具由 Rust 直接处理。前端 API 统一监听并释放订阅，菜单 enabled/visible 快照经 `sync_menu_state` 同步，`AppBar.vue` 在品牌与文件夹按钮之间提供可恢复更新提示的无障碍标记，并持有 ⌘O/Ctrl+O 打开文件夹快捷键。
+Tauri 原生应用菜单通过 `Menu`/`Submenu` 提供 File/Edit/View/Help 菜单。WebView 可消费的稳定动作 ID 通过 `app-menu-action` 事件发给 `App.vue`；原生编辑 role、窗口关闭/退出及开发者工具由 Rust 直接处理。前端 API 统一监听并释放订阅，菜单 enabled/visible 快照经 `sync_menu_state` 同步，`AppBar.vue` 在品牌与文件夹按钮之间提供可恢复更新提示的无障碍标记，并持有 ⌘O/Ctrl+O 打开文件夹快捷键。更新标记使用无可见底色的透明按钮保留键盘与辅助技术操作，内部红色圆点直径约 8px；保留可访问名称、悬停提示和原有提示恢复动作，不显示字符圆点或大型圆形按钮背景。
 
 新版提示非模态、不抢焦点，只在点“查看详情”后打开对应页面；“稍后”将版本记入 localStorage，仅抑制该版本提示，更高版本仍显示，手动检查结果及关于状态始终可见。没有下载、安装或文件写入路径。
 
