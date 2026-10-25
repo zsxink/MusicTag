@@ -5,13 +5,17 @@
 # MusicTag
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v0.2.0-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/版本-v0.2.1-blue.svg" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-个人学习许可-red.svg" alt="license" /></a>
   <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
 </p>
+
+## v0.2.1 更新
+
+- 将可用更新提示标记调整为紧凑的红点。
 
 ## v0.2.0 更新
 

@@ -41,7 +41,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       aria-label="有可用更新，重新显示更新提示"
       title="重新显示更新提示"
       @click="restoreUpdateNotice"
-    ><span aria-hidden="true">•</span></button>
+    ><span class="update-dot" aria-hidden="true"></span></button>
     <button
       class="open-folder-btn"
       type="button"
@@ -129,17 +129,24 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
   border: 0;
-  border-radius: 50%;
-  color: #fff;
-  background: #d33;
-  font-size: 20px;
-  line-height: 1;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
 }
 
-.update-indicator:hover,
 .update-indicator:focus-visible {
-  background: #b22;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.update-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #d33;
 }
 
 .theme-btn {

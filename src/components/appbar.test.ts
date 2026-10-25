@@ -155,11 +155,24 @@ describe('AppBar — 主题按钮（spec: 顶栏最右主题按钮手动切换 �
     })
     const w = mount(AppBar)
     const indicator = w.get('button.update-indicator')
-    expect(indicator.attributes('aria-label')).toContain('有可用更新')
+    expect(indicator.attributes('aria-label')).toBe('有可用更新，重新显示更新提示')
+    expect(indicator.attributes('title')).toBe('重新显示更新提示')
+    expect(indicator.text()).toBe('')
     expect(w.find('.brand').element.nextElementSibling).toBe(indicator.element)
     await indicator.trigger('click')
     expect(updatesStore.noticeVisible).toBe(true)
     restoreUpdateNotice()
+  })
+
+  it('没有可用更新时隐藏更新标记', () => {
+    Object.assign(updatesStore, {
+      status: 'up-to-date',
+      recentOutcome: { result: { current_version: '0.2.1', latest_version: '0.2.1', update_available: false, release_url: 'https://example.com' }, error: null },
+      dismissedVersion: null,
+      noticeVisible: false,
+    })
+    const w = mount(AppBar)
+    expect(w.find('button.update-indicator').exists()).toBe(false)
   })
 
   it('点击主题按钮 → setTheme 在深浅间切换，图标跟随 effective', async () => {
