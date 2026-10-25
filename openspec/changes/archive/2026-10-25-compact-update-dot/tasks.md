@@ -14,9 +14,9 @@
 
 ## Independent CR and Verify
 
-- [ ] 7. Independent read-only CR reviews the final diff against the modified `update-check` requirement and its scenarios. Confirm the change is presentation-only, keeps the condition/name/title/restore click/placement, removes visible glyph and large circle, preserves hit area/focus affordance, and does not alter update checks, prompting, timers, or persistence. Record snapshot, files, evidence, and explicit blocker/major result.
-- [ ] 8. Verify runs the current change strict validation and all applicable CI checks from `.github/workflows/ci.yml`, including `validate --all --strict --no-interactive`, pipe native suites, Homebrew publisher test, pipe self-check, `npm ci`, build/test, and Rust stable `cargo check --all-targets`/`cargo test --all-targets` with workflow system dependencies. Run the focused component test explicitly as well. Record each command, exit code, Node/Rust/system setup, and exact HEAD; stop on failure.
-- [ ] 9. Main agent saves the source manifest and command evidence for the verified snapshot and confirms the evidence matches current HEAD. Any post-CR source change invalidates affected verification and requires re-review as applicable.
+- [x] 7. Independent read-only CR reviews the final diff against the modified `update-check` requirement and its scenarios. Confirm the change is presentation-only, keeps the condition/name/title/restore click/placement, removes visible glyph and large circle, preserves hit area/focus affordance, and does not alter update checks, prompting, timers, or persistence. Record snapshot, files, evidence, and explicit blocker/major result.
+- [x] 8. Verify runs the current change strict validation and all applicable CI checks from `.github/workflows/ci.yml`, including `validate --all --strict --no-interactive`, pipe native suites, Homebrew publisher test, pipe self-check, `npm ci`, build/test, and Rust stable `cargo check --all-targets`/`cargo test --all-targets` with workflow system dependencies. Run the focused component test explicitly as well. Record each command, exit code, Node/Rust/system setup, and exact HEAD; stop on failure.
+- [x] 9. Main agent saves the source manifest and command evidence for the verified snapshot and confirms the evidence matches current HEAD. Any post-CR source change invalidates affected verification and requires re-review as applicable.
 
 ## Integrate and v0.2.1 release
 
