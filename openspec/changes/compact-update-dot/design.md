@@ -2,7 +2,7 @@
 
 ## Scope and domain
 
-Domain: `frontend`. Issue #188 changes only the presentation of the existing update indicator in `src/components/AppBar.vue`: replace its 28px red circular badge with a small red dot. This is a v0.2.1 patch release. The approved proposal and `specs/update-notifications/spec.md` define the boundary; update discovery, eligibility, notice lifecycle, persistence, and release behavior are out of scope.
+Domain: `frontend`. Issue #188 changes only the presentation of the existing update indicator in `src/components/AppBar.vue`: replace its 28px red circular badge with a small red dot. This is a v0.2.1 patch release. The approved proposal and `specs/update-check/spec.md` define the boundary; update discovery, eligibility, notice lifecycle, persistence, and release behavior are out of scope.
 
 The current component renders the indicator only when `hasAvailableUpdate()` is true. Clicking the button calls `restoreUpdateNotice`; the button has an accessible name and `title`. Preserve these bindings and attributes exactly. The small indicator stays beside the brand. No changes are needed to Rust, stores, update APIs, PRD, or the shared technical design for this presentation-only change.
 
@@ -19,10 +19,12 @@ This is a single-component visual adjustment with no state migration and no netw
 
 ## Scenario-to-validation mapping
 
-| Spec scenario | Validation |
+| Behavior scenario | Validation |
 |---|---|
-| Available update is indicated compactly | Component test sets `update-available` with a dismissed, restorable notice; asserts one indicator adjacent to the brand, preserved `aria-label` and `title`, no rendered glyph/text, and click restores `noticeVisible`. Review scoped CSS to confirm a small red dot, transparent button surface, and keyboard focus affordance. |
-| No available update | Component test covers a state without an eligible/restorable available update and asserts the indicator is absent. |
+| Update prompt automatically closes | Existing toast tests continue to cover the 15-second close behavior. Review the AppBar CSS for the 8px dot, transparent button surface, and keyboard focus affordance. |
+| User reopens the update prompt | AppBar test sets an available, dismissed update; asserts the indicator is adjacent to the brand, its `aria-label` and `title` are preserved, no glyph/text is rendered, and click restores `noticeVisible`. Existing toast tests cover prompt contents. |
+| No update is available | AppBar test covers `up-to-date` and asserts the indicator is absent. |
+| User views details or postpones | Existing update store and toast tests cover these unchanged behaviors; this change does not modify them. |
 
 Extend the existing `src/components/appbar.test.ts` cases rather than creating a new test harness. The markup behavior is directly asserted in the co-located Vue component test. Dot dimensions and surface styling should be checked against the CSS diff; avoid brittle snapshot assertions of the entire component. No fixture is required.
 

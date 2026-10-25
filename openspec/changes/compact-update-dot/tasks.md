@@ -10,11 +10,11 @@
 - [x] 3. Dev makes the minimal scoped change in `src/components/AppBar.vue`: render a small red CSS dot instead of the 28px red circle and bullet glyph. Preserve `hasAvailableUpdate()` gating, placement, button accessibility name, title, click action, usable hit area, and focus feedback. Do not alter update state or behavior.
 - [x] 4. Dev extends `src/components/appbar.test.ts` to cover the eligible/restorable update case (indicator adjacent to brand, accessible name/title preserved, no text glyph, click restores notice) and the no-available-update case (indicator absent). Keep assertions focused; no new harness or fixture.
 - [x] 5. Dev updates application-owned versions to `0.2.1` in `package.json`, `package-lock.json` root entries, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`'s `music-tag` package, and `src-tauri/tauri.conf.json`; update README badge and add a concise v0.2.1 note. Do not edit historical notes or dependency versions.
-- [ ] 6. Main agent audits Dev's diff against authorized paths and records the Dev checkpoint. Tester runs the focused `src/components/appbar.test.ts`, reviews the rendered CSS diff for a small red dot with no large red surface and retained focus affordance, checks version consistency/README accuracy, and runs `npm run build` plus `npm run test`. Record commands, exit codes, and HEAD. No fixture applies.
+- [x] 6. Main agent audits Dev's diff against authorized paths and records the Dev checkpoint. Tester runs the focused `src/components/appbar.test.ts`, reviews the rendered CSS diff for a small red dot with no large red surface and retained focus affordance, checks version consistency/README accuracy, and runs `npm run build` plus `npm run test`. Record commands, exit codes, and HEAD. No fixture applies.
 
 ## Independent CR and Verify
 
-- [ ] 7. Independent read-only CR reviews the final diff against both spec scenarios. Confirm the change is presentation-only, keeps the condition/name/title/restore click/placement, removes visible glyph and large circle, preserves hit area/focus affordance, and does not alter update checks, prompting, timers, or persistence. Record snapshot, files, evidence, and explicit blocker/major result.
+- [ ] 7. Independent read-only CR reviews the final diff against the modified `update-check` requirement and its scenarios. Confirm the change is presentation-only, keeps the condition/name/title/restore click/placement, removes visible glyph and large circle, preserves hit area/focus affordance, and does not alter update checks, prompting, timers, or persistence. Record snapshot, files, evidence, and explicit blocker/major result.
 - [ ] 8. Verify runs the current change strict validation and all applicable CI checks from `.github/workflows/ci.yml`, including `validate --all --strict --no-interactive`, pipe native suites, Homebrew publisher test, pipe self-check, `npm ci`, build/test, and Rust stable `cargo check --all-targets`/`cargo test --all-targets` with workflow system dependencies. Run the focused component test explicitly as well. Record each command, exit code, Node/Rust/system setup, and exact HEAD; stop on failure.
 - [ ] 9. Main agent saves the source manifest and command evidence for the verified snapshot and confirms the evidence matches current HEAD. Any post-CR source change invalidates affected verification and requires re-review as applicable.
 
@@ -26,7 +26,7 @@
 
 ## Completion evidence
 
-- Both spec scenarios pass through component tests; visual CSS review confirms a compact red dot without a large red surface.
+- All scenarios in the modified `update-check` requirement remain covered by existing store/toast tests or AppBar tests; visual CSS review confirms a compact red dot without a large red surface.
 - Update eligibility, notice restoration, accessibility name/title, and all update-check/persistence behavior remain unchanged.
 - Application version declarations and README identify v0.2.1 without third-party dependency changes.
 - Independent CR, strict OpenSpec validation, and all applicable CI checks have evidence tied to the final Verify HEAD.
