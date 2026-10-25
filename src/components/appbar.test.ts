@@ -8,6 +8,7 @@ import { updatesStore, restoreUpdateNotice } from '../store/updates'
 import { songStore } from '../store/song'
 import type { ThemeEnv } from '../store/theme'
 import AppBar from './AppBar.vue'
+import SongList from './SongList.vue'
 
 const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn(async () => undefined) }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mockInvoke }))
@@ -75,6 +76,33 @@ describe('AppBar — 主题按钮（spec: 顶栏最右主题按钮手动切换 �
     await w.get('button.open-folder-btn').trigger('click')
     await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('pick_folder', undefined))
     expect(mockInvoke).not.toHaveBeenCalledWith('list_songs', expect.anything())
+  })
+
+  it.each([
+    ['⌘O', { metaKey: true }],
+    ['Ctrl+O', { ctrlKey: true }],
+  ] as const)('%s 快捷键打开文件夹选择器', async (_label, modifiers) => {
+    mockInvoke.mockImplementation(async (cmd: string) => cmd === 'pick_folder' ? null : undefined)
+    const w = mount(AppBar)
+    const event = new KeyboardEvent('keydown', { key: 'o', ...modifiers, cancelable: true })
+    window.dispatchEvent(event)
+    await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('pick_folder', undefined))
+    expect(event.defaultPrevented).toBe(true)
+    w.unmount()
+  })
+
+  it('选择器抛错后在歌曲列表中显示文件夹错误', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'pick_folder') throw new Error('dialog unavailable')
+      return undefined
+    })
+    const list = mount(SongList)
+    const bar = mount(AppBar)
+    await bar.get('button.open-folder-btn').trigger('click')
+    await vi.waitFor(() => expect(list.get('[role="status"]').text()).toContain('打开文件夹失败：dialog unavailable'))
+    expect(songStore.folderRefreshError).toBe('打开文件夹失败：dialog unavailable')
+    bar.unmount()
+    list.unmount()
   })
 
   it('存在未保存修改时仍经过目录切换拦截门', async () => {
