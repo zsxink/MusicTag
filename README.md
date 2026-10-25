@@ -5,13 +5,18 @@
 # MusicTag
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v0.1.5-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/版本-v0.2.0-blue.svg" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-个人学习许可-red.svg" alt="license" /></a>
   <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
 </p>
+
+## v0.2.0 更新
+
+- 改进 Homebrew Cask 维护：增加基于 GitHub 最新正式版的 `livecheck` 检查；普通卸载会先退出 MusicTag，用户可选择运行 `brew uninstall --zap --cask musictag` 清理应用数据目录。
+- 将「打开文件夹」入口调整为全局顶栏文件夹图标；保留无障碍名称、悬停提示和 ⌘O/Ctrl+O 快捷键。
 
 ## v0.1.5 更新
 
