@@ -1,10 +1,31 @@
 <script setup lang="ts">
-// 全局顶栏（v1-folder-list）：品牌 + 当前目录绝对路径（mono）+ 主题按钮。
+// 全局顶栏：品牌 + 文件夹操作 + 主题按钮。
 // v1-ux-settings：主题按钮接 theme store——图标 = 目标主题（D8：effective 深色显示 ☀️，
 // 浅色显示 🌙），点击 setTheme 在深浅之间切换（写/删 localStorage 持久记忆）。
+import { onMounted, onUnmounted } from 'vue'
+import { listSongs, pickFolder } from '../api/songs'
+import { requestFolder, songStore } from '../store/song'
 import { setTheme, themeStore } from '../store/theme'
 import { hasAvailableUpdate, restoreUpdateNotice } from '../store/updates'
-import { songStore } from '../store/song'
+
+async function openFolder() {
+  try {
+    const picked = await pickFolder()
+    if (picked === null) return
+    await requestFolder(picked, listSongs)
+  } catch (error) {
+    songStore.folderRefreshError = `打开文件夹失败：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') {
+    event.preventDefault()
+    void openFolder()
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
@@ -21,13 +42,18 @@ import { songStore } from '../store/song'
       title="重新显示更新提示"
       @click="restoreUpdateNotice"
     ><span aria-hidden="true">•</span></button>
-    <div
-      class="appbar-path"
-      :title="songStore.folderPath ?? '未打开文件夹'"
+    <button
+      class="open-folder-btn"
+      type="button"
+      aria-label="打开文件夹"
+      title="打开文件夹"
+      @click="openFolder"
     >
-      <template v-if="songStore.folderPath">路径: {{ songStore.folderPath }}</template>
-      <template v-else>路径: —</template>
-    </div>
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+        <path d="M3.75 6.75h6l1.8 2h8.7v8.5a2 2 0 0 1-2 2h-12.5a2 2 0 0 1-2-2v-10.5Z" />
+        <path d="M3.75 9h16.5" />
+      </svg>
+    </button>
     <!-- 主题按钮：图标 = 目标主题（深色 → ☀️ 去浅色；浅色 → 🌙 去深色） -->
     <button
       class="theme-btn"
@@ -66,14 +92,34 @@ import { songStore } from '../store/song'
   letter-spacing: 0.02em;
 }
 
-.appbar-path {
-  flex: 1;
-  color: var(--text-dim);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.open-folder-btn {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: transparent;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.open-folder-btn svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.open-folder-btn:hover,
+.open-folder-btn:focus-visible {
+  background: var(--hover);
+  border-color: var(--accent);
 }
 
 .update-indicator {
@@ -98,6 +144,7 @@ import { songStore } from '../store/song'
 
 .theme-btn {
   flex: 0 0 auto;
+  margin-left: auto;
   width: 30px;
   height: 30px;
   display: flex;

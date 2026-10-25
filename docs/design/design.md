@@ -92,10 +92,9 @@
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│ appbar   ♪ MusicTag │ 路径: /Volumes/…      │ [☀️主题] │
+│ appbar   ♪ MusicTag │ [文件夹图标]           │ [☀️主题] │
 ├──────────────┬─────────────────────────────────────────┤
 │ sidebar 300px │ editor                                │
-│ [📁 打开文件夹] │ ┌────────────────────────────────────┐ │
 │ [🔍 搜索……]   │ │ 正在编辑: 告白气球.mp3 周杰伦  [状态]│ │
 │ ──────────── │ │                          [撤销][保存]│ │
 │ 周杰伦        │ ├────────────────────────────────────┤ │
@@ -116,8 +115,8 @@
 └──────────────┴─────────────────────────────────────────┘
 ```
 
-- **appbar**：品牌 + 路径（mono）+ 主题按钮（**最右**）。
-- **sidebar 300px**：打开文件夹 → 搜索 → 展平歌曲列表。
+- **appbar**：品牌 + 打开文件夹按钮 + 主题按钮（**最右**）。
+- **sidebar 300px**：搜索 → 展平歌曲列表。
 - **editor**：编辑顶栏（状态 + 撤销/保存右上）→ 字段网格 `1fr 200px`（左字段列 + 右封面区，封面下方接「搜索封面」）→ 歌词区（head 行 → 搜索歌词 → textarea）。
 
 ---
@@ -128,7 +127,7 @@
 
 | 组件 | 关键状态 |
 |---|---|
-| 打开文件夹按钮 | 全宽、ghost；hover 微亮 |
+| 打开文件夹按钮 | 顶栏紧凑描边图标按钮；无障碍名称与悬停提示为「打开文件夹」；hover 微亮；支持 `⌘O` / `Ctrl+O` |
 | 搜索框 | focus 琥珀描边 |
 | 歌曲行 | hover 微亮；`selected` 琥珀底 + 歌名变琥珀 |
 | 输入框 | focus 琥珀描边；占位符 `--text-dim` |
@@ -256,9 +255,9 @@ IPC 在 Rust 只允许出现在 `commands/`，在前端只允许出现在 `api/c
 
 ```
 App.vue
-├── AppBar.vue          # 品牌 + 路径 + 主题按钮（最右）
+├── AppBar.vue          # 品牌 + 打开文件夹按钮 + 主题按钮（最右）
 ├── AboutDialog.vue     # 当前版本与最近更新检查结果
-├── SongList.vue        # 左栏：打开文件夹 + 搜索框 + 右键刷新 + 歌曲列表
+├── SongList.vue        # 左栏：搜索框 + 右键刷新 + 歌曲列表
 │   └── SongRow.vue     # 单行（作者 + 歌名），选中高亮
 ├── Editor.vue          # 右栏编辑表单
 │   ├── EditorBar.vue   # 正在编辑 + 保存状态 + 撤销/保存
@@ -410,7 +409,7 @@ interface UpdateCheckResult {
 
 前端 `api/updates.ts → api/client.ts` 封装检查/详情 IPC、最近成功检查时间和菜单状态同步；`store/updates.ts` 持有 `idle/checking/up-to-date/update-available/error` 和最近结果，并用请求序号忽略过期结果，独立于歌词/封面搜索离线状态。启动时仅在无成功时间或距成功时间至少 7×24 小时时异步检查；手动菜单检查始终执行，成功结果写入时间，失败不写。`App.vue` 集中监听 `app-menu-action` 并分发动作，同时按当前 EULA、歌曲和 dirty 状态复核；`AboutDialog.vue` 显示当前版本及最近结果。
 
-Tauri 原生应用菜单通过 `Menu`/`Submenu` 提供 File/Edit/View/Help 菜单。WebView 可消费的稳定动作 ID 通过 `app-menu-action` 事件发给 `App.vue`；原生编辑 role、窗口关闭/退出及开发者工具由 Rust 直接处理。前端 API 统一监听并释放订阅，菜单 enabled/visible 快照经 `sync_menu_state` 同步，`AppBar.vue` 在品牌与路径之间提供可恢复更新提示的无障碍标记。
+Tauri 原生应用菜单通过 `Menu`/`Submenu` 提供 File/Edit/View/Help 菜单。WebView 可消费的稳定动作 ID 通过 `app-menu-action` 事件发给 `App.vue`；原生编辑 role、窗口关闭/退出及开发者工具由 Rust 直接处理。前端 API 统一监听并释放订阅，菜单 enabled/visible 快照经 `sync_menu_state` 同步，`AppBar.vue` 在品牌与文件夹按钮之间提供可恢复更新提示的无障碍标记，并持有 ⌘O/Ctrl+O 打开文件夹快捷键。
 
 新版提示非模态、不抢焦点，只在点“查看详情”后打开对应页面；“稍后”将版本记入 localStorage，仅抑制该版本提示，更高版本仍显示，手动检查结果及关于状态始终可见。没有下载、安装或文件写入路径。
 

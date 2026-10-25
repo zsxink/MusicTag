@@ -1,10 +1,8 @@
 <script setup lang="ts">
-// 左栏（v1-folder-list）：顶部「打开文件夹」按钮 + 搜索框 + 展平列表。
-// 数据流：invoke('pick_folder') → Rust 原生选择器 → None 无视 / Some(dir)
-//   → store.folderPath = dir → invoke('list_songs', { dir }) → songs 整体替换、selectedPath 重置。
+// 左栏：搜索框 + 展平列表。
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 
-import { getLastDir, listSongs, pickFolder } from '../api/songs'
+import { getLastDir, listSongs } from '../api/songs'
 import type { MissingField } from '../api/types'
 import { filteredSongs } from '../store/selectors'
 import {
@@ -12,7 +10,6 @@ import {
   initLastDir,
   MISSING_FIELDS,
   openMissingFilter,
-  requestFolder,
   refreshFolder,
   resetFailedStartupFolder,
   startFolderWatching,
@@ -23,29 +20,12 @@ import {
 } from '../store/song'
 import SongRow from './SongRow.vue'
 
-/** 打开文件夹：选择 + 遍历 + 整体替换列表。
- *  v1-ux-settings：走 requestFolder（dirty 拦截门——有未保存修改时复用同一三选一弹窗）。 */
-async function openFolder() {
-  try {
-    const picked = await pickFolder()
-    if (picked === null || !mounted) return
-    await requestFolder(picked, (dir) => listSongs(dir))
-  } catch (error) {
-    songStore.folderRefreshError = `打开文件夹失败：${error instanceof Error ? error.message : String(error)}`
-  }
-}
-
-/** ⌘O / Ctrl+O 快捷键打开文件夹。 */
 function onKeydown(e: KeyboardEvent) {
   if (menuOpen.value && e.key === 'Escape') {
     e.preventDefault()
     closeMenu(true)
   }
   if (menuOpen.value && e.key === 'Tab') closeMenu(false)
-  if ((e.metaKey || e.ctrlKey) && (e.key === 'o' || e.key === 'O')) {
-    e.preventDefault()
-    openFolder()
-  }
 }
 
 const missingLabels: Record<MissingField, string> = {
@@ -164,7 +144,6 @@ onUnmounted(() => {
 <template>
   <aside class="song-list">
     <div class="list-head">
-      <button class="open-btn" type="button" @click="openFolder">打开文件夹</button>
       <input
         v-model="songStore.searchQuery"
         class="search-input"
@@ -230,7 +209,7 @@ onUnmounted(() => {
     <div v-if="songStore.folderPath === null" class="empty">
       <span class="empty-icon" aria-hidden="true">🗂️</span>
       <p class="empty-title">未打开文件夹</p>
-      <p class="empty-desc">点击上方「打开文件夹」选择本地音乐文件夹</p>
+      <p class="empty-desc">点击顶部「打开文件夹」选择本地音乐文件夹</p>
     </div>
 
     <!-- 空文件夹 / 无匹配 -->
@@ -330,24 +309,6 @@ onUnmounted(() => {
   gap: 8px;
   padding: 10px;
   border-bottom: 1px solid var(--border);
-}
-
-.open-btn {
-  padding: 8px 10px;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 6px;
-  font-weight: 600;
-  transition: background 0.12s, border-color 0.12s;
-}
-
-.open-btn:hover {
-  background: var(--hover);
-}
-
-.open-btn:active {
-  transform: translateY(1px);
 }
 
 .missing-filter-btn,
