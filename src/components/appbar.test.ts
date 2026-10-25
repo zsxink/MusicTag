@@ -1,7 +1,7 @@
 // AppBar 主题按钮组件测试（v1-ux-settings D8：图标 = 目标主题，点击调 setTheme）。
 // 注入 theme store 桩环境（仿 store/theme.test.ts），不触碰真实 DOM。
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 
 import { initTheme, themeStore } from '../store/theme'
 import { updatesStore, restoreUpdateNotice } from '../store/updates'
@@ -9,6 +9,8 @@ import { songStore } from '../store/song'
 import type { ThemeEnv } from '../store/theme'
 import AppBar from './AppBar.vue'
 import SongList from './SongList.vue'
+
+enableAutoUnmount(afterEach)
 
 const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn(async () => undefined) }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mockInvoke }))
@@ -87,8 +89,11 @@ describe('AppBar — 主题按钮（spec: 顶栏最右主题按钮手动切换 �
     const event = new KeyboardEvent('keydown', { key: 'o', ...modifiers, cancelable: true })
     window.dispatchEvent(event)
     await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('pick_folder', undefined))
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
     expect(event.defaultPrevented).toBe(true)
     w.unmount()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ...modifiers, cancelable: true }))
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
   })
 
   it('选择器抛错后在歌曲列表中显示文件夹错误', async () => {

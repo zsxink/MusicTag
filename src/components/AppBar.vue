@@ -2,12 +2,11 @@
 // 全局顶栏：品牌 + 文件夹操作 + 主题按钮。
 // v1-ux-settings：主题按钮接 theme store——图标 = 目标主题（D8：effective 深色显示 ☀️，
 // 浅色显示 🌙），点击 setTheme 在深浅之间切换（写/删 localStorage 持久记忆）。
+import { onMounted, onUnmounted } from 'vue'
+import { listSongs, pickFolder } from '../api/songs'
+import { requestFolder, songStore } from '../store/song'
 import { setTheme, themeStore } from '../store/theme'
 import { hasAvailableUpdate, restoreUpdateNotice } from '../store/updates'
-import { songStore } from '../store/song'
-import { listSongs, pickFolder } from '../api/songs'
-import { requestFolder } from '../store/song'
-import { onMounted, onUnmounted } from 'vue'
 
 async function openFolder() {
   try {
@@ -121,6 +120,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 .theme-btn {
   flex: 0 0 auto;
+  margin-left: auto;
   width: 30px;
   height: 30px;
   display: flex;

@@ -6,7 +6,7 @@
   - Keep the theme and update controls in their existing positions/behavior.
 - [x] 2. Remove the sidebar duplicate and update its component coverage.
   - Own `src/components/SongList.vue` and `src/components/songlist.test.ts`.
-  - Remove the sidebar button and its picker handler/imports while retaining ⌘O/Ctrl+O, search, missing-field controls, shared error/retry feedback, and song browsing.
+  - Remove the sidebar button and its picker handler/imports while retaining search, missing-field controls, shared error/retry feedback, and song browsing; keep ⌘O/Ctrl+O on AppBar.
   - Point the no-folder empty-state instruction to the app-bar button; cover shortcut and sidebar controls.
 - [x] 3. Cover the app-bar folder action and validate the frontend change.
   - Own `src/components/appbar.test.ts`.
