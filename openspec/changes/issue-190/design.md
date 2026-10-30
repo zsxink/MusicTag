@@ -90,7 +90,7 @@ pub fn apply_permissions(file: &fs::File, perms: Option<fs::Permissions>) -> std
 
 | 角色 | 可写路径 | 说明 |
 |---|---|---|
-| Dev | `src-tauri/src/service/fs_atomic.rs`、`src-tauri/src/service/lyrics.rs`、`src-tauri/tests/save_song.rs`、`src-tauri/tests/lyrics_lrc.rs` | 仅这四个文件；不改 `Cargo.toml`/`Cargo.lock`、`service/mod.rs`、`writer.rs` |
+| Dev | `src-tauri/src/service/fs_atomic.rs`、`src-tauri/src/service/lyrics.rs`、`src-tauri/tests/save_song.rs`、`src-tauri/tests/lyrics_lrc.rs` | 本节权限实现部分仅这四个文件；不改 `service/mod.rs`、`writer.rs`。v0.2.2 版本升级的额外可写路径见 §11.2 |
 | Tester | 默认只读；经主会话明确授权后可修改上述两个测试文件 | 补测必须限定在授权路径，不得改生产代码 |
 | 主会话 | `docs/V1-PRD.md`、`docs/design/design.md`、`tasks.md`、`.agents/runs/issue-190/progress.md` | 文档同步、任务勾选与进度由主会话负责 |
 | CR / Verify | 只读 | 不改任何文件 |
@@ -155,7 +155,7 @@ Rust 全量测试会经 `tests/common` 调用 `ffmpeg` 生成 WAV/M4A fixture，
 | npm package | `package.json` 根 `version`（第 4 行） | 只改根版本 |
 | npm lock | `package-lock.json` 根 `version`（第 3 行）与 `packages[""].version`（第 9 行） | 只改这两处；其余 `packages` 条目不动 |
 | Cargo package | `src-tauri/Cargo.toml` `[package].version`（第 3 行） | 只改 package 版本 |
-| Cargo lock | `src-tauri/Cargo.lock` 中 `name = "music-tag"` 自身条目（第 2696–2697 行） | 只改该条目；`as-slice`（第 104 行）、`openssl-probe`（第 3142 行）以及 `windows-future`/`windows-link` 依赖同样出现的 `0.2.1` 均属第三方，必须保持不变 |
+| Cargo lock | `src-tauri/Cargo.lock` 中 `name = "music-tag"` 自身条目（第 2696–2697 行） | 只改该条目；`as-slice`（第 104 行）、`openssl-probe`（第 3142 行）、`version-compare`（第 5564 行）以及 `windows-future`/`windows-link` 依赖同样出现的 `0.2.1` 均属第三方，必须保持不变 |
 | Tauri | `src-tauri/tauri.conf.json` 顶层 `version`（第 4 行） | 只改顶层 version |
 | README | `README.md` 版本徽章（第 8 行 `版本-v0.2.1-blue.svg`） | 改为 `v0.2.2`；历史版本小节保留 |
 
