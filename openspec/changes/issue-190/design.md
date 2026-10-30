@@ -134,3 +134,80 @@ Rust 全量测试会经 `tests/common` 调用 `ffmpeg` 生成 WAV/M4A fixture，
 - 生产改动仅限 `fs_atomic.rs` 与 `lyrics.rs`，无新增依赖、无前端/command 契约变化、Windows 路径为 no-op。
 - `cargo check`、`cargo test`、`npm run test`、`npm run build`、`openspec validate issue-190 --strict` 全部通过，证据绑定最终 Verify HEAD。
 - PRD 与 design 的保存语义已同步；CR 无 blocker/major。
+
+## 11. 追加范围：发布 v0.2.2
+
+用户在本变更进入集成前追加授权：随 issue-190 发布 `v0.2.2`。本节只覆盖追加部分；D1–D7、权限实现方案与既有测试计划不变。
+
+### 11.1 域判定与边界
+
+- **域：`backend`（原范围不变）+ `docs`/`infra`（追加部分）**。追加内容为应用自身版本元数据、README 版本徽章与发布说明、合并后 tag 触发的公开发布与 Homebrew 同步验证；不涉及 Rust/Vue 业务代码，故不构成 `both`。
+- **范围内**：`package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json` 中应用自身版本 `0.2.1` → `0.2.2`；`README.md` 徽章与新增 v0.2.2 发布说明；合并后 `v0.2.2` tag 的 Release 与 Homebrew Tap 远端验证。
+- **范围外**：不改 `.github/workflows/release.yml`、`.github/workflows/homebrew.yml`、tag 触发、四平台 matrix、发布顺序、权限或 tap 同步机制。现有 `release.yml` 的 `publish-release` 已在 job-level `env` 提供 `GH_REPO: ${{ github.repository }}`（`release.yml:112`），满足 delta spec 的「Publish job resolves repository without checkout」场景，无需改动。不改产品行为、command 契约、依赖或 `THIRD-PARTY-NOTICES.md`。
+- **规格依据**：`openspec/changes/issue-190/specs/release/spec.md` 的三条 MODIFIED requirement。
+
+### 11.2 版本来源清单
+
+当前六处应用自身版本均为 `0.2.1`，目标均为 `0.2.2`：
+
+| 声明 | 精确位置 | 约束 |
+|---|---|---|
+| npm package | `package.json` 根 `version`（第 4 行） | 只改根版本 |
+| npm lock | `package-lock.json` 根 `version`（第 3 行）与 `packages[""].version`（第 9 行） | 只改这两处；其余 `packages` 条目不动 |
+| Cargo package | `src-tauri/Cargo.toml` `[package].version`（第 3 行） | 只改 package 版本 |
+| Cargo lock | `src-tauri/Cargo.lock` 中 `name = "music-tag"` 自身条目（第 2696–2697 行） | 只改该条目；`as-slice`（第 104 行）、`openssl-probe`（第 3142 行）以及 `windows-future`/`windows-link` 依赖同样出现的 `0.2.1` 均属第三方，必须保持不变 |
+| Tauri | `src-tauri/tauri.conf.json` 顶层 `version`（第 4 行） | 只改顶层 version |
+| README | `README.md` 版本徽章（第 8 行 `版本-v0.2.1-blue.svg`） | 改为 `v0.2.2`；历史版本小节保留 |
+
+- 运行时版本由 Tauri `getVersion()` 与 Rust `CARGO_PKG_VERSION` 派生；上述字段一致即应用版本一致。
+- 只做精确字段编辑。不得运行 `cargo update`、`npm update` 或其他会重写/重排锁文件的命令，不得全局替换 `0.2.1`。
+
+### 11.3 README 发布说明
+
+在 `## v0.2.1 更新` 之前新增 `## v0.2.2 更新`，内容限于本次实际发布的行为：
+
+- 保存音频文件或覆盖已有 `.lrc` 时，保留原文件权限位（Linux/macOS）。
+- 新建 `.lrc` 与 Windows 下的行为不变。
+
+不得声称保留所有权、ACL、xattr 或时间戳，不得声称 Windows 权限语义变化；不得把测试补强、CI 或 workflow 变化写成用户功能；保留 v0.2.1 及更早小节原文。
+
+### 11.4 发布顺序与门禁
+
+1. 版本与 README 变更和权限实现同属一个 change/PR；Verify 必须在包含 `0.2.2` 元数据的最终 HEAD 通过后才可集成。
+2. 主会话按任务 11 的序列集成：`archive → commit → sync-main → push → get-or-create-pr（Closes #190）→ wait-required-ci → merge → verify-remote → cleanup-local`。required CI 未成功不得合并。
+3. 合并后核对远端 main 已包含版本提交；检查 `v0.2.2` tag 是否已存在。已存在则核实其指向的 commit SHA，不覆盖、不强推、不移动；不存在才在合并提交创建并推送 `v0.2.2`。
+4. 等待该 tag 对应 `.github/workflows/release.yml`：`test` job 成功；`publish-tauri` 的 Windows、macOS arm64、macOS x64、Linux 四个条目全部成功并上传资产；随后 `publish-release` 将 draft 转正并派发 `homebrew.yml`。任一 job 失败或被跳过则保留未完成。
+5. 核对公开 Release：`draft=false`、`prerelease=false`，tag/标题为 `v0.2.2`，含四平台资产；记录 Release URL、资产名称与大小。
+6. 等待并核实该 tag 对应 `.github/workflows/homebrew.yml` run 成功，记录 run URL、输入 tag 与 tap 同步结果。自动派发失败时，按 README 既有维护说明手动 dispatch 同一 tag 重试并核对最终成功 run。
+7. 需要时由主会话把公开 Release 正文核对/补齐为与 README 一致的简短 v0.2.2 摘要；不改动已上传资产。
+
+不得手动提前 publish draft；不得以 workflow queued/构建中、本地构建成功、draft 已存在或派发命令成功声称发布完成。
+
+### 11.5 风险与控制
+
+| 风险 | 控制 |
+|---|---|
+| 漏改版本源（尤其 `package-lock.json` 两处与 `Cargo.lock` 自身条目） | Dev 按 §11.2 逐项编辑；Tester 结构化读取六处；CR 复核 diff 行级范围 |
+| 误改第三方版本（`Cargo.lock` 中 `as-slice`/`openssl-probe`/`windows-*` 的 `0.2.1`、`THIRD-PARTY-NOTICES.md`） | 只允许 §11.2 列出的行变化；用 `git diff` 证明锁文件其余内容不变 |
+| README 描述超范围或与实现不一致 | 文案限定权限位保留（Linux/macOS）并明确新建 `.lrc`/Windows 不变；CR 对照 `fs_atomic.rs`、`lyrics.rs` 与两个 spec |
+| tag 指向错误 commit 或覆盖旧 tag | 只在合并后的 main 提交创建 tag；先检查存在性并核对 SHA；禁止 force push/move tag |
+| 把 draft、构建中或派发成功误报为已发布 | 发布验收以公开 Release `draft=false`/`prerelease=false`、四平台资产与 Homebrew run 成功为证据；缺一即保留未完成 |
+| 版本/README 变更使既有 Verify 失效 | 在新 HEAD 重跑完整适用 CI 矩阵与 strict validate；新增差异经 round 2 独立只读 CR |
+| 验证命令重写锁文件引入无关变化 | 仅做精确字段编辑；版本一致性用只读结构化检查，不用会更新锁文件的命令 |
+
+### 11.6 验证补充
+
+- **版本结构化核对**：解析 `package.json`、`package-lock.json`（根与 `packages[""]`）、`src-tauri/tauri.conf.json`；定点读取 `src-tauri/Cargo.toml` `[package].version` 与 `src-tauri/Cargo.lock` 的 `music-tag` 条目；六处均为 `0.2.2`。
+- **锁文件与范围审计**：`git diff` 中 `package-lock.json` 仅两处版本行、`src-tauri/Cargo.lock` 仅 `music-tag` 条目一行变化；第三方包版本与 `THIRD-PARTY-NOTICES.md` 零变化；`.github/workflows/` 无 diff。
+- **README 审计**：徽章为 `v0.2.2`；新增小节措辞与 §11.3 一致，且与已实现行为相符。
+- **Verify 重跑**：源码在既有 Verify 后发生变化，旧结果失效。在含版本变更的最终 HEAD 重新运行 `cargo check --manifest-path src-tauri/Cargo.toml`、`cargo test --manifest-path src-tauri/Cargo.toml`、`npm run test`、`npm run build`、`npx --yes @fission-ai/openspec@1.5.0 validate --all --strict --no-interactive` 与 `validate issue-190 --strict --no-interactive`，记录 HEAD、命令、退出码、源码与规格指纹。
+- **独立 CR**：新增差异需在 round 2 只读复审，覆盖 §11.2/§11.3/§11.4 与「既有权限实现和 D1–D7 未被改变」；无 blocker/major 才继续集成。
+
+### 11.7 完成判据补充
+
+- 六个应用版本源均为 `0.2.2`，锁文件仅应用自身条目变化，第三方版本与 `THIRD-PARTY-NOTICES.md` 未变。
+- README 徽章为 `v0.2.2`，发布说明与已发布实现一致且不夸大。
+- 版本变更与权限实现同处最终 Verify 快照，完整 CI/严格校验通过，round 2 CR 无 blocker/major。
+- PR 合并且 required CI 成功，`v0.2.2` tag 指向合并提交。
+- Release workflow 四平台全部成功，公开 Release 为 `draft=false`、`prerelease=false` 且含四平台资产；Homebrew Tap workflow 同步成功。
+- 任一远端事实缺失或失败时保留未完成并如实报告，不得将发布标记为完成。
