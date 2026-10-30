@@ -703,3 +703,83 @@ fn save_song_mp3_embeds_compressed_cover_not_original() {
         embedded_img.height()
     );
 }
+
+// ---------------------------------------------------------------------------
+// issue-190：原子写回保留原文件权限（Unix/macOS）
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn save_song_preserves_0644_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    write_tagged_flac(tmp.path(), "mode.flac", "旧标题", "旧艺术家");
+    let path = tmp.path().join("mode.flac");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("设置 0644 失败");
+
+    app_lib::service::writer::save_song(full_song(path.to_string_lossy().into_owned()), false)
+        .expect("FLAC 保存应成功");
+
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o644, "保存后权限位应保持 0644");
+    // 权限保留不得影响标签写回本身
+    let saved = app_lib::service::reader::read_song_meta(&path).expect("保存后应可读");
+    assert_eq!(saved.title, "保存标题");
+    assert_eq!(saved.artist, "保存艺术家");
+    assert_eq!(saved.lyrics, "[00:00.00]保存歌词第一行\n[00:10.00]第二行");
+}
+
+#[cfg(unix)]
+#[test]
+fn save_song_preserves_non_default_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for mode in [0o640u32, 0o664u32] {
+        let tmp = TempDir::new().unwrap();
+        write_tagged_flac(tmp.path(), "mode.flac", "旧标题", "旧艺术家");
+        let path = tmp.path().join("mode.flac");
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).expect("设置权限失败");
+
+        app_lib::service::writer::save_song(full_song(path.to_string_lossy().into_owned()), false)
+            .expect("保存应成功");
+
+        let actual = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(actual, mode, "保存后权限位应保持 {mode:o}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn save_song_failed_write_preserves_content_and_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("ro_dir");
+    fs::create_dir(&dir).unwrap();
+    write_tagged_flac(&dir, "song.flac", "原标题", "原艺术家");
+    let path = dir.join("song.flac");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).expect("设置文件权限失败");
+    let orig_bytes = fs::read(&path).unwrap();
+
+    // 目录只读 → 临时文件创建失败 → Err，原文件内容与权限位均不变。
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).expect("设置只读目录失败");
+    let res =
+        app_lib::service::writer::save_song(full_song(path.to_string_lossy().into_owned()), false);
+    assert!(res.is_err(), "只读目录应返回 Err");
+
+    // 0555 仍允许读取目录内文件（r-x）。
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        orig_bytes,
+        "原子写失败不得改动原文件内容"
+    );
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o640,
+        "原子写失败不得改动原文件权限位"
+    );
+
+    // 恢复目录写权限以便 TempDir 清理。
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+}

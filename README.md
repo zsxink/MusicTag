@@ -5,13 +5,17 @@
 # MusicTag
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v0.2.1-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/版本-v0.2.2-blue.svg" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-个人学习许可-red.svg" alt="license" /></a>
   <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
 </p>
+
+## v0.2.2 更新
+
+- 修复保存后原文件权限丢失：保存音频或覆盖已有 `.lrc` 时保留原文件权限位（Linux/macOS）；新建 `.lrc` 与 Windows 行为不变。
 
 ## v0.2.1 更新
 

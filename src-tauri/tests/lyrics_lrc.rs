@@ -261,3 +261,82 @@ fn export_lrc_direct_call_roundtrip() {
         LYRIC_EDITED
     );
 }
+
+// ---------------------------------------------------------------------------
+// issue-190：覆盖已有 `.lrc` 保留原权限位（Unix/macOS）
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn export_lrc_overwrite_preserves_existing_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    write_tagged_flac(tmp.path(), "song.flac", "T", "A");
+    let path = tmp.path().join("song.flac");
+    let lrc_path = sidecar_lrc_path(&path);
+    fs::write(&lrc_path, "旧侧载内容").unwrap();
+    fs::set_permissions(&lrc_path, fs::Permissions::from_mode(0o640)).expect("设置 .lrc 权限失败");
+
+    let mut song = full_song(path.to_string_lossy().into_owned());
+    song.lyrics = LYRIC_EDITED.into();
+    save_song(song.clone(), true).expect("勾选保存应成功");
+
+    assert_eq!(
+        fs::read_to_string(&lrc_path).unwrap(),
+        song.lyrics,
+        "覆盖后 .lrc 内容应为当前歌词"
+    );
+    let mode = fs::metadata(&lrc_path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o640, "覆盖已有 .lrc 后权限位应保持 0640");
+}
+
+#[cfg(unix)]
+#[test]
+fn export_lrc_new_file_with_audio_nondefault_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    write_tagged_flac(tmp.path(), "song.flac", "T", "A");
+    let path = tmp.path().join("song.flac");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).expect("设置音频权限失败");
+    let lrc_path = sidecar_lrc_path(&path);
+    assert!(!lrc_path.exists(), "前置条件：.lrc 不存在");
+
+    let song = full_song(path.to_string_lossy().into_owned());
+    save_song(song.clone(), true).expect("新建 .lrc 的勾选保存应成功");
+
+    assert!(lrc_path.exists(), "应正常新建 .lrc");
+    assert_eq!(fs::read_to_string(&lrc_path).unwrap(), song.lyrics);
+    // 新建 .lrc 行为不变：不要求、也不断言继承音频文件权限（issue-190 D6）。
+}
+
+#[cfg(unix)]
+#[test]
+fn export_lrc_failed_write_preserves_existing_content_and_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join("ro_dir");
+    fs::create_dir(&dir).unwrap();
+    let audio = dir.join("song.flac");
+    let lrc_path = sidecar_lrc_path(&audio);
+    fs::write(&lrc_path, "旧侧载内容").unwrap();
+    fs::set_permissions(&lrc_path, fs::Permissions::from_mode(0o640)).expect("设置 .lrc 权限失败");
+
+    // 目录只读 → 临时文件创建失败 → Err，原 `.lrc` 内容与权限位均不变。
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).expect("设置只读目录失败");
+    let res = export_lrc(&audio, LYRIC_EDITED);
+    assert!(res.is_err(), "只读目录应返回 Err");
+
+    assert_eq!(
+        fs::read_to_string(&lrc_path).unwrap(),
+        "旧侧载内容",
+        "写失败不得改动原 .lrc 内容"
+    );
+    let mode = fs::metadata(&lrc_path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o640, "写失败不得改动原 .lrc 权限位");
+
+    // 恢复目录写权限以便 TempDir 清理。
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+}
