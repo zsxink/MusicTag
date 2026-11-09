@@ -1,29 +1,79 @@
 <script setup lang="ts">
-// 封面候选格（design §6.4）：1:1 缩略图 + 左下角来源角标；onerror 破图静默隐藏该格。
-// 点击 → store.pickCoverCandidate（点选才 download_cover 裸 bytes → lib/cover 压缩，惰性拉取）。
+// 封面候选格（design §6.4）：**先让 WebView 直接加载外链缩略图**（零额外开销）；
+// 只有直接加载失败（@error）才回退到后端 `download_cover` 拉 bytes → data URL 重试（Issue #192 路线 2）。
+// 两者都失败才切占位态，保留格子与点选（点选再走 pickCoverCandidate）。
 import { ref } from 'vue'
 
 import type { SongCandidate } from '../api/types'
+import { coverBytesToDataUrl } from '../lib/cover'
+import { loadCoverPreview } from '../lib/coverPreview'
 import { sourceLabel } from '../store/selectors'
-import { pickCoverCandidate } from '../store/song'
+import { pickCoverCandidate, songStore } from '../store/song'
 
 const props = defineProps<{
   cand: SongCandidate
 }>()
 
-/** 缩略图破图（onerror）→ 静默隐藏该格（验收 #12：不报错不标红）。 */
+const emit = defineEmits<{
+  /** 缩略图未能预览（父组件据此汇总「N 张封面未能预览」提示）。 */
+  (e: 'broken'): void
+}>()
+
+/** 当前 `<img>` 的 src：初始为外链 URL（直出），回退时换成 data URL。 */
+const imgSrc = ref<string | null>(props.cand.cover_url)
 const broken = ref(false)
+/** 回退下载进行中（占位显示「封面加载中…」，不计数）。 */
+const downloading = ref(false)
+/** 已尝试过后端下载回退（避免 data URL 再破图时无限重试）。 */
+let fallbackTried = false
+
+/** 切到占位态：不报错、不标红，且同一格只上报一次。 */
+function markBroken(): void {
+  if (broken.value) return
+  broken.value = true
+  imgSrc.value = null
+  emit('broken')
+}
+
+/**
+ * 图片加载失败：第一次 → 回退到后端下载（Rust reqwest，不经 WebView）；
+ * 回退后仍失败 / 已回退过 / 无 URL → 占位态。
+ */
+async function onImageError(): Promise<void> {
+  const url = props.cand.cover_url
+  if (url === null || fallbackTried) {
+    markBroken()
+    return
+  }
+  fallbackTried = true
+  downloading.value = true
+  const seq = songStore.coverSearchSeq
+  try {
+    const bytes = await loadCoverPreview(url)
+    if (songStore.coverSearchSeq !== seq) return // 已切歌 / 重搜，丢弃结果
+    imgSrc.value = coverBytesToDataUrl(bytes)
+  } catch {
+    if (songStore.coverSearchSeq !== seq) return
+    markBroken()
+  } finally {
+    downloading.value = false
+  }
+}
 </script>
 
 <template>
   <button
-    v-if="!broken"
     type="button"
     class="cand-cell"
+    :class="{ 'is-broken': broken }"
     :title="`${cand.title} — ${cand.artist}`"
     @click="pickCoverCandidate(props.cand)"
   >
-    <img :src="props.cand.cover_url ?? undefined" alt="" loading="lazy" @error="broken = true" />
+    <img v-if="imgSrc" :src="imgSrc" alt="" @error="onImageError" />
+    <span v-else class="cand-fallback" aria-hidden="true">
+      <span class="cand-fallback-icon"></span>
+      <span class="cand-fallback-text">{{ broken ? '封面加载失败' : '封面加载中…' }}<template v-if="broken"><br />仍可点选下载</template></span>
+    </span>
     <span class="src-tag">{{ sourceLabel(props.cand.source) }}</span>
   </button>
 </template>
@@ -43,6 +93,11 @@ const broken = ref(false)
   transition: border-color 0.12s;
 }
 
+/* 失败态：虚线描边标示占位，不标红、不报错 */
+.cand-cell.is-broken {
+  border-style: dashed;
+}
+
 .cand-cell:hover {
   border-color: var(--accent);
 }
@@ -57,6 +112,30 @@ const broken = ref(false)
   object-fit: cover;
   display: block;
   pointer-events: none;
+}
+
+/* 占位：纯 CSS 方框 + dim 文案，不依赖图标字体 / 外链资源 */
+.cand-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px;
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+}
+
+.cand-fallback-icon {
+  width: 20px;
+  height: 20px;
+  border: 1px dashed var(--text-dim);
+  border-radius: 2px;
 }
 
 /* 来源角标（左下角，9px 白字、半透明底、3px 圆角） */

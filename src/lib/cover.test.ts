@@ -3,7 +3,7 @@
 // happy-dom 无 canvas 2d 实现）；canvas 压缩路径留 `tauri dev` 人工确认。
 import { describe, expect, it, vi } from 'vitest'
 
-import { bytesToCoverInput, sniffMime } from './cover'
+import { bytesToCoverInput, coverBytesToDataUrl, sniffMime } from './cover'
 
 /** 1×1 透明 PNG 的完整字节（小图直出用，≤2048 不经 canvas）。 */
 const TINY_PNG_BYTES = [
@@ -88,5 +88,21 @@ describe('lib/cover — bytesToCoverInput（bytes → data URL + mime）', () =>
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('lib/cover — coverBytesToDataUrl（候选缩略图：嗅探 mime + base64，不解码/不压缩）', () => {
+  it('JPEG → data:image/jpeg;base64,...', () => {
+    const url = coverBytesToDataUrl([0xff, 0xd8, 0xff, 0xe0, 0x00])
+    expect(url.startsWith('data:image/jpeg;base64,')).toBe(true)
+    expect(url.slice('data:image/jpeg;base64,'.length)).toBe(btoa('\xff\xd8\xff\xe0\x00'))
+  })
+
+  it('PNG（TINY_PNG_BYTES）→ data:image/png;base64,...', () => {
+    expect(coverBytesToDataUrl(TINY_PNG_BYTES).startsWith('data:image/png;base64,')).toBe(true)
+  })
+
+  it('未知格式 → throw「封面格式无法识别」（调用方降级到占位格）', () => {
+    expect(() => coverBytesToDataUrl([0x00, 0x01, 0x02])).toThrow('封面格式无法识别')
   })
 })

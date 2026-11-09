@@ -61,6 +61,20 @@ function bytesToBase64(bytes: number[]): string {
   return btoa(binary)
 }
 
+/**
+ * 候选缩略图预览：bytes → data URL（仅嗅探 mime + base64）。
+ * 与 `bytesToCoverInput` 不同：**不解码、不经 canvas 压缩**，缩略图直接交给 `<img>` 渲染，
+ * 避免 12 张候选各自做一次 Image 解码；同时不依赖 WKWebView 加载外链图片。
+ * 未知格式 → throw（调用方降级到占位格）。
+ */
+export function coverBytesToDataUrl(bytes: number[]): string {
+  const mime = sniffMime(bytes)
+  if (mime === null) {
+    throw new Error('封面格式无法识别')
+  }
+  return `data:${mime};base64,${bytesToBase64(bytes)}`
+}
+
 /** 构造 Image 并加载 data URL；解码失败 → reject（中文原因）。 */
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {

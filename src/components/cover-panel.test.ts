@@ -29,9 +29,15 @@ vi.mock('../api/search', () => ({
   fetchLyric: vi.fn(async () => null),
   downloadCover: mockDownloadCover,
 }))
-vi.mock('../lib/cover', () => ({
-  bytesToCoverInput: mockBytesToCoverInput,
-}))
+vi.mock('../lib/cover', async (importOriginal) => {
+  // 保留真实的 coverBytesToDataUrl / sniffMime（候选缩略图直接预览要用），
+  // 只替换会触发 Image 解码的 bytesToCoverInput。
+  const actual = await importOriginal<typeof import('../lib/cover')>()
+  return {
+    ...actual,
+    bytesToCoverInput: mockBytesToCoverInput,
+  }
+})
 
 // mock @tauri-apps/api/window → getCurrentWindow().onDragDropEvent 捕获 handler + 返回 fake unlisten
 // （v1-cover-embed D4：拖拽用 Tauri 原生 drag-drop，非 WebView FileReader）。
@@ -455,7 +461,7 @@ describe('CoverPanel — 封面候选区（v1-search-ui D8：status/网格/空�
     expect(status.find('.spinner').exists()).toBe(true)
   })
 
-  it('done 有候选 → 3 列网格缩略图 + 来源角标 + 提示（design §6.4）', () => {
+  it('done 有候选 → 先直接加载外链缩略图（零开销），不做下载', async () => {
     songStore.coverSearchState = 'done'
     songStore.coverCandidates = [
       cand({ source: 'netease', id: 'n1' }),
@@ -463,13 +469,34 @@ describe('CoverPanel — 封面候选区（v1-search-ui D8：status/网格/空�
       cand({ source: 'itunes', id: 'i1', cover_url: 'https://i/1.jpg' }),
     ]
     const w = mount(CoverPanel)
+    await flushPromises()
     const cells = w.findAll('.cand-cell')
     expect(cells).toHaveLength(3)
     expect(w.find('.cand-grid').classes()).toContain('cand-grid')
+    // 能直连时零额外开销：src 就是外链 URL，不调 download_cover
     expect(cells[0].find('img').attributes('src')).toBe('https://p1.music.126.net/1.jpg')
+    expect(mockDownloadCover).not.toHaveBeenCalled()
     expect(cells[0].find('.src-tag').text()).toBe('网易云')
     expect(cells[1].find('.src-tag').text()).toBe('QQ音乐')
+    expect(w.find('.cand-broken-hint').exists()).toBe(false)
     expect(w.find('.cand-hint').text()).toContain('点选一张填入预览')
+  })
+
+  it('直接加载失败 → 回退后端下载并以 data URL 重试（Issue #192 路线 2）', async () => {
+    songStore.coverSearchState = 'done'
+    songStore.coverCandidates = [cand({ cover_url: 'https://p1.music.126.net/1.jpg' })]
+    mockDownloadCover.mockResolvedValue([0xff, 0xd8, 0xff, 0xe0])
+    const w = mount(CoverPanel)
+    await flushPromises()
+    expect(w.find('.cand-cell img').attributes('src')).toBe('https://p1.music.126.net/1.jpg')
+
+    await w.find('.cand-cell img').trigger('error')
+    await flushPromises()
+
+    expect(mockDownloadCover).toHaveBeenCalledWith('https://p1.music.126.net/1.jpg')
+    expect(w.find('.cand-cell img').attributes('src')).toContain('data:image/jpeg;base64,')
+    expect(w.find('.cand-cell.is-broken').exists()).toBe(false) // 回退成功不算失败
+    expect(w.find('.cand-broken-hint').exists()).toBe(false)
   })
 
   it('done 无候选 → 空态「未找到匹配的封面」', () => {
@@ -502,20 +529,60 @@ describe('CoverPanel — 封面候选区（v1-search-ui D8：status/网格/空�
     expect(songStore.dirty).toBe(true)
   })
 
-  it('缩略图破图（onerror）→ 静默隐藏该格（验收 #12），其余格不受影响', async () => {
+  it('直连失败 + 回退下载失败 → 保留格子与占位、仍可点选下载（Issue #192）', async () => {
     songStore.coverSearchState = 'done'
     songStore.coverCandidates = [
       cand({ source: 'netease', id: 'n1', cover_url: 'https://broken/1.jpg' }),
       cand({ source: 'qqmusic', id: 'q1', cover_url: 'https://ok/1.jpg' }),
     ]
+    mockDownloadCover.mockImplementation(async (u: string) => {
+      if (u.includes('broken')) throw new Error('下载封面失败')
+      return [0xff, 0xd8, 0xff, 0xe0]
+    })
     const w = mount(CoverPanel)
+    await flushPromises()
+
+    await w.findAll('.cand-cell img')[0].trigger('error')
+    await flushPromises()
+
+    expect(w.findAll('.cand-cell')).toHaveLength(2) // 失败格保留，不整格移除
+    expect(w.findAll('.cand-cell img')).toHaveLength(1) // 失败格已无 img（占位态）
+    expect(w.find('.cand-cell.is-broken .cand-fallback').exists()).toBe(true)
+    expect(w.find('.cand-broken-hint').text()).toContain('1 张封面未能预览')
+    expect(w.findAll('.cand-cell')[1].find('.src-tag').text()).toBe('QQ音乐')
+
+    // 失败格仍可点选 → 走后端 download_cover
+    await w.findAll('.cand-cell')[0].trigger('click')
+    await flushPromises()
+    expect(mockDownloadCover).toHaveBeenCalledWith('https://broken/1.jpg')
+  })
+
+  it('多张封面回退失败 → 提示累计张数；重新搜索（coverSearchSeq 递增）后归零', async () => {
+    songStore.coverSearchState = 'done'
+    songStore.coverCandidates = [
+      cand({ source: 'netease', id: 'n1', cover_url: 'https://broken/1.jpg' }),
+      cand({ source: 'qqmusic', id: 'q1', cover_url: 'https://broken/2.jpg' }),
+      cand({ source: 'kugou', id: 'k1', cover_url: 'https://ok/3.jpg' }),
+    ]
+    mockDownloadCover.mockImplementation(async (u: string) => {
+      if (u.includes('broken')) throw new Error('下载封面失败')
+      return [0xff, 0xd8, 0xff, 0xe0]
+    })
+    const w = mount(CoverPanel)
+    await flushPromises()
     const imgs = w.findAll('.cand-cell img')
-    expect(imgs).toHaveLength(2)
-
     await imgs[0].trigger('error')
+    await flushPromises()
+    // 第一格已切占位态，重新取第二格的 img（按格子定位，不按下标移位）
+    await w.findAll('.cand-cell')[1].find('img').trigger('error')
+    await flushPromises()
 
-    expect(w.findAll('.cand-cell')).toHaveLength(1) // 破图格被隐藏
-    expect(w.find('.cand-cell .src-tag').text()).toBe('QQ音乐') // 其余正常
+    expect(w.findAll('.cand-cell')).toHaveLength(3)
+    expect(w.find('.cand-broken-hint').text()).toContain('2 张封面未能预览')
+
+    songStore.coverSearchSeq += 1
+    await flushPromises()
+    expect(w.find('.cand-broken-hint').exists()).toBe(false)
   })
 
   it('readonly（坏标签只读）→ 搜索按钮禁用、不触发搜索', async () => {
