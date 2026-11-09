@@ -56,6 +56,19 @@ const candidatesVisible = computed(
     || songStore.isOffline,
 )
 
+/** 缩略图加载失败的候选数（Issue #192）：破图不再隐藏整格，汇总成候选区一行 dim 提示。
+ *  自动/手动搜索与切歌都会让 coverSearchSeq 递增，据此归零，避免跨歌曲累计。 */
+const brokenCoverCount = ref(0)
+function onCoverCandidateBroken(): void {
+  brokenCoverCount.value += 1
+}
+watch(
+  () => songStore.coverSearchSeq,
+  () => {
+    brokenCoverCount.value = 0
+  },
+)
+
 /** 拖拽中高亮（dragging class：虚线框 hover 琥珀，design §6.1 封面区）。 */
 const dragging = ref(false)
 /** 一行 dim 错误提示（非图片/读失败，不弹窗）。 */
@@ -329,9 +342,13 @@ onBeforeUnmount(() => {
             v-for="c in songStore.coverCandidates"
             :key="`${c.source}:${c.id}`"
             :cand="c"
+            @broken="onCoverCandidateBroken"
           />
         </div>
         <div v-else class="cand-empty">未找到匹配的封面</div>
+        <div v-if="brokenCoverCount" class="cand-broken-hint" role="status">
+          {{ brokenCoverCount }} 张缩略图加载失败，仍可点选下载封面
+        </div>
         <div v-if="songStore.coverCandidates.length" class="cand-hint">点选一张填入预览</div>
       </template>
       <div v-else-if="songStore.isOffline" class="cand-empty">离线：仅手动填写</div>
@@ -569,6 +586,14 @@ onBeforeUnmount(() => {
 }
 
 .cand-hint {
+  margin-top: 6px;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+/* Issue #192：缩略图破图汇总提示（不标红、不弹窗，与 cand-hint 同款 dim 文字） */
+.cand-broken-hint {
   margin-top: 6px;
   text-align: center;
   font-size: 10.5px;

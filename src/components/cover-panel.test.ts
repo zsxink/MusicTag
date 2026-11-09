@@ -502,20 +502,49 @@ describe('CoverPanel — 封面候选区（v1-search-ui D8：status/网格/空�
     expect(songStore.dirty).toBe(true)
   })
 
-  it('缩略图破图（onerror）→ 静默隐藏该格（验收 #12），其余格不受影响', async () => {
+  it('缩略图破图（onerror）→ 保留格子与占位、仍可点选下载（Issue #192），其余格不受影响', async () => {
     songStore.coverSearchState = 'done'
     songStore.coverCandidates = [
       cand({ source: 'netease', id: 'n1', cover_url: 'https://broken/1.jpg' }),
       cand({ source: 'qqmusic', id: 'q1', cover_url: 'https://ok/1.jpg' }),
     ]
+    mockDownloadCover.mockResolvedValue([0xff, 0xd8, 0xff, 0xe0])
     const w = mount(CoverPanel)
     const imgs = w.findAll('.cand-cell img')
     expect(imgs).toHaveLength(2)
 
     await imgs[0].trigger('error')
 
-    expect(w.findAll('.cand-cell')).toHaveLength(1) // 破图格被隐藏
-    expect(w.find('.cand-cell .src-tag').text()).toBe('QQ音乐') // 其余正常
+    expect(w.findAll('.cand-cell')).toHaveLength(2) // 破图格保留，不整格移除
+    expect(w.findAll('.cand-cell img')).toHaveLength(1) // 只隐藏破图那张 img
+    expect(w.find('.cand-cell.is-broken .cand-fallback').exists()).toBe(true)
+    expect(w.find('.cand-broken-hint').text()).toContain('1 张缩略图加载失败')
+    expect(w.findAll('.cand-cell')[1].find('.src-tag').text()).toBe('QQ音乐') // 其余正常
+
+    // 破图格仍可点选 → 走后端 download_cover，不依赖 WebView 图片加载
+    await w.findAll('.cand-cell')[0].trigger('click')
+    await flushPromises()
+    expect(mockDownloadCover).toHaveBeenCalledWith('https://broken/1.jpg')
+  })
+
+  it('多张缩略图破图 → 提示累计张数；重新搜索（coverSearchSeq 递增）后归零', async () => {
+    songStore.coverSearchState = 'done'
+    songStore.coverCandidates = [
+      cand({ source: 'netease', id: 'n1', cover_url: 'https://broken/1.jpg' }),
+      cand({ source: 'qqmusic', id: 'q1', cover_url: 'https://broken/2.jpg' }),
+      cand({ source: 'kugou', id: 'k1', cover_url: 'https://ok/3.jpg' }),
+    ]
+    const w = mount(CoverPanel)
+    const imgs = w.findAll('.cand-cell img')
+    await imgs[0].trigger('error')
+    await imgs[1].trigger('error')
+
+    expect(w.findAll('.cand-cell')).toHaveLength(3)
+    expect(w.find('.cand-broken-hint').text()).toContain('2 张缩略图加载失败')
+
+    songStore.coverSearchSeq += 1
+    await flushPromises()
+    expect(w.find('.cand-broken-hint').exists()).toBe(false)
   })
 
   it('readonly（坏标签只读）→ 搜索按钮禁用、不触发搜索', async () => {
