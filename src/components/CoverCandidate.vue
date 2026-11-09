@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// 封面候选格（design §6.4）：默认主动下载缩略图并以 data URL 直接展示（Issue #192 路线 2）。
-// 下载走 Rust `download_cover`（loadCoverPreview 限流 4），不依赖 WKWebView 加载外链图片；
-// 下载 / 解码失败或 @error 时才切占位态，保留格子与点选（点选再走 pickCoverCandidate）。
-import { onMounted, ref } from 'vue'
+// 封面候选格（design §6.4）：**先让 WebView 直接加载外链缩略图**（零额外开销）；
+// 只有直接加载失败（@error）才回退到后端 `download_cover` 拉 bytes → data URL 重试（Issue #192 路线 2）。
+// 两者都失败才切占位态，保留格子与点选（点选再走 pickCoverCandidate）。
+import { ref } from 'vue'
 
 import type { SongCandidate } from '../api/types'
 import { coverBytesToDataUrl } from '../lib/cover'
@@ -19,8 +19,13 @@ const emit = defineEmits<{
   (e: 'broken'): void
 }>()
 
-const imgSrc = ref<string | null>(null)
+/** 当前 `<img>` 的 src：初始为外链 URL（直出），回退时换成 data URL。 */
+const imgSrc = ref<string | null>(props.cand.cover_url)
 const broken = ref(false)
+/** 回退下载进行中（占位显示「封面加载中…」，不计数）。 */
+const downloading = ref(false)
+/** 已尝试过后端下载回退（避免 data URL 再破图时无限重试）。 */
+let fallbackTried = false
 
 /** 切到占位态：不报错、不标红，且同一格只上报一次。 */
 function markBroken(): void {
@@ -30,12 +35,18 @@ function markBroken(): void {
   emit('broken')
 }
 
-onMounted(async () => {
+/**
+ * 图片加载失败：第一次 → 回退到后端下载（Rust reqwest，不经 WebView）；
+ * 回退后仍失败 / 已回退过 / 无 URL → 占位态。
+ */
+async function onImageError(): Promise<void> {
   const url = props.cand.cover_url
-  if (url === null) {
+  if (url === null || fallbackTried) {
     markBroken()
     return
   }
+  fallbackTried = true
+  downloading.value = true
   const seq = songStore.coverSearchSeq
   try {
     const bytes = await loadCoverPreview(url)
@@ -44,8 +55,10 @@ onMounted(async () => {
   } catch {
     if (songStore.coverSearchSeq !== seq) return
     markBroken()
+  } finally {
+    downloading.value = false
   }
-})
+}
 </script>
 
 <template>
@@ -56,11 +69,10 @@ onMounted(async () => {
     :title="`${cand.title} — ${cand.artist}`"
     @click="pickCoverCandidate(props.cand)"
   >
-    <img v-if="imgSrc" :src="imgSrc" alt="" @error="markBroken" />
+    <img v-if="imgSrc" :src="imgSrc" alt="" @error="onImageError" />
     <span v-else class="cand-fallback" aria-hidden="true">
       <span class="cand-fallback-icon"></span>
-      <span v-if="broken" class="cand-fallback-text">封面加载失败<br />仍可点选下载</span>
-      <span v-else class="cand-fallback-text">封面加载中…</span>
+      <span class="cand-fallback-text">{{ broken ? '封面加载失败' : '封面加载中…' }}<template v-if="broken"><br />仍可点选下载</template></span>
     </span>
     <span class="src-tag">{{ sourceLabel(props.cand.source) }}</span>
   </button>

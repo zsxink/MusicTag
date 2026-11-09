@@ -164,7 +164,7 @@
 - hover 描边变琥珀；点击填入封面区预览。
 - 来源角标（`.src-tag`）：缩略图**左下角**，9px 白字、`rgba(0,0,0,0.6)` 底、3px 圆角（如 网易云 / QQ音乐 / 酷狗 / LRCLIB / iTunes）。
 - 网格下方一行 dim 提示（如「点选一张填入预览」）。
-- **缩略图直接预览（Issue #192 路线 2）**：候选格挂载即调 `lib/coverPreview.ts::loadCoverPreview`（并发上限 4）→ `download_cover` 裸 bytes → `lib/cover.ts::coverBytesToDataUrl`（嗅探 mime + base64，**不经 canvas**）→ `<img :src="data:…">` 直接渲染，无需点选、不依赖 WKWebView 外链加载。用 `coverSearchSeq` 守卫丢弃切歌 / 重搜的过期结果。
+- **缩略图直接预览（Issue #192 路线 2）**：`<img :src="cover_url">` **先让 WebView 直接加载**（能直连时零开销）；`@error` 才回退 `lib/coverPreview.ts::loadCoverPreview`（并发上限 4）→ `download_cover` 裸 bytes → `lib/cover.ts::coverBytesToDataUrl`（嗅探 mime + base64，**不经 canvas**）→ 换 data URL 重试。回退只尝试一次（`fallbackTried`），用 `coverSearchSeq` 守卫丢弃切歌 / 重搜的过期结果。
 - **失败兜底**：下载 / 解码失败或 `<img @error>` → 只切占位态（虚线描边 + 「封面加载失败 / 仍可点选下载」+ 来源角标），**不移除 `<button>`**；格子仍可点选，`pickCoverCandidate → download_cover` 走 Rust `reqwest`。破图格 `emit('broken')`，父组件按 `coverSearchSeq` 汇总计数并显示「N 张封面未能预览，仍可点选下载」，每次搜索 / 切歌归零。**下载失败静默移除该张的既有语义不变**（验收 #12）。
 
 ### 6.5 歌词候选（`.cand-row`）
