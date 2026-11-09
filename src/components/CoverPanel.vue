@@ -347,7 +347,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-else class="cand-empty">未找到匹配的封面</div>
         <div v-if="brokenCoverCount" class="cand-broken-hint" role="status">
-          {{ brokenCoverCount }} 张缩略图加载失败，仍可点选下载封面
+          {{ brokenCoverCount }} 张封面未能预览，仍可点选下载
         </div>
         <div v-if="songStore.coverCandidates.length" class="cand-hint">点选一张填入预览</div>
       </template>
