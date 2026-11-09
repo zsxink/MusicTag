@@ -5,13 +5,18 @@
 # MusicTag
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v0.2.2-blue.svg" alt="version" />
+  <img src="https://img.shields.io/badge/版本-v0.2.3-blue.svg" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2-green.svg" alt="tauri" />
   <img src="https://img.shields.io/badge/Rust-orange.svg" alt="rust" />
   <img src="https://img.shields.io/badge/Vue%203-green.svg" alt="vue" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-个人学习许可-red.svg" alt="license" /></a>
   <a href="https://github.com/zsxink/MusicTag/releases"><img src="https://img.shields.io/badge/Downloads-Releases-blue.svg" alt="releases" /></a>
 </p>
+
+## v0.2.3 更新
+
+- 搜索封面后，候选网格直接显示封面缩略图，无需先点选：优先由界面直接加载，加载不到时自动改用后端下载后显示。
+- 封面缩略图加载失败时不再整格消失：保留占位格与来源标记，仍可点选下载封面。
 
 ## v0.2.2 更新
 
