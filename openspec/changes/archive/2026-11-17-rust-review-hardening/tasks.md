@@ -24,8 +24,8 @@ GitHub Issue: #194
 - [x] 7.1 — 提交 61e95ea、071caac（格式）
 - [x] 8.1 — 提交 1245e49
 - [x] 9.1 — Tester 全场景审计通过（cargo test --all-targets 329 passed；grep 均无命中）
-- [ ] 9.2 — 待 CR 只读审查
-- [ ] 9.3 — 待 Verify 全量门禁
+- [x] 9.2 — CR 只读审查通过（pass=true，无 blocker/major）
+- [x] 9.3 — Verify 全量门禁通过（10 条命令 exit=0）
 
 ## 执行约定
 
