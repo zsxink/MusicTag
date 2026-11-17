@@ -2,8 +2,9 @@
 //
 // - `read_summary`：只读 title/artist（失败 → 空串，列表永不因单曲坏标签崩溃）。
 // - `read_song_meta`：读全量标签（失败 → `Err`，触发前端坏标签只读表单）。
-// - `first_embedded_picture`：封面读侧唯一出口（含 APE 原生封面回退），
-//   `read_song_meta` 与 `cover::export_cover_bytes` 共用同一条取图路径。
+// - `first_embedded_picture`：封面读侧唯一出口（优先 `CoverFront`，含 APE 原生封面回退），
+//   `read_song_meta`（预览）与 `cover::export_cover_bytes`（导出）共用同一条取图路径，
+//   保证「界面上看得到的封面」与「导出的字节」完全一致。
 // 依赖 `meta::split_track_pair` + `cover::encode_cover`，函数提升 `pub`。
 
 use crate::model::{LyricsSource, Song, SongSummary};
@@ -41,15 +42,22 @@ pub fn read_ape_cover(path: &Path) -> Option<Picture> {
     )
 }
 
-/// 封面读侧唯一出口：primary tag 的第一个 picture，否则回退 APE 原生封面。
+/// 封面读侧唯一出口：优先 primary tag 的第一个 `CoverFront` 图片，无 front cover
+/// 时回退第一张图片，标签无任何图片时再回退 APE 原生封面。
 ///
 /// **必须复用此函数，不得在别处另写 `tag.pictures().first()`**：lofty 0.24 的通用
 /// `Tag` 转换路径不映射 APE 图片，APE 的内嵌封面只能经 `read_ape_cover` 取到。
 /// 若导出路径自取图，APE 文件会静默取不到图 → 误报「没有内嵌封面」
 /// （design.md §3.2）。共用本函数才能保证「界面上看得到的封面」与「导出的字节」
-/// 判定完全一致。
+/// 判定完全一致：预览（`read_song_meta`）与导出（`cover::export_cover_bytes`）
+/// 都走这里，多图标签取同一个 front cover，无 front cover 时同样取第一张。
 pub fn first_embedded_picture(path: &Path, tag: Option<&Tag>) -> Option<Picture> {
-    tag.and_then(|t| t.pictures().first().cloned()).or_else(|| {
+    tag.and_then(|t| {
+        t.get_picture_type(PictureType::CoverFront)
+            .or_else(|| t.pictures().first())
+            .cloned()
+    })
+    .or_else(|| {
         path.extension()
             .filter(|ext| ext.eq_ignore_ascii_case("ape"))
             .and_then(|_| read_ape_cover(path))

@@ -3,8 +3,10 @@
 // 语义（design.md D1/D2/D7，FR-4.6 / 4.6a / 4.7 / FR-5.6）：
 // - `rename_song(old_path, new_name)`：改文件名是**独立动作**（FR-5.5，不进保存字段语义），
 //   同目录同名 `.lrc` 一并改名；纯扩展名变化（主干相同）`.lrc` 不动（FR-4.6a）；
-// - 撞名预检先行（D1 原子性）：全部 `exists()` 检查在**第一次 `fs::rename` 之前**一次性
+// - 撞名预检先行（D1 原子性）：全部存在性检查在**第一次 `fs::rename` 之前**一次性
 //   完成，撞名（最常见失败）零部分状态，禁止 POSIX 覆盖（FR-4.7）；
+// - 存在性用 `fs::symlink_metadata`（不跟随链接）：普通文件、目录与符号链接（含悬空
+//   链接）统一视为“已存在”；元数据检查本身失败返回中文错误，不放行改名；
 // - 改名顺序 `.lrc` 先、音频后（D2 失败自愈）：任一失败返回中文 Err，原文件保持原样可重试；
 // - `new_name` 防御校验（D7 安全护栏）：含 `/`、`\`、`..` → Err「文件名不合法」。
 //
@@ -49,10 +51,11 @@ pub fn rename_song(old_path: &Path, new_name: &str) -> Result<(), String> {
         return Err("目标已存在".to_string());
     }
     // new_path 存在 → 音频撞名；或（旧 `.lrc` 需移动且）new_lrc 存在 → `.lrc` 撞名。
-    if new_path.exists() {
+    // 存在性经 `target_exists`（symlink_metadata）：悬空链接也算撞名，元数据错误返回 Err。
+    if target_exists(&new_path)? {
         return Err("目标已存在".to_string());
     }
-    if lrc_to_move && new_lrc.exists() {
+    if lrc_to_move && target_exists(&new_lrc)? {
         return Err("目标已存在".to_string());
     }
 
@@ -63,6 +66,22 @@ pub fn rename_song(old_path: &Path, new_name: &str) -> Result<(), String> {
     }
     fs::rename(old_path, &new_path).map_err(|e| format!("改名音频失败: {e}"))?;
     Ok(())
+}
+
+/// 撞名预检：判断目标路径是否“已存在”，供 `rename_song` 与集成测试使用。
+///
+/// 用 `fs::symlink_metadata` 而非 `Path::exists()`：前者不跟随符号链接，普通文件、
+/// 目录、指向存在目标的链接与悬空链接都返回 `Ok`，统一视为“已存在”，避免改名
+/// 静默替换悬空链接。仅 `ErrorKind::NotFound` 视为不存在；权限、`ENOTDIR` 等
+/// 元数据检查失败返回中文 `Err`，调用方不得继续 rename。
+///
+/// `pub`：供 `src-tauri/tests/` 直接断言（rust-tests-separation 单测外置）。
+pub fn target_exists(path: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("检查目标是否存在失败: {error}")),
+    }
 }
 
 /// `new_name` 防御校验（D7）：拒绝路径分隔符（`/`、`\`）与 `..`，防改名逃逸当前目录。

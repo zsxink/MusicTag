@@ -117,16 +117,29 @@ impl Default for MenuState {
 }
 
 impl MenuState {
+    /// 仅供集成测试构造“已毒化的状态”使用；生产路径请用 `Default`。
+    pub fn from_mutex(inner: std::sync::Mutex<std::collections::HashMap<String, bool>>) -> Self {
+        Self(inner)
+    }
+
+    /// 取锁；毒化时先记录异常到 stderr，再恢复读取最后一次可见的状态，
+    /// 避免把锁异常静默伪装成“全部禁用/空快照”。
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<String, bool>> {
+        match self.0.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                eprintln!("菜单状态锁异常（已恢复读取）: {poisoned}");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     pub fn is_enabled(&self, id: &str) -> bool {
-        self.0
-            .lock()
-            .ok()
-            .and_then(|state| state.get(id).copied())
-            .unwrap_or(false)
+        self.lock_state().get(id).copied().unwrap_or(false)
     }
 
     pub fn snapshot(&self) -> std::collections::HashMap<String, bool> {
-        self.0.lock().map(|state| state.clone()).unwrap_or_default()
+        self.lock_state().clone()
     }
 }
 
