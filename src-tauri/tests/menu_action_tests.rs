@@ -123,6 +123,67 @@ fn menu_item_enabled_requires_enabled_and_visible() {
 }
 
 #[test]
+fn poisoned_menu_lock_recovers_last_state_instead_of_defaulting() {
+    use std::collections::HashMap;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::Mutex;
+
+    // 与默认状态不同的 map：默认 open-folder=true/save=false，这里正好相反。
+    let mut expected: HashMap<String, bool> = HashMap::new();
+    for id in ACTION_IDS {
+        expected.insert((*id).to_string(), true);
+    }
+    expected.insert("save".to_string(), true);
+    expected.insert("open-folder".to_string(), false);
+    assert_eq!(expected.len(), ACTION_IDS.len());
+
+    let mutex = Mutex::new(expected.clone());
+    let poisoned = catch_unwind(AssertUnwindSafe(|| {
+        let _guard = mutex.lock().expect("fresh mutex must lock");
+        panic!("poison menu state lock");
+    }));
+    assert!(poisoned.is_err(), "the poison panic must be caught");
+    assert!(mutex.is_poisoned(), "holding a panic must poison the lock");
+
+    let state = app_lib::MenuState::from_mutex(mutex);
+    let (save_enabled, open_folder_enabled, snapshot) = catch_unwind(AssertUnwindSafe(|| {
+        (
+            state.is_enabled("save"),
+            state.is_enabled("open-folder"),
+            state.snapshot(),
+        )
+    }))
+    .expect("reading a poisoned menu state must not panic");
+
+    assert!(save_enabled, "poisoned lock must recover save=true");
+    assert!(
+        !open_folder_enabled,
+        "poisoned lock must recover open-folder=false"
+    );
+    assert_eq!(snapshot.len(), ACTION_IDS.len());
+    for id in ACTION_IDS {
+        assert_eq!(
+            snapshot.get(*id).copied(),
+            Some(expected[*id]),
+            "poisoned snapshot lost state for {id}"
+        );
+    }
+    assert_eq!(
+        snapshot, expected,
+        "poisoned snapshot must equal the last visible map"
+    );
+    assert!(
+        !snapshot.is_empty(),
+        "poisoned lock must not fall back to an empty snapshot"
+    );
+    assert_ne!(
+        snapshot,
+        app_lib::MenuState::default().snapshot(),
+        "poisoned lock must not fall back to the default state"
+    );
+}
+
+#[test]
 fn snapshot_ipc_requires_explicit_enabled_and_visible_fields() {
     for enabled in [false, true] {
         for visible in [false, true] {
