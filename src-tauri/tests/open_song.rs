@@ -7,13 +7,35 @@ mod common;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use common::{
-    add_ape_tags_with_picture, add_tags, assert_bad_wav_fixture, assert_wav_fixture_tags,
-    tiny_png_bytes, write_dual_tagged_wav, write_riff_info_only_wav, write_tagged_ape,
-    write_tagged_flac, write_tagged_m4a, write_tagged_mp3, write_tagged_wav,
+    add_ape_tags_with_picture, add_pictures, add_tags, assert_bad_wav_fixture,
+    assert_wav_fixture_tags, tiny_png_bytes, tiny_png_bytes_blue, write_dual_tagged_wav,
+    write_riff_info_only_wav, write_tagged_ape, write_tagged_flac, write_tagged_m4a,
+    write_tagged_mp3, write_tagged_wav,
 };
+use lofty::picture::PictureType;
 use lofty::prelude::TaggedFileExt;
 use std::fs;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+
+/// 构造多图 FLAC/MP3 fixture：图片按传入顺序写入，不额外追加 `CoverFront`。
+/// 扩展名决定容器（`.mp3` → ID3v2.4 APIC，其余 → FLAC PICTURE）。
+fn song_with_pictures(dir: &Path, name: &str, pictures: &[(PictureType, Vec<u8>)]) -> PathBuf {
+    if name.ends_with(".mp3") {
+        write_tagged_mp3(dir, name, "Song", "Artist");
+    } else {
+        write_tagged_flac(dir, name, "Song", "Artist");
+    }
+    let path = dir.join(name);
+    add_pictures(&path, pictures);
+    path
+}
+
+/// 解码封面 data URL 的 base64 payload，用于与原始图片字节比对。
+fn decode_cover_data_url(cover: &str) -> Vec<u8> {
+    let (_, b64) = cover.split_once(',').expect("封面 data URL 应含逗号");
+    BASE64.decode(b64).expect("封面 base64 应可解码")
+}
 
 #[test]
 fn open_song_flac_reads_all_fields_with_lyrics_and_cover() {
@@ -84,6 +106,70 @@ fn open_song_mp3_reads_all_fields_with_uslt_and_apic() {
     assert_eq!(song.cover_mime.as_deref(), Some("image/png"));
     let b64 = cover.strip_prefix("data:image/png;base64,").unwrap();
     assert_eq!(BASE64.decode(b64).unwrap(), tiny_png_bytes());
+}
+
+#[test]
+fn open_song_preview_prefers_front_cover_over_first_picture() {
+    // 多图标签首图是 CoverBack、次图是 CoverFront：预览 data URL 解码后必须是
+    // front 原始字节（与导出共用 first_embedded_picture），而非首图。
+    let tmp = TempDir::new().unwrap();
+    let back = tiny_png_bytes();
+    let front = tiny_png_bytes_blue();
+    assert_ne!(
+        back, front,
+        "fixture 两张图字节必须不同，否则无法断言取图来源"
+    );
+
+    for name in ["multi.flac", "multi.mp3"] {
+        let path = song_with_pictures(
+            tmp.path(),
+            name,
+            &[
+                (PictureType::CoverBack, back.clone()),
+                (PictureType::CoverFront, front.clone()),
+            ],
+        );
+        let song = app_lib::service::reader::read_song_meta(&path)
+            .unwrap_or_else(|e| panic!("{name} 多图歌曲应可读: {e}"));
+        assert_eq!(song.cover_mime.as_deref(), Some("image/png"), "{name}");
+        let cover = song
+            .cover
+            .unwrap_or_else(|| panic!("{name} 应有封面 data URL"));
+        assert_eq!(
+            decode_cover_data_url(&cover),
+            front,
+            "{name} 预览应优先取 CoverFront，而非首图 CoverBack"
+        );
+    }
+}
+
+#[test]
+fn open_song_preview_falls_back_to_first_picture_without_front_cover() {
+    // 无任何 front cover：保持既有行为取第一张，预览字节来自首图而非第二张。
+    let tmp = TempDir::new().unwrap();
+    let first = tiny_png_bytes();
+    let second = tiny_png_bytes_blue();
+
+    for name in ["no-front.flac", "no-front.mp3"] {
+        let path = song_with_pictures(
+            tmp.path(),
+            name,
+            &[
+                (PictureType::CoverBack, first.clone()),
+                (PictureType::Other, second.clone()),
+            ],
+        );
+        let song = app_lib::service::reader::read_song_meta(&path)
+            .unwrap_or_else(|e| panic!("{name} 无 front cover 歌曲应可读: {e}"));
+        let cover = song
+            .cover
+            .unwrap_or_else(|| panic!("{name} 应有封面 data URL"));
+        assert_eq!(
+            decode_cover_data_url(&cover),
+            first,
+            "{name} 无 front cover 时预览应回退第一张"
+        );
+    }
 }
 
 #[test]
