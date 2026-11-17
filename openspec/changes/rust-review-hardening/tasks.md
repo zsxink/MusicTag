@@ -7,6 +7,26 @@ GitHub Issue: #194
 规格依据: `openspec/changes/rust-review-hardening/specs/` 下六份 delta spec
 基线: `main` 之上、`rust-review-hardening` 分支；归档前完成全部任务与质量门。
 
+## 完成状态（仅主会话维护）
+
+- [x] 1.1 — 提交 8d8c097
+- [x] 1.2 — 提交 3b5cb03
+- [x] 2.1 — 提交 8d8c097
+- [x] 2.2 — 提交 8ebe6d5
+- [x] 3.1 — 提交 8d8c097
+- [x] 3.2 — 提交 8d8c097
+- [x] 3.3 — 提交 213fd73
+- [x] 4.1 — 提交 61e95ea
+- [x] 4.2 — 提交 9e73fd5
+- [x] 5.1 — 提交 2a78316
+- [x] 5.2 — 提交 a26ba1e
+- [x] 6.1 — 提交 61e95ea
+- [x] 7.1 — 提交 61e95ea、071caac（格式）
+- [x] 8.1 — 提交 1245e49
+- [ ] 9.1 — 待 Tester 全场景覆盖审计
+- [ ] 9.2 — 待 CR 只读审查
+- [ ] 9.3 — 待 Verify 全量门禁
+
 ## 执行约定
 
 - 本文件由主会话（Leader）维护勾选；子 Agent 不修改本文件状态，不执行 `git add` / `git commit` / push / PR / merge。
