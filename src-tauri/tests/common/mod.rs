@@ -113,14 +113,20 @@ pub fn mock_http_router(
 
 /// 生成一张 2x2 红色 PNG 的字节（`image` crate 编码）。
 pub fn tiny_png_bytes() -> Vec<u8> {
+    tiny_png_bytes_with_color(image::Rgba([255, 0, 0, 255]))
+}
+
+/// 生成一张 2x2 蓝色 PNG 的字节。与 `tiny_png_bytes` 颜色不同，供多图标签
+/// 断言「取到的是哪一张图」——字节不同才能证明取图来源。
+pub fn tiny_png_bytes_blue() -> Vec<u8> {
+    tiny_png_bytes_with_color(image::Rgba([0, 0, 255, 255]))
+}
+
+fn tiny_png_bytes_with_color(color: image::Rgba<u8>) -> Vec<u8> {
     let mut buf = Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-        2,
-        2,
-        image::Rgba([255, 0, 0, 255]),
-    ))
-    .write_to(&mut buf, image::ImageFormat::Png)
-    .expect("编码测试 PNG 失败");
+    image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(2, 2, color))
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .expect("编码测试 PNG 失败");
     buf.into_inner()
 }
 
@@ -158,6 +164,25 @@ pub fn add_tags(path: &Path, lyrics: Option<&str>, picture: Option<Vec<u8>>) {
 
     tag.save_to_path(path, WriteOptions::default())
         .expect("写回 fixture 失败");
+}
+
+/// 在已写好的音频文件上按传入顺序追加多张图片（不额外追加 `CoverFront`）。
+///
+/// 供「首图 BackCover、次图 CoverFront」这类顺序敏感场景构造 fixture；
+/// 单图场景继续用 `add_tags(..., Some(bytes))`，其「单张 CoverFront」行为不变。
+pub fn add_pictures(path: &Path, pictures: &[(PictureType, Vec<u8>)]) {
+    let mut file = lofty::read_from_path(path).expect("读取 fixture 失败");
+    let tag = file.primary_tag_mut().expect("fixture 应有主标签");
+    for (pic_type, bytes) in pictures {
+        let pic = Picture::unchecked(bytes.clone())
+            .pic_type(*pic_type)
+            .mime_type(MimeType::Png)
+            .description("fixture")
+            .build();
+        tag.push_picture(pic);
+    }
+    tag.save_to_path(path, WriteOptions::default())
+        .expect("写回多图 fixture 失败");
 }
 
 /// 为 APE fixture 写入原生 APEv2 picture item。通用 `Tag::save_to_path` 会先

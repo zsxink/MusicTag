@@ -16,6 +16,24 @@ use lofty::tag::Tag;
 use lofty::tag::TagType;
 use std::path::Path;
 
+/// 清空并重写已存在的 RIFF INFO 辅助标签（WAV 分支）。
+///
+/// 调用方须先确认原文件含 RIFF INFO（`has_riff_info`）。若写入阶段该标签已不可
+/// 访问，返回中文错误而非 panic；错误发生在 `write_atomic_with` 之前，保持“失败
+/// 时原文件零触碰”。函数提升 `pub` 供 `src-tauri/tests/` 集成测试直接覆盖
+/// `None` 分支。
+pub fn write_riff_info(
+    tagged_file: &mut lofty::file::TaggedFile,
+    song: &Song,
+) -> Result<(), String> {
+    let riff_info = tagged_file
+        .tag_mut(TagType::RiffInfo)
+        .ok_or_else(|| "保存失败: RIFF INFO 标签在写入阶段不可访问".to_string())?;
+    riff_info.clear();
+    apply_riff_info_meta(riff_info, song);
+    Ok(())
+}
+
 /// 保存当前编辑表单，全量覆盖写回原路径。
 ///
 /// 写盘策略（D6）：读入 → `clear()` 重建标签 → 写同目录临时文件 →
@@ -55,11 +73,7 @@ pub fn save_song(song: Song, export_lrc: bool) -> Result<(), String> {
     }
 
     if has_riff_info {
-        let riff_info = tagged_file
-            .tag_mut(TagType::RiffInfo)
-            .expect("已确认存在的 RIFF INFO 标签应仍可访问");
-        riff_info.clear();
-        apply_riff_info_meta(riff_info, &song);
+        write_riff_info(&mut tagged_file, &song)?;
     }
 
     let ape_tag = tagged_file

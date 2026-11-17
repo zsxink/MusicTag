@@ -131,7 +131,7 @@ impl MusicSource for Kugou {
         let sig = signature(&params);
         params.push(("signature".to_string(), sig));
         let url = reqwest::Url::parse_with_params(&self.search_url, &params)
-            .expect("构造酷狗搜索 URL 失败");
+            .map_err(|error| format!("酷狗搜索 URL 构造失败: {error}"))?;
         let resp = match client
             .get(url)
             .header("User-Agent", KUGOU_UA)

@@ -21,8 +21,10 @@ use app_lib::service::cover::{
 };
 use app_lib::service::reader::first_embedded_picture;
 use common::{
-    add_ape_tags_with_picture, add_tags, tiny_png_bytes, write_tagged_ape, write_tagged_flac,
+    add_ape_tags_with_picture, add_pictures, add_tags, tiny_png_bytes, tiny_png_bytes_blue,
+    write_tagged_ape, write_tagged_flac, write_tagged_mp3,
 };
+use lofty::picture::PictureType;
 use lofty::prelude::TaggedFileExt;
 use lofty::probe::Probe;
 use std::fs;
@@ -59,6 +61,23 @@ fn ape_with_cover(dir: &Path, name: &str, picture: Vec<u8>) -> std::path::PathBu
     write_tagged_ape(dir, name, "Song", "Artist");
     let path = dir.join(name);
     add_ape_tags_with_picture(&path, picture);
+    path
+}
+
+/// 构造多图 FLAC/MP3 fixture：图片按传入顺序写入，不额外追加 `CoverFront`。
+/// 扩展名决定容器（`.mp3` → ID3v2.4 APIC，其余 → FLAC PICTURE）。
+fn song_with_pictures(
+    dir: &Path,
+    name: &str,
+    pictures: &[(PictureType, Vec<u8>)],
+) -> std::path::PathBuf {
+    if name.ends_with(".mp3") {
+        write_tagged_mp3(dir, name, "Song", "Artist");
+    } else {
+        write_tagged_flac(dir, name, "Song", "Artist");
+    }
+    let path = dir.join(name);
+    add_pictures(&path, pictures);
     path
 }
 
@@ -115,6 +134,141 @@ fn fixture_early_check_flac_and_ape_embedded_pictures_are_readable() {
         png.as_slice(),
         "APE 内嵌字节应逐字节等于构造字节"
     );
+}
+
+/// 多图 fixture 早检：先证明「首图 BackCover、次图 CoverFront」的顺序与类型真的
+/// 按构造落盘，再允许后续字节比对。否则 lofty 行为或 fixture 构造退化会让
+/// 「优先 front cover」的断言变成空转绿（无论实现取第一张还是 front 都通过）。
+#[test]
+fn fixture_early_check_multi_picture_order() {
+    let tmp = TempDir::new().expect("临时目录");
+    let back = tiny_png_bytes();
+    let front = tiny_png_bytes_blue();
+    assert_ne!(
+        back, front,
+        "fixture 两张图字节必须不同，否则无法断言取图来源"
+    );
+
+    for name in ["multi.flac", "multi.mp3"] {
+        let path = song_with_pictures(
+            tmp.path(),
+            name,
+            &[
+                (PictureType::CoverBack, back.clone()),
+                (PictureType::CoverFront, front.clone()),
+            ],
+        );
+        let tagged = Probe::open(&path)
+            .and_then(|probed| probed.read())
+            .unwrap_or_else(|e| panic!("多图 fixture 应可被 lofty 读取 {path:?}: {e}"));
+        let tag = tagged
+            .primary_tag()
+            .unwrap_or_else(|| panic!("{name} 应有 primary tag"));
+        let pictures = tag.pictures();
+        assert_eq!(pictures.len(), 2, "{name} 应含两张图片");
+        assert_eq!(
+            pictures[0].pic_type(),
+            PictureType::CoverBack,
+            "{name} 首图应为 CoverBack（顺序敏感）"
+        );
+        assert_eq!(
+            pictures[1].pic_type(),
+            PictureType::CoverFront,
+            "{name} 次图应为 CoverFront"
+        );
+        assert_eq!(
+            pictures[0].data(),
+            back.as_slice(),
+            "{name} 首图字节应来自 back fixture"
+        );
+        assert_eq!(
+            pictures[1].data(),
+            front.as_slice(),
+            "{name} 次图字节应来自 front fixture"
+        );
+        let picked =
+            first_embedded_picture(&path, Some(tag)).expect("多图 fixture 应能取到内嵌封面");
+        assert_eq!(
+            picked.data(),
+            front.as_slice(),
+            "{name} 早检：取图应优先 CoverFront"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 多图取图优先级（rust-review-hardening §1.2）：优先第一个 CoverFront，
+// 无 front cover 时保持既有「第一张」回退。
+// ---------------------------------------------------------------------------
+
+#[test]
+fn export_prefers_front_cover_over_first_picture_flac() {
+    let tmp = TempDir::new().expect("临时目录");
+    let back = tiny_png_bytes();
+    let front = tiny_png_bytes_blue();
+    let flac = song_with_pictures(
+        tmp.path(),
+        "multi.flac",
+        &[
+            (PictureType::CoverBack, back.clone()),
+            (PictureType::CoverFront, front.clone()),
+        ],
+    );
+
+    let (bytes, mime) = export_cover_bytes(&flac).expect("FLAC 多图导出应成功");
+    assert_eq!(
+        bytes, front,
+        "应导出第二张 front cover，而非首图 back cover"
+    );
+    assert_ne!(bytes, back, "不得导出首图");
+    assert_eq!(mime.as_deref(), Some("image/png"));
+}
+
+#[test]
+fn export_prefers_front_cover_over_first_picture_mp3() {
+    let tmp = TempDir::new().expect("临时目录");
+    let back = tiny_png_bytes();
+    let front = tiny_png_bytes_blue();
+    let mp3 = song_with_pictures(
+        tmp.path(),
+        "multi.mp3",
+        &[
+            (PictureType::CoverBack, back.clone()),
+            (PictureType::CoverFront, front.clone()),
+        ],
+    );
+
+    let (bytes, mime) = export_cover_bytes(&mp3).expect("MP3 多图导出应成功");
+    assert_eq!(
+        bytes, front,
+        "应导出第二张 front cover，而非首图 back cover"
+    );
+    assert_ne!(bytes, back, "不得导出首图");
+    assert_eq!(mime.as_deref(), Some("image/png"));
+}
+
+#[test]
+fn export_falls_back_to_first_picture_without_front_cover() {
+    // 无任何 front cover：保持既有行为取第一张，不返回空、不新增空白封面。
+    // 用两张非 front 图片（而非单图）才能证明「取第一张」而不是「只有一张可挑」。
+    let tmp = TempDir::new().expect("临时目录");
+    let first = tiny_png_bytes();
+    let second = tiny_png_bytes_blue();
+
+    for name in ["no-front.flac", "no-front.mp3"] {
+        let path = song_with_pictures(
+            tmp.path(),
+            name,
+            &[
+                (PictureType::CoverBack, first.clone()),
+                (PictureType::Other, second.clone()),
+            ],
+        );
+        let (bytes, _) = export_cover_bytes(&path)
+            .unwrap_or_else(|e| panic!("{name} 无 front cover 时仍应导出第一张: {e}"));
+        assert_eq!(bytes, first, "{name} 无 front cover 时应回退第一张");
+        assert_ne!(bytes, second, "{name} 不应取第二张非 front 图片");
+    }
 }
 
 // ---------------------------------------------------------------------------

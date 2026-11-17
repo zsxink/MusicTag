@@ -82,7 +82,7 @@ impl MusicSource for Itunes {
                     ("limit", "10"),
                 ],
             )
-            .expect("构造 iTunes 搜索 URL 失败");
+            .map_err(|error| format!("iTunes 搜索 URL 构造失败: {error}"))?;
             let client = client.clone();
             set.spawn(async move { (index, search_storefront(client, url).await) });
         }

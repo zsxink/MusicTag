@@ -52,7 +52,7 @@ impl MusicSource for Lrclib {
             params.push(("album_name", album));
         }
         let url = reqwest::Url::parse_with_params(&self.search_url, &params)
-            .expect("构造 LRCLIB 搜索 URL 失败");
+            .map_err(|error| format!("LRCLIB 搜索 URL 构造失败: {error}"))?;
         let resp = match client.get(url).header("User-Agent", LRCLIB_UA).send().await {
             Ok(r) => r,
             Err(e) => return Err(format!("LRCLIB 搜索请求失败: {e}")),

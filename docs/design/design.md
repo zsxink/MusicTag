@@ -222,7 +222,7 @@
 
 文件夹扫描收集 `.flac`、`.mp3`、`.ape`、`.wav`、`.m4a`，扩展名匹配不区分大小写；通用 `.mp4` 不收集。`.mp4` 可能是视频容器，扩展名不足以可靠判断音频内容；若未来要支持它，需要单独定义内容探测和视频排除规则。
 
-lofty 0.24 的 primary tag 选择决定主要写入位置：APE 使用 `TagType::Ape`，WAV 使用内嵌 `TagType::Id3v2`，M4A 使用 `TagType::Mp4Ilst`。WAV 另外支持 `TagType::RiffInfo`：读取时按字段优先取非空 ID3v2，缺失字段回退 RIFF INFO；保存仍以 ID3v2 承载完整表单，且当原文件含 RIFF INFO 时同步其中可表示的文本字段，避免旧标签值残留。歌词和封面由 WAV 的 ID3v2 承载。标题、作者、专辑、专辑作者、音轨号、音轨总数、年份和流派继续经 `ItemKey` 统一映射；年份写 `ItemKey::RecordingDate`。歌词只有 `TagType::Id3v2` 使用 `ItemKey::UnsyncLyrics` 并设置 `lang=eng` 写 USLT，其余新增格式使用 `ItemKey::Lyrics`。封面统一使用 `CoverFront`；WAV/M4A 由通用 lofty 标签路径写入 APIC 或 MP4 `covr`，APE 使用 `ApeTag` 专用路径写入 APEv2 `Cover Art (Front)` binary item，因为 lofty 0.24 的 generic `Tag` 转换路径不会映射 APE 图片。APE 读取也通过 `ApeFile` 专用 API 读取该图片项。APE 只写 APE 标签，禁止写只读 ID3v2。
+lofty 0.24 的 primary tag 选择决定主要写入位置：APE 使用 `TagType::Ape`，WAV 使用内嵌 `TagType::Id3v2`，M4A 使用 `TagType::Mp4Ilst`。WAV 另外支持 `TagType::RiffInfo`：读取时按字段优先取非空 ID3v2，缺失字段回退 RIFF INFO；保存仍以 ID3v2 承载完整表单，且当原文件含 RIFF INFO 时同步其中可表示的文本字段，避免旧标签值残留。歌词和封面由 WAV 的 ID3v2 承载。标题、作者、专辑、专辑作者、音轨号、音轨总数、年份和流派继续经 `ItemKey` 统一映射；年份写 `ItemKey::RecordingDate`。歌词只有 `TagType::Id3v2` 使用 `ItemKey::UnsyncLyrics` 并设置 `lang=eng` 写 USLT，其余新增格式使用 `ItemKey::Lyrics`。封面统一使用 `CoverFront`；WAV/M4A 由通用 lofty 标签路径写入 APIC 或 MP4 `covr`，APE 使用 `ApeTag` 专用路径写入 APEv2 `Cover Art (Front)` binary item，因为 lofty 0.24 的 generic `Tag` 转换路径不会映射 APE 图片。APE 读取也通过 `ApeFile` 专用 API 读取该图片项。读侧（封面预览与导出）共用 `reader::first_embedded_picture`：优先 primary tag 的第一个 `CoverFront` 图片，无 front cover 时回退第一张图片，通用标签完全无图时再回退 APE 原生 `Cover Art (Front)`（APE 回退语义不变）；导出写出的始终是取到的图片原始字节。APE 只写 APE 标签，禁止写只读 ID3v2。
 
 保存流程仍是读取并校验 → 若有效容器没有 primary tag，按 lofty 的 `primary_tag_type()` 创建对应空标签 → 清空标签并按表单写入非空字段 → 在同目录临时副本写入并原子替换；APE 直接保存转换后的 `ApeTag`，其他格式保存 `TaggedFile`。首次创建路径支持 APE、WAV 的 ID3v2 和 M4A 的 Mp4Ilst。含 RIFF INFO 的 WAV 会在原子写回时同步其可表示字段，未含 RIFF INFO 的 WAV 不额外创建该标签。空字段删除、侧载 `.lrc`、坏标签只读和 MP3 ID3v2.4 约束均不变。原子替换前会把原文件的权限位复制到临时文件，保存成功后权限不变；覆盖已有 `.lrc` 时同样保留其权限，新建 `.lrc` 与 Windows 行为不变。
 
@@ -375,13 +375,13 @@ interface UpdateCheckResult {
 | `get_last_dir()` | `() → Option<String>` | 读取持久化的上次打开目录（config.json `last_dir`）；无记忆/目录已删 → `None`（启动自动加载用） |
 | `save_last_dir(dir)` | `String → ()` | 记住本次打开目录（config.json 原子写）；fire-and-forget，失败静默 |
 | `list_songs(dir)` | `String → Vec<SongSummary>` | 打开文件夹，深度遍历；**只读列表项**（`path`/`title`/`artist`，歌名/作者空时前端回退显示文件名） |
-| `open_song(path)` | `String → Result<Song, String>` | 读取一首的**完整**标签 + 封面 base64，放进编辑区（按需读取；坏标签 → `Err`，表单只读） |
+| `open_song(path)` | `String → Result<Song, String>` | 读取一首的**完整**标签 + 封面 base64，放进编辑区（按需读取；坏标签 → `Err`，表单只读）；封面按预览/导出共用的取图优先级：优先第一个 `CoverFront`，无则第一张，APE 原生回退不变 |
 | `save_song(song, exportLrc)` | `Song, bool → Result<(), String>` | 写回原文件（cover 为 base64，Rust 侧解码）；`exportLrc` 勾选时同步写同目录同名 `.lrc`（空歌词忽略） |
 | `rename_song(path, new_name)` | `String, String → Result<(), String>` | 音频 + `.lrc` 改名 |
-| `pick_cover_file()` | `() → Option<CoverInput>` | 原生封面文件选择器（jpg/png/webp）；取消返回 `None`，选中 → 压缩后 data URL + mime |
+| `pick_cover_file()` | `() → Result<Option<CoverInput>, String>` | 原生封面文件选择器（jpg/png/webp）；取消 → `Ok(None)`，选中 → 读取/格式识别/压缩后 data URL + mime；读取/格式识别/压缩失败 → 中文 `Err`（不伪装成取消） |
 | `read_cover_path(path)` | `String → Result<CoverInput, String>` | 拖拽封面路径 → 读文件 + 压缩 + data URL；读失败/非图片 → `Err(中文原因)` |
 | `pick_cover_save_path(song_path)` | `String → Result<Option<String>, String>` | 弹 rfd 存盘框取导出目标路径，默认文件名 = 音频文件名去扩展名 + 按图片 mime 推断的扩展名；取消 → Ok(None) |
-| `export_cover(song_path, dest_path)` | `(String, String) → Result<(), String>` | 把标签内第一个 front cover 的**原始字节**写到 dest_path（`std::fs::write`，无 UI）；只读、不改标签/表单 |
+| `export_cover(song_path, dest_path)` | `(String, String) → Result<(), String>` | 把内嵌封面的**原始字节**写到 dest_path：优先第一个 `CoverFront`，无则第一张，APE 原生回退不变（`std::fs::write`，无 UI）；只读、不改标签/表单 |
 | `search_song(title, artist, album)` | `String, String, String → SearchResult` | 五源并发搜索（iTunes 内部再并发 HK/US 双店面）+ **同源去重、跨源保留、来源分组排序（每源 TOP 3）**；归一化含繁→简折叠但只作用于比较侧，候选文本原样返回（含 `all_failed`：五源全失败才 true，iTunes 仅两店面全失败才算失败，冷门歌空结果 false）。**契约零变化**（Issue #152） |
 | `search_source(source, title, artist, album)` | `MusicSourceId, String, String, String → Vec<SongCandidate>` | **单源搜索原始候选**（C2 换源用，绕过跨源聚合）：逐源拿该源全部原始候选，不受每源 TOP 3 截断；失败/超时 → 空列表，前端跳过该源 |
 | `fetch_lyric(source, id)` | `MusicSourceId, String → Option<String>` | 点选歌词候选拉文本（None = 取词失败/无词，供 C2 换源） |

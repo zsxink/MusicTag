@@ -2,7 +2,9 @@
 // export-embedded-cover）。
 //
 // 只做参数接收与对 service 层委托，不含压缩/IO 逻辑（都在 `service::cover`）：
-// - `pick_cover_file` → rfd 原生文件对话框（jpg/png/webp 过滤器），选中 → `cover_from_path`；
+// - `pick_cover_file` → rfd 原生文件对话框（jpg/png/webp 过滤器），选中 → `cover_input_for_selection`
+//   → `cover_from_path`；取消 `Ok(None)`，选中后读/识别/压缩失败原样返回中文 `Err`（不再 `.ok()`
+//   把失败伪装成取消，见 rust-review-hardening §4.5）；
 // - `read_cover_path` → 拖拽路径 → `cover_from_path`（读 + 压缩 + data URL）；
 // - `pick_cover_save_path` → rfd 原生存盘对话框取导出目标路径（**只取路径，不写盘**）；
 // - `export_cover` → 纯写盘，无任何 UI（前端在拿到路径后才调）。
@@ -16,15 +18,26 @@ use crate::service::cover::{
     cover_extension_for, cover_from_path, default_cover_file_name, export_cover_bytes,
     write_cover_to,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// 打开原生封面文件选择器（jpg/png/webp）。取消返回 `None`，否则返回压缩后 data URL + mime。
+/// 打开原生封面文件选择器（jpg/png/webp）。
+///
+/// 取消 → `Ok(None)`；选中 → 读文件/格式识别/压缩，任一步失败原样返回中文 `Err`（不伪装成取消）。
 #[tauri::command]
-pub fn pick_cover_file() -> Option<CoverInput> {
-    rfd::FileDialog::new()
-        .add_filter("图片", &["jpg", "jpeg", "png", "webp"])
-        .pick_file()
-        .and_then(|path| cover_from_path(&path).ok())
+pub fn pick_cover_file() -> Result<Option<CoverInput>, String> {
+    cover_input_for_selection(
+        rfd::FileDialog::new()
+            .add_filter("图片", &["jpg", "jpeg", "png", "webp"])
+            .pick_file(),
+    )
+}
+
+/// 「对话框选择结果 → command 结果」映射，rfd 对话框无头不可测，故独立成 helper 供测试直接覆盖。
+///
+/// `None`（取消）→ `Ok(None)`；`Some(path)` → `cover_from_path` 的 `Result` 原样传播
+/// （读失败/格式无法识别/压缩失败均为既有中文 `Err`）。
+pub fn cover_input_for_selection(selection: Option<PathBuf>) -> Result<Option<CoverInput>, String> {
+    selection.map(|path| cover_from_path(&path)).transpose()
 }
 
 /// 读取拖拽路径的封面文件：读文件 → 压缩 → data URL。读失败/非图片 → `Err(中文原因)`。

@@ -57,9 +57,11 @@ impl FolderWatch {
 
     /// 应用退出显式释放 AppHandle emitter、平台监听线程及所有旧回调。
     pub fn shutdown(&self) {
-        let mut target = self.target.lock().unwrap_or_else(|err| err.into_inner());
-        target.closed = true;
-        target.active.take();
+        // 锁毒化说明状态可能不一致，安全跳过清理，不 panic、不读取毒化后的 target。
+        if let Ok(mut target) = self.target.lock() {
+            target.closed = true;
+            target.active.take();
+        }
     }
 }
 
@@ -130,9 +132,10 @@ fn start_watch(dir: &str, watch_id: u64, sink: NotifySink) -> Result<ActiveWatch
                 move |result: notify::Result<notify::Event>| {
                     if registering_for_callback.load(Ordering::Acquire) {
                         if let Err(error) = &result {
-                            *error_for_callback
-                                .lock()
-                                .unwrap_or_else(|err| err.into_inner()) = Some(error.to_string());
+                            // 锁毒化时丢弃本次错误记录，回调不 panic。
+                            if let Ok(mut slot) = error_for_callback.lock() {
+                                *slot = Some(error.to_string());
+                            }
                         }
                     }
                     handler(result);
@@ -144,10 +147,11 @@ fn start_watch(dir: &str, watch_id: u64, sink: NotifySink) -> Result<ActiveWatch
             .and_then(|mut watcher| {
                 watcher.watch(Path::new(dir), RecursiveMode::Recursive)?;
                 registering.store(false, Ordering::Release);
+                // 锁毒化时视为无错误记录，按既有成功/失败语义继续。
                 if let Some(error) = registration_error
                     .lock()
-                    .unwrap_or_else(|err| err.into_inner())
-                    .take()
+                    .ok()
+                    .and_then(|mut slot| slot.take())
                 {
                     return Err(notify::Error::generic(&error));
                 }
