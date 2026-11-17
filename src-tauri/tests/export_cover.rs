@@ -222,6 +222,11 @@ fn export_prefers_front_cover_over_first_picture_flac() {
     );
     assert_ne!(bytes, back, "不得导出首图");
     assert_eq!(mime.as_deref(), Some("image/png"));
+    assert_eq!(
+        default_cover_file_name(&flac, mime.as_deref(), &bytes),
+        "multi.png",
+        "默认导出名应使用取到图片的 MIME 推断扩展名"
+    );
 }
 
 #[test]
@@ -245,6 +250,11 @@ fn export_prefers_front_cover_over_first_picture_mp3() {
     );
     assert_ne!(bytes, back, "不得导出首图");
     assert_eq!(mime.as_deref(), Some("image/png"));
+    assert_eq!(
+        default_cover_file_name(&mp3, mime.as_deref(), &bytes),
+        "multi.png",
+        "默认导出名应使用取到图片的 MIME 推断扩展名"
+    );
 }
 
 #[test]
