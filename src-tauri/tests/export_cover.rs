@@ -2,7 +2,7 @@
 //
 // 覆盖 spec S2 / S2a / S2b / S5 / S6 / S7 的 Rust 侧：
 // - fixture 早检（第一个测试只「构造 + 读回」，不过则先修 fixture）；
-// - S2：`export_cover_bytes` 返回字节 = 标签内第一个 front cover 的原始字节（FLAC + APE）；
+// - S2：`export_cover_bytes` 返回字节 = 标签内取到的封面原始字节（优先 `CoverFront`，无则第一张；FLAC + APE）；
 // - S2a：APE 必须经 `read_ape_cover` 原生回退取图（lofty 通用 `Tag` 路径不映射 APE 图片）；
 // - S2b：>2048 大图导出后尺寸不变，证明未过 `compress_cover`；
 // - 端到端写盘（等价 `commands::cover::export_cover` 两参语义；rfd 存盘框无头不可测）；
@@ -222,6 +222,11 @@ fn export_prefers_front_cover_over_first_picture_flac() {
     );
     assert_ne!(bytes, back, "不得导出首图");
     assert_eq!(mime.as_deref(), Some("image/png"));
+    assert_eq!(
+        default_cover_file_name(&flac, mime.as_deref(), &bytes),
+        "multi.png",
+        "默认导出名应使用取到图片的 MIME 推断扩展名"
+    );
 }
 
 #[test]
@@ -245,6 +250,11 @@ fn export_prefers_front_cover_over_first_picture_mp3() {
     );
     assert_ne!(bytes, back, "不得导出首图");
     assert_eq!(mime.as_deref(), Some("image/png"));
+    assert_eq!(
+        default_cover_file_name(&mp3, mime.as_deref(), &bytes),
+        "multi.png",
+        "默认导出名应使用取到图片的 MIME 推断扩展名"
+    );
 }
 
 #[test]
@@ -254,6 +264,10 @@ fn export_falls_back_to_first_picture_without_front_cover() {
     let tmp = TempDir::new().expect("临时目录");
     let first = tiny_png_bytes();
     let second = tiny_png_bytes_blue();
+    assert_ne!(
+        first, second,
+        "fixture 两张图字节必须不同，否则无法断言取图来源"
+    );
 
     for name in ["no-front.flac", "no-front.mp3"] {
         let path = song_with_pictures(
@@ -264,6 +278,42 @@ fn export_falls_back_to_first_picture_without_front_cover() {
                 (PictureType::Other, second.clone()),
             ],
         );
+
+        // fixture 早检：先证明「两张非 front 图按构造落盘、顺序与类型一致」，再断言
+        // 业务行为。否则 fixture 退化成单图时，下面的字节比对会变成空转绿。
+        let tagged = Probe::open(&path)
+            .and_then(|probed| probed.read())
+            .unwrap_or_else(|e| panic!("{name} fixture 应可被 lofty 读取: {e}"));
+        let tag = tagged
+            .primary_tag()
+            .unwrap_or_else(|| panic!("{name} 应有 primary tag"));
+        assert!(
+            tag.get_picture_type(PictureType::CoverFront).is_none(),
+            "{name} fixture 不应含任何 CoverFront（否则不会走回退分支）"
+        );
+        let pictures = tag.pictures();
+        assert_eq!(pictures.len(), 2, "{name} 应含两张非 front 图片");
+        assert_eq!(
+            pictures[0].pic_type(),
+            PictureType::CoverBack,
+            "{name} 首图应为 CoverBack"
+        );
+        assert_eq!(
+            pictures[1].pic_type(),
+            PictureType::Other,
+            "{name} 次图应为 Other"
+        );
+        assert_eq!(
+            pictures[0].data(),
+            first.as_slice(),
+            "{name} 首图字节应来自构造的第一张"
+        );
+        assert_eq!(
+            pictures[1].data(),
+            second.as_slice(),
+            "{name} 次图字节应来自构造的第二张"
+        );
+
         let (bytes, _) = export_cover_bytes(&path)
             .unwrap_or_else(|e| panic!("{name} 无 front cover 时仍应导出第一张: {e}"));
         assert_eq!(bytes, first, "{name} 无 front cover 时应回退第一张");

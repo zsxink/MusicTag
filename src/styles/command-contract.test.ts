@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Tauri command 契约一致性守卫（spec: command-contract-sync，GATE #92 挂起修复）。
 // 真值基准 = src-tauri/src/lib.rs `invoke_handler(tauri::generate_handler![...])`
-// 实际注册的 19 个 command（代码是唯一事实来源，文档跟随代码）。
+// 实际注册的 22 个 command（代码是唯一事实来源，文档跟随代码）。
 // 断言 docs/design/design.md §10.3、docs/V1-PRD.md §7、openspec/config.yaml
 // 三处契约清单与 lib.rs 注册集一致——任一源缺 command（或 lib.rs 新增未同步）
 // 即红，失败消息列出该源相对 lib.rs 的缺/多余 command 名。
@@ -36,7 +36,7 @@ const lib = read('../../src-tauri/src/lib.rs')
 const libCommands = uniqSort([...lib.matchAll(/commands::([a-z_]+)::([a-z_]+)/g)].map((m) => m[2]))
 
 // 真值签名：commands/*.rs 定义文件 `pub fn name(` / `pub async fn name(`。
-// 19 个 command 中无参者包括 pick_folder / pick_cover_file / get_last_dir / check_for_update。
+// 22 个 command 中无参者包括 pick_folder / pick_cover_file / get_last_dir / check_for_update。
 // 从定义文件提取（lib.rs 只注册不定义 download_cover 等，签名不在 lib.rs）。
 const sigSource = ['folder.rs', 'song.rs', 'cover.rs', 'search.rs']
   .concat(['missing.rs', 'update.rs', 'menu.rs'])

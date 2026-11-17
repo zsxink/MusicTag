@@ -77,7 +77,8 @@ pub fn pick_cover_save_path(song_path: String) -> Result<Option<String>, String>
         .map(|dest| dest.to_string_lossy().into_owned()))
 }
 
-/// 把标签内第一个 front cover 的**原始字节**写到 `dest_path`（纯写盘，无 UI）。
+/// 把标签内封面（优先第一个 `CoverFront`，无则第一张；通用标签完全无图时再回退
+/// APE 原生 `Cover Art (Front)`）的**原始字节**写到 `dest_path`（纯写盘，无 UI）。
 ///
 /// 只读保证：全程只 `Probe::open(..).read()` + `File::open`，唯一写入是 `fs::write(dest_path, ..)`，
 /// 绝不调 `Tag::save_to` / `write_atomic` / `save_song`。不重算扩展名、不校验 `dest_path`

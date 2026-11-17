@@ -141,7 +141,8 @@ pub fn cover_from_path(path: &std::path::Path) -> Result<crate::model::CoverInpu
     })
 }
 
-/// 读单曲标签内**第一个 front cover 的原始字节** + 其声明 MIME（export-embedded-cover）。
+/// 读单曲标签内封面（优先第一个 `CoverFront`，无则第一张；通用标签完全无图时再回退
+/// APE 原生 `Cover Art (Front)`）的**原始字节** + 其声明 MIME（export-embedded-cover）。
 ///
 /// 与嵌入路径的关键差别：**不经 `compress_cover`**，导出的是 `Picture::data()` 原样字节
 /// （spec「非 ≤2048 压缩预览图」）。取图一律经 `reader::first_embedded_picture`，
