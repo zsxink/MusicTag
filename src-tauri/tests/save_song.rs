@@ -237,6 +237,27 @@ fn save_song_wav_id3_only_does_not_create_riff_info() {
 }
 
 #[test]
+fn write_riff_info_without_riff_info_returns_chinese_error() {
+    // RIFF INFO 在写入阶段不可访问是真实保存路径上的不可达分支：直接用不含
+    // RIFF INFO 的 TaggedFile 调用 helper，断言返回中文错误而非 panic。
+    let tmp = TempDir::new().unwrap();
+    write_tagged_wav(tmp.path(), "no-riff.wav", "旧标题", "旧艺术家");
+    let path = tmp.path().join("no-riff.wav");
+    let mut tagged = Probe::open(&path)
+        .and_then(|p| p.read())
+        .expect("WAV fixture 应可读");
+    assert!(
+        tagged.tag(lofty::tag::TagType::RiffInfo).is_none(),
+        "fixture 不应含 RIFF INFO"
+    );
+
+    let song = full_song(path.to_string_lossy().into_owned());
+    let err = app_lib::service::writer::write_riff_info(&mut tagged, &song)
+        .expect_err("缺少 RIFF INFO 应返回 Err");
+    assert_eq!(err, "保存失败: RIFF INFO 标签在写入阶段不可访问");
+}
+
+#[test]
 fn save_song_wav_dual_tags_mirror_both_sides() {
     let tmp = TempDir::new().unwrap();
     write_dual_tagged_wav(

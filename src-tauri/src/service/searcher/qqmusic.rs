@@ -62,7 +62,7 @@ impl MusicSource for QqMusic {
                 ("format", "json"),
             ],
         )
-        .expect("构造 QQ 搜索 URL 失败");
+        .map_err(|error| format!("QQ 音乐搜索 URL 构造失败: {error}"))?;
         let resp = match client
             .get(url)
             .header("User-Agent", QQ_UA)
