@@ -102,6 +102,40 @@ fn weapi_output_shape() {
 }
 
 #[test]
+fn weapi_with_secret_rejects_non_16_byte_key() {
+    // 调用方可控 secret：非 16 字节必须返回中文 Err，不得 panic
+    // （design.md §4.4.2 校验顺序：先 `as_bytes()` 长度，再 ASCII hex 字符集）。
+    let text = r#"{"limit":10,"offset":0,"s":"test","type":1}"#;
+    for secret in ["short", "123456789012345", "12345678901234567"] {
+        let outcome = std::panic::catch_unwind(|| weapi_with_secret(text, secret))
+            .expect("非 16 字节 secret 不得 panic");
+        let err = match outcome {
+            Err(err) => err,
+            Ok(_) => panic!("非 16 字节 secret 应返回 Err"),
+        };
+        assert!(
+            err.contains("16 字节"),
+            "错误消息应含“16 字节”，实际: {err}"
+        );
+    }
+}
+
+#[test]
+fn weapi_with_secret_rejects_non_hex_secret() {
+    // 16 字节但含非 hex 字符：返回中文 Err，不得 panic。
+    let text = r#"{"limit":10,"offset":0,"s":"test","type":1}"#;
+    for secret in ["zzzzzzzzzzzzzzzz", "gggggggggggggggg"] {
+        let outcome = std::panic::catch_unwind(|| weapi_with_secret(text, secret))
+            .expect("非 hex secret 不得 panic");
+        let err = match outcome {
+            Err(err) => err,
+            Ok(_) => panic!("非 hex secret 应返回 Err"),
+        };
+        assert!(err.contains("hex"), "错误消息应含“hex”，实际: {err}");
+    }
+}
+
+#[test]
 fn random_hex_secret_shape() {
     let s1 = random_hex_secret();
     let s2 = random_hex_secret();
