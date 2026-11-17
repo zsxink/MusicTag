@@ -97,7 +97,9 @@ fn cover_input_for_selection_valid_png_returns_cover_input() {
         .data_url
         .strip_prefix(prefix)
         .unwrap_or_else(|| panic!("data URL 应以 {prefix} 开头，实际: {}", input.data_url));
-    let decoded = BASE64.decode(encoded).expect("data URL 载荷应为合法 base64");
+    let decoded = BASE64
+        .decode(encoded)
+        .expect("data URL 载荷应为合法 base64");
     assert!(!decoded.is_empty(), "解码后的封面字节不应为空");
     assert_eq!(
         image::guess_format(&decoded).expect("解码字节应为可识别图片"),
