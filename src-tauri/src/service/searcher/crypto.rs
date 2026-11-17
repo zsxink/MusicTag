@@ -36,23 +36,32 @@ pub struct WeapiParams {
 }
 
 /// weapi 加密：生成随机 `secret = hexlify(urandom(16))[:16]`（16 字符 hex 串当 AES 密钥）。
-pub fn weapi(text: &str) -> WeapiParams {
+pub fn weapi(text: &str) -> Result<WeapiParams, String> {
     weapi_with_secret(text, &random_hex_secret())
 }
 
 /// weapi 加密（注入固定 secret，供已知向量单测锁算法）。
-pub fn weapi_with_secret(text: &str, secret: &str) -> WeapiParams {
+///
+/// `secret` 是调用方可控输入：非 16 字节 / 非 ASCII hex 时返回中文 `Err`，不 panic。
+pub fn weapi_with_secret(text: &str, secret: &str) -> Result<WeapiParams, String> {
+    let key: &[u8; 16] = secret
+        .as_bytes()
+        .try_into()
+        .map_err(|_| "AES secret 须为 16 字节".to_string())?;
+    if !secret.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("AES secret 须为 16 位 hex 字符串".to_string());
+    }
     // 第一层：AES-CBC(NONCE 密钥 + PKCS7) → base64
     let inner = aes_cbc_encrypt(text.as_bytes(), NONCE);
     let inner_b64 = BASE64.encode(&inner);
     // 第二层：AES-CBC(secret 密钥 + 同 iv + PKCS7) → base64 → params
-    let params = aes_cbc_encrypt(inner_b64.as_bytes(), secret.as_bytes());
+    let params = aes_cbc_encrypt(inner_b64.as_bytes(), key);
     let params = BASE64.encode(&params);
-    let enc_sec_key = rsa_encrypt(secret);
-    WeapiParams {
+    let enc_sec_key = rsa_encrypt(secret)?;
+    Ok(WeapiParams {
         params,
         enc_sec_key,
-    }
+    })
 }
 
 /// linuxapi 加密：AES-ECB（LINUXKEY，无 iv）→ hex 大写 → `eparams`。
@@ -75,30 +84,37 @@ pub fn random_hex_secret() -> String {
 /// 参照库语义（weapi 约定）：secret 字符串反转 → **hexlify 反转后的 UTF-8 字节** → 当 hex
 /// 解析为 BigUint → `pow(n, e, m)`。注意不是「反转串直接当 hex 解析」（那是常见走样点，
 /// design.md D4「已知向量锁算法」专门锁这一处）。
-pub fn rsa_encrypt(secret: &str) -> String {
+///
+/// 解析失败（含 `PUBKEY` / `MODULUS` 常量非法）返回中文 `Err`，不 panic。
+pub fn rsa_encrypt(secret: &str) -> Result<String, String> {
     use rsa::BigUint;
     let rev: String = secret.chars().rev().collect();
     let rev_hex = hex_encode(rev.as_bytes());
-    let n = BigUint::parse_bytes(rev_hex.as_bytes(), 16).expect("反转 secret 的 hexlify 应为 hex");
-    let e = BigUint::parse_bytes(PUBKEY.as_bytes(), 16).expect("PUBKEY 应为 hex");
-    let m = BigUint::parse_bytes(MODULUS.as_bytes(), 16).expect("MODULUS 应为 hex");
+    let n = BigUint::parse_bytes(rev_hex.as_bytes(), 16)
+        .ok_or_else(|| "RSA 加密失败：反转 secret 的 hexlify 不是合法 hex".to_string())?;
+    let e = BigUint::parse_bytes(PUBKEY.as_bytes(), 16)
+        .ok_or_else(|| "RSA 加密失败：PUBKEY 不是合法 hex".to_string())?;
+    let m = BigUint::parse_bytes(MODULUS.as_bytes(), 16)
+        .ok_or_else(|| "RSA 加密失败：MODULUS 不是合法 hex".to_string())?;
     let enc = n.modpow(&e, &m);
-    format!("{:0>256}", enc.to_str_radix(16))
+    Ok(format!("{:0>256}", enc.to_str_radix(16)))
 }
 
 /// AES-128-CBC 加密（PKCS7 + 固定 iv `0102030405060708`）。
-fn aes_cbc_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
-    Encryptor::<Aes128>::new_from_slices(key, IV)
-        .expect("AES-128 密钥须为 16 字节")
+///
+/// key 类型为 `&[u8; 16]`，非 16 字节密钥在编译期被排除。
+fn aes_cbc_encrypt(data: &[u8], key: &[u8; 16]) -> Vec<u8> {
+    Encryptor::<Aes128>::new(GenericArray::from_slice(key), GenericArray::from_slice(IV))
         .encrypt_padded_vec_mut::<Pkcs7>(data)
 }
 
 /// AES-128-ECB 加密（无 iv，手写 PKCS7 + 逐块加密）。
 ///
 /// `pub`：供 `src-tauri/tests/searcher_crypto_tests.rs` 往返断言（rust-tests-separation
-/// 单测外置；集成测试是独立 crate，仅 `pub` 可见）。
-pub fn aes_ecb_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
-    let cipher = Aes128::new_from_slice(key).expect("AES-128 密钥须为 16 字节");
+/// 单测外置；集成测试是独立 crate，仅 `pub` 可见）。key 类型为 `&[u8; 16]`，
+/// 非 16 字节密钥在编译期被排除。
+pub fn aes_ecb_encrypt(data: &[u8], key: &[u8; 16]) -> Vec<u8> {
+    let cipher = Aes128::new(GenericArray::from_slice(key));
     let mut buf = data.to_vec();
     let pad = 16 - buf.len() % 16;
     buf.extend(std::iter::repeat_n(pad as u8, pad));

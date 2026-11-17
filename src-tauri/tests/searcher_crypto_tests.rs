@@ -58,7 +58,7 @@ fn weapi_matches_reference_vector() {
     // 16 ASCII 字节）：固定 secret + 固定文本 → params / encSecKey 逐字一致
     // （design.md D4「已知向量锁算法」）。
     let text = r#"{"limit":10,"offset":0,"s":"test","type":1}"#;
-    let p = weapi_with_secret(text, "0123456789abcdef");
+    let p = weapi_with_secret(text, "0123456789abcdef").expect("固定 secret 应合法");
     assert_eq!(
         p.params,
         "LrEUQS6Y9M2j7REO1sea8TQlqJ/yus95dDz1DH+QzrMUCYkwqOAmICPZg+zZpXnh2jFoq6FmNxUoAYqidfLsHMw1grMh2mSwM85TAYr8iM0="
@@ -74,7 +74,7 @@ fn weapi_params_roundtrips_to_plaintext() {
     // 往返：secret 层解密 → base64 → NONCE 层解密 → 原文（锁双层 CBC 结构 + 同 iv）。
     let text = r#"{"limit":10,"offset":0,"s":"晴天","type":1}"#;
     let secret = "fedcba0123456789";
-    let p = weapi_with_secret(text, secret);
+    let p = weapi_with_secret(text, secret).expect("合法 secret");
     let outer = BASE64.decode(&p.params).expect("params 应为 base64");
     let inner = aes_cbc_decrypt(&outer, secret.as_bytes()).expect("第二层解密失败");
     let inner = String::from_utf8(inner).expect("内层应为 base64 文本");
@@ -86,8 +86,8 @@ fn weapi_params_roundtrips_to_plaintext() {
 #[test]
 fn weapi_output_shape() {
     // 结构守卫：encSecKey 恒 256 位 hex，params 为 base64（随机 secret 每次不同）。
-    let p1 = weapi("hello");
-    let p2 = weapi("hello");
+    let p1 = weapi("hello").expect("weapi 加密失败");
+    let p2 = weapi("hello").expect("weapi 加密失败");
     assert_eq!(p1.enc_sec_key.len(), 256);
     assert!(p1.enc_sec_key.chars().all(|c| c.is_ascii_hexdigit()));
     assert!(
@@ -150,7 +150,7 @@ fn rsa_encrypt_matches_reference_modpow() {
     // 已知向量（Python pow 独立计算，canonical 语义）：secret 反转 → hexlify UTF-8 字节 →
     // modpow → 左补零 256 位。
     assert_eq!(
-        rsa_encrypt("0123456789abcdef"),
+        rsa_encrypt("0123456789abcdef").expect("合法 secret"),
         "35701388baf89fed412e11269b9c76625d095ecaf17f03fa018abe19ea2d38b949debf242ee39a71ca1f6cda71b1b86a45aa909ee27f7e78e267d34e732f0de948206c3340a788d0003372183e2f753c1f78b66ac23d134ac1fc9b993156520ea826b8aa89a962d4491b4b8d7e08738e1da9b07aa39bf4a7ef0b1c210728cd52"
     );
 }
@@ -159,7 +159,7 @@ fn rsa_encrypt_matches_reference_modpow() {
 fn rsa_encrypt_left_pads_to_256() {
     // 任意 secret 输出恒 256 位 hex（modpow 结果可能 < 256 位，须左补零）。
     for s in ["0", "ffffffffffffffff", "0000000000000000"] {
-        let key = rsa_encrypt(s);
+        let key = rsa_encrypt(s).expect("合法 secret");
         assert_eq!(
             key.len(),
             256,
