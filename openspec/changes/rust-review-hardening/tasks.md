@@ -23,7 +23,7 @@ GitHub Issue: #194
 - [x] 6.1 — 提交 61e95ea
 - [x] 7.1 — 提交 61e95ea、071caac（格式）
 - [x] 8.1 — 提交 1245e49
-- [ ] 9.1 — 待 Tester 全场景覆盖审计
+- [x] 9.1 — Tester 全场景审计通过（cargo test --all-targets 329 passed；grep 均无命中）
 - [ ] 9.2 — 待 CR 只读审查
 - [ ] 9.3 — 待 Verify 全量门禁
 
