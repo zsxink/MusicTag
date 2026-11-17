@@ -13,7 +13,7 @@ GitHub Issue: #196
 | 两处取图注释仍写「第一个 front cover」 | 真实：`src-tauri/src/commands/cover.rs:80`、`src-tauri/src/service/cover.rs:144` 与 `src-tauri/src/service/reader.rs:54-65` 的实际实现不一致 | 改写注释 |
 | command 契约守卫注释写 19 | 真实：`src/styles/command-contract.test.ts:4`、`:39` 写 19；同文件断言（`:96`、`:105`）与 `src-tauri/src/lib.rs:22-43` 的注册集均已是 22 | 注释改 22 |
 | 封面回退测试未证明回退来自首图 | 真实：`src-tauri/tests/export_cover.rs:250-272` 的 `export_falls_back_to_first_picture_without_front_cover` 没有 fixture 早检，标签若退化成「只有一张可挑」仍会绿 | 增加早检 |
-| CR 指向 `docs/design/design.md` 的取图描述 | 归因有误：该文档 `:225` 已是正确表述；陈旧文本只存在于已归档快照（如 `openspec/changes/archive/2026-11-17-rust-review-hardening/design.md:371`），历史归档不应回改 | 不改 |
+| CR 指向 `docs/design/design.md` 的取图描述 | 归因有误：该文档 `:225` 已是正确表述；陈旧文本位于已归档快照 `openspec/changes/archive/2026-11-17-rust-review-hardening/design.md:295`（RSA 文案）与主 spec `openspec/specs/cover-embed/spec.md:44`、`:54`（「第一个 front cover」绝对措辞，见下方说明），历史归档不应回改 | 不改（主 spec 措辞记为规格债务，见 §2.2） |
 
 目标：
 
@@ -40,6 +40,7 @@ GitHub Issue: #196
 - 不改 `src-tauri/tests/open_song.rs`：预览侧既有测试已用不同字节区分 front 与首图；本次 proposal Impact 只列 `export_cover.rs`，且预览与导出共用 `first_embedded_picture`，共享路径的证据由导出侧早检 + 既有 `fixture_early_check_multi_picture_order` 提供。若要求预览测试也逐用例加早检，属范围扩张，需另行裁决。
 - 不改 `src-tauri/tests/common/mod.rs`：既有 `add_pictures`、`tiny_png_bytes`、`tiny_png_bytes_blue` 已足够构造并区分两张非 front 图片。
 - 不改已归档的 `openspec/changes/archive/2026-11-17-rust-review-hardening/design.md` 或其他历史归档。
+- 不改 `openspec/specs/cover-embed/spec.md` 的「右键导出内嵌封面原图」requirement 及其 scenario（`:44`、`:54` 仍写「第一个 front cover 的原始字节」）。这是 `rust-review-hardening` 归档后遗留的既有规格债务：该 requirement 与本次 MODIFIED 的「封面预览与导出优先取 front cover」在主 spec 中并存，前者措辞偏绝对。修它需要新增一条 MODIFIED requirement 并重跑完整门禁，超出本变更「零行为变更的注释/测试收敛」范围；记为后续规格债务（CR minor #1），不在此处顺手改。
 - 不改 `docs/V1-PRD.md`、`docs/design/design.md`：两份文档的取图描述已是正确表述（design `:225`、PRD `:287`）。
 - 不新增依赖、不新增/重命名/删除 Tauri command、不改前端生产代码与 IPC 契约。
 - 不改变 V1 约束（一次一首、保存全量覆盖、直接写盘、撞名拒绝、坏标签只读、离线降级）。
@@ -265,7 +266,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --all-targets
 - `rg -n "19 个 command" src/styles/command-contract.test.ts` 无输出（exit 1 为预期）。
 - `cargo test --all-targets` 输出中 `export_falls_back_to_first_picture_without_front_cover`、`export_prefers_front_cover_over_first_picture_flac`、`export_prefers_front_cover_over_first_picture_mp3` 均通过。
 - 所有门禁命令退出码 0；不得跳过或用 `|| true` 吞失败。
-- diff 只包含 §2.1 列出的四个文件，且源码改动只有注释行。
+- **实现文件** diff 只包含 §2.1 列出的四个文件（两处 Rust 注释、一处 TS 注释、一个 Rust 测试文件），且源码改动只有注释行；`openspec/changes/rust-review-minor-cleanup/` 下的 5 个变更文档（proposal/design/tasks/spec/.openspec.yaml）是本变更自身的规格产物，属预期文件。
 
 ## 7. 规格追溯矩阵
 
@@ -274,7 +275,7 @@ delta spec：`openspec/changes/rust-review-minor-cleanup/specs/cover-embed/spec.
 | delta spec 条目 | 实现/证据位置 | 测试/命令 |
 | --- | --- | --- |
 | Requirement：预览与导出共用取图路径，优先第一个 `CoverFront`，随后第一张，APE 回退不变 | `src-tauri/src/service/reader.rs:54-65`（本次不改）；注释同步于 `commands/cover.rs:80`、`service/cover.rs:144` | `fixture_early_check_multi_picture_order`、`export_prefers_front_cover_over_first_picture_flac`、`_mp3`、`export_cover_bytes_ape_returns_embedded_original_bytes_via_fallback`、`open_song_preview_prefers_front_cover_over_first_picture` |
-| Requirement 证据句：多图 fixture 先回读并断言顺序与类型 | `src-tauri/tests/export_cover.rs:142-197`（既有）；回退场景新增于 `:250-272` | `fixture_early_check_multi_picture_order`、强化后的 `export_falls_back_to_first_picture_without_front_cover` |
+| Requirement 证据句：多图 fixture 先回读并断言顺序与类型 | `src-tauri/tests/export_cover.rs` 的 `fixture_early_check_multi_picture_order`（既有）；回退场景新增于 `export_falls_back_to_first_picture_without_front_cover` 函数内早检 | `fixture_early_check_multi_picture_order`、强化后的 `export_falls_back_to_first_picture_without_front_cover` |
 | Scenario：首图不是 front cover 的多图标签 | 多图 front-cover 导出/预览用例；新增默认扩展名断言 | `export_prefers_front_cover_over_first_picture_flac`、`export_prefers_front_cover_over_first_picture_mp3`（含 `default_cover_file_name == "multi.png"`）、`open_song_preview_prefers_front_cover_over_first_picture` |
 | Scenario：无 front cover 的既有标签 | 回退用例新增早检（无 CoverFront、2 张非 front、首图字节 = 构造首图） | `export_falls_back_to_first_picture_without_front_cover`、`open_song_preview_falls_back_to_first_picture_without_front_cover` |
 | Scenario：APE 回退仍可用 | `reader.rs:60-64` 不变；APE fixture 早检既有 | `fixture_early_check_flac_and_ape_embedded_pictures_are_readable`、`export_cover_bytes_ape_returns_embedded_original_bytes_via_fallback` |

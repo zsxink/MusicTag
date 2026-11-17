@@ -2,7 +2,7 @@
 //
 // 覆盖 spec S2 / S2a / S2b / S5 / S6 / S7 的 Rust 侧：
 // - fixture 早检（第一个测试只「构造 + 读回」，不过则先修 fixture）；
-// - S2：`export_cover_bytes` 返回字节 = 标签内第一个 front cover 的原始字节（FLAC + APE）；
+// - S2：`export_cover_bytes` 返回字节 = 标签内取到的封面原始字节（优先 `CoverFront`，无则第一张；FLAC + APE）；
 // - S2a：APE 必须经 `read_ape_cover` 原生回退取图（lofty 通用 `Tag` 路径不映射 APE 图片）；
 // - S2b：>2048 大图导出后尺寸不变，证明未过 `compress_cover`；
 // - 端到端写盘（等价 `commands::cover::export_cover` 两参语义；rfd 存盘框无头不可测）；

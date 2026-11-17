@@ -123,7 +123,7 @@ GitHub Issue: #196
   - 全部命令退出码 0；不得跳过、不得用 `|| true` 吞失败。
   - `cargo test --all-targets` 输出中可见 `export_falls_back_to_first_picture_without_front_cover`、`export_prefers_front_cover_over_first_picture_flac`、`export_prefers_front_cover_over_first_picture_mp3` 且通过。
   - `rg -n "第一个 front cover" src-tauri/src/commands/cover.rs src-tauri/src/service/cover.rs` 无输出；`rg -n "19 个 command" src/styles/command-contract.test.ts` 无输出。
-  - diff 仅包含四个授权文件（两处 Rust 注释、一处 TS 注释、一个 Rust 测试文件），无函数体/断言阈值/依赖/command 变化。
+  - **实现文件** diff 仅包含四个授权文件（两处 Rust 注释、一处 TS 注释、一个 Rust 测试文件），无函数体/断言阈值/依赖/command 变化；`openspec/changes/rust-review-minor-cleanup/` 下的 5 个变更文档为预期产物。
   - 环境型失败（缺 ffmpeg、Node/Rust 版本不符等）如实回报 Leader，不假报通过。
 
 ## 派发批次建议（Leader 参考）
