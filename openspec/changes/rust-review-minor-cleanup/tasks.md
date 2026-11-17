@@ -9,10 +9,10 @@ GitHub Issue: #196
 
 ## 完成状态（仅主会话维护）
 
-- [ ] 1.1 — Rust 取图注释改写
-- [ ] 1.2 — command 契约守卫注释 19 → 22
-- [ ] 2.1 — 无 front cover 回退测试 fixture 早检
-- [ ] 2.2 — 多图 front-cover 导出默认扩展名断言
+- [x] 1.1 — Rust 取图注释改写
+- [x] 1.2 — command 契约守卫注释 19 → 22
+- [x] 2.1 — 无 front cover 回退测试 fixture 早检
+- [x] 2.2 — 多图 front-cover 导出默认扩展名断言
 - [ ] 3.1 — Verify 全量门禁
 
 ## 执行约定
