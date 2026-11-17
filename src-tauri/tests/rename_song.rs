@@ -162,6 +162,90 @@ fn rename_to_multi_suffix_lrc_rejected() {
 }
 
 // ---------------------------------------------------------------------------
+// 悬空符号链接与目录撞名（rename-sync MODIFIED：symlink_metadata 预检）
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn rename_rejects_dangling_symlink_audio_target() {
+    // 目标名是指向不存在路径的符号链接：`Path::exists()` 会跟随链接返回 false，
+    // 放行后 `fs::rename` 会替换该链接。symlink_metadata 预检必须判定为撞名。
+    use std::os::unix::fs::symlink;
+
+    let tmp = TempDir::new().unwrap();
+    write_tagged_mp3(tmp.path(), "song.mp3", "T", "A");
+    let dangling_target = tmp.path().join("target.mp3");
+    symlink("不存在的目标.mp3", &dangling_target).unwrap();
+
+    let err = rename_song(&tmp.path().join("song.mp3"), "target.mp3")
+        .expect_err("悬空 symlink 音频目标应判定为撞名");
+
+    assert!(err.contains("目标已存在"), "错误应含「目标已存在」: {err}");
+    assert!(tmp.path().join("song.mp3").exists(), "原音频应保留");
+    let meta = fs::symlink_metadata(&dangling_target).expect("悬空链接应保留");
+    assert!(meta.file_type().is_symlink(), "目标应仍是符号链接");
+    assert_eq!(
+        fs::read_link(&dangling_target).unwrap(),
+        std::path::Path::new("不存在的目标.mp3"),
+        "链接指向不得被改写"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rename_rejects_dangling_symlink_lrc_target() {
+    // `.lrc` 目标名是悬空符号链接：预检在任何 rename 之前拒绝，
+    // 原音频与旧 `.lrc` 均不动，链接本身保留。
+    use std::os::unix::fs::symlink;
+
+    let tmp = TempDir::new().unwrap();
+    write_tagged_mp3(tmp.path(), "song.mp3", "T", "A");
+    fs::write(tmp.path().join("song.lrc"), "[00:00.00]歌词").unwrap();
+    let dangling_lrc = tmp.path().join("新歌.lrc");
+    symlink("不存在的歌词.lrc", &dangling_lrc).unwrap();
+
+    let err = rename_song(&tmp.path().join("song.mp3"), "新歌.mp3")
+        .expect_err("悬空 symlink 的 .lrc 目标应判定为撞名");
+
+    assert!(err.contains("目标已存在"), "错误应含「目标已存在」: {err}");
+    assert!(tmp.path().join("song.mp3").exists(), "原音频不得被移动");
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("song.lrc")).unwrap(),
+        "[00:00.00]歌词",
+        "旧 .lrc 内容不得被改动"
+    );
+    let meta = fs::symlink_metadata(&dangling_lrc).expect("悬空 .lrc 链接应保留");
+    assert!(meta.file_type().is_symlink(), "目标 .lrc 应仍是符号链接");
+    assert_eq!(
+        fs::read_link(&dangling_lrc).unwrap(),
+        std::path::Path::new("不存在的歌词.lrc"),
+        "链接指向不得被改写"
+    );
+    assert!(!tmp.path().join("新歌.mp3").exists(), "不得产生新音频");
+}
+
+#[test]
+fn rename_rejects_directory_audio_target() {
+    // 目标名是目录：symlink_metadata 返回 Ok → 统一视为“已存在”，
+    // 必须在任何 rename 之前拒绝（跨平台）。
+    let tmp = TempDir::new().unwrap();
+    write_tagged_mp3(tmp.path(), "song.mp3", "T", "A");
+    let target_dir = tmp.path().join("target.mp3");
+    fs::create_dir(&target_dir).unwrap();
+
+    let err = rename_song(&tmp.path().join("song.mp3"), "target.mp3")
+        .expect_err("目录音频目标应判定为撞名");
+
+    assert!(err.contains("目标已存在"), "错误应含「目标已存在」: {err}");
+    assert!(tmp.path().join("song.mp3").exists(), "原音频应保留");
+    assert!(target_dir.is_dir(), "目标目录不得被替换");
+    assert!(
+        fs::read_dir(&target_dir).unwrap().next().is_none(),
+        "目标目录应保持为空"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // 防御校验（D7）与失败路径（FR-5.6：返回错误、原文件保留可重试）
 // ---------------------------------------------------------------------------
 
